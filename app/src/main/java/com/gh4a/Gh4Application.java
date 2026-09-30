@@ -26,6 +26,7 @@ import android.util.LongSparseArray;
 import com.gh4a.fragment.SettingsFragment;
 import com.gh4a.utils.StringUtils;
 import com.gh4a.worker.NotificationsWorker;
+import com.gh4a.worker.ReleaseRadarWorker;
 import com.meisolsson.githubsdk.model.User;
 import com.tspoon.traceur.Traceur;
 
@@ -172,6 +173,7 @@ public class Gh4Application extends Application implements
             getPrefs().edit()
                     .putString(KEY_ACTIVE_LOGIN, login)
                     .apply();
+            rescheduleWorkers();
         }
     }
 
@@ -208,7 +210,7 @@ public class Gh4Application extends Application implements
                 .putLong(KEY_PREFIX_USER_ID + login, user.id())
                 .apply();
 
-        updateNotificationWorker(prefs);
+        rescheduleWorkers();
     }
 
     public User getCurrentAccountInfoForAvatar() {
@@ -233,18 +235,56 @@ public class Gh4Application extends Application implements
         if (login == null) {
             return;
         }
+        removeAccount(login);
+    }
 
-        Set<String> logins = StringUtils.getEditableStringSetFromPrefs(getPrefs(), KEY_ALL_LOGINS);
+    /**
+     * Remove any account (not just the active one). If the removed account was
+     * active, another one becomes active. Returns the new active login, or
+     * null when no accounts are left.
+     */
+    public String removeAccount(String login) {
+        SharedPreferences prefs = getPrefs();
+        Set<String> logins = StringUtils.getEditableStringSetFromPrefs(prefs, KEY_ALL_LOGINS);
         logins.remove(login);
 
-        getPrefs().edit()
-                .putString(KEY_ACTIVE_LOGIN, logins.size() > 0 ? logins.iterator().next() : null)
+        String newActiveLogin;
+        if (login.equals(getAuthLogin())) {
+            newActiveLogin = logins.isEmpty() ? null : logins.iterator().next();
+        } else {
+            newActiveLogin = getAuthLogin();
+        }
+
+        prefs.edit()
+                .putString(KEY_ACTIVE_LOGIN, newActiveLogin)
                 .putStringSet(KEY_ALL_LOGINS, logins)
                 .remove(KEY_PREFIX_TOKEN + login)
                 .remove(KEY_PREFIX_USER_ID + login)
                 .apply();
 
-        NotificationsWorker.cancel(this);
+        rescheduleWorkers();
+        return newActiveLogin;
+    }
+
+    /**
+     * Re-schedule background workers after an account switch, removal or
+     * addition, so they run with the current account's token and settings.
+     */
+    public void rescheduleWorkers() {
+        SharedPreferences prefs = getPrefs();
+        updateNotificationWorker(prefs);
+        if (prefs.getBoolean(SettingsFragment.KEY_RELEASE_RADAR_NOTIFICATIONS, false)) {
+            int intervalMinutes;
+            try {
+                intervalMinutes = Integer.parseInt(
+                        prefs.getString(SettingsFragment.KEY_RELEASE_RADAR_INTERVAL, "360"));
+            } catch (NumberFormatException e) {
+                intervalMinutes = 360;
+            }
+            ReleaseRadarWorker.schedule(this, intervalMinutes);
+        } else {
+            ReleaseRadarWorker.cancel(this);
+        }
     }
 
     private SharedPreferences getPrefs() {

@@ -157,6 +157,10 @@
             android:name=".activities.DrawerEditActivity"
             android:title="@string/customize_drawer" />
 
+        <activity
+            android:name=".activities.AccountManageActivity"
+            android:title="@string/account_manage" />
+
         <activity android:name=".resolver.BrowseFilter"
             android:excludeFromRecents="true"
             android:taskAffinity=""
@@ -201,6 +205,16 @@
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
+        </provider>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
         </provider>
 
         <provider

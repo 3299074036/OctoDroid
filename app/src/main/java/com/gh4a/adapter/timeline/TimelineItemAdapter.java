@@ -3,6 +3,7 @@ package com.gh4a.adapter.timeline;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
@@ -61,6 +62,10 @@ public class TimelineItemAdapter
         Single<List<Reaction>> loadReactionDetails(GitHubCommentBase comment, boolean bypassCache);
         Single<Reaction> addReaction(GitHubCommentBase comment, String content);
         Single<Boolean> deleteReaction(GitHubCommentBase comment, long reactionId);
+        /** Translate (or toggle back) the body HTML of a comment/review, keyed by its id. */
+        void translateBody(long id, String bodyHtml);
+        /** Translated body HTML for the id, or null when the original should be shown. */
+        @Nullable String getTranslatedBody(long id);
     }
 
     private final ReviewViewHolder.Callback mReviewCallback = new ReviewViewHolder.Callback() {
@@ -72,6 +77,16 @@ public class TimelineItemAdapter
         @Override
         public void quoteText(CharSequence text) {
             mActionCallback.quoteText(text);
+        }
+
+        @Override
+        public void translateBody(long id, String bodyHtml) {
+            mActionCallback.translateBody(id, bodyHtml);
+        }
+
+        @Override
+        public String getTranslatedBody(long id) {
+            return mActionCallback.getTranslatedBody(id);
         }
     };
 
@@ -137,6 +152,11 @@ public class TimelineItemAdapter
         @Override
         public Single<Boolean> deleteReaction(TimelineItem.TimelineComment item, long reactionId) {
             return mActionCallback.deleteReaction(item.comment(), reactionId);
+        }
+
+        @Override
+        public String getTranslatedBodyHtml(long commentId) {
+            return mActionCallback.getTranslatedBody(commentId);
         }
     };
 

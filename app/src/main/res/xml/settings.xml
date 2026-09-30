@@ -2,104 +2,214 @@
 
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-    <ListPreference
-        app:iconSpaceReserved="false"
-        android:defaultValue="green"
-        android:entries="@array/accent_color_items"
-        android:entryValues="@array/accent_color_values"
-        android:key="accent_color"
-        android:summary="%s"
-        android:title="@string/accent_color" />
 
-    <ListPreference
+    <PreferenceCategory
         app:iconSpaceReserved="false"
-        android:defaultValue=""
-        android:entries="@array/language_items"
-        android:entryValues="@array/language_values"
-        android:key="language"
-        android:summary="%s"
-        android:title="@string/language" />
+        android:title="@string/settings_category_appearance">
 
-    <ListPreference
-        app:iconSpaceReserved="false"
-        android:defaultValue="newsfeed"
-        android:entries="@array/start_page_items"
-        android:entryValues="@array/start_page_values"
-        android:key="start_page"
-        android:summary="%s"
-        android:title="@string/start_page" />
+        <ListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="green"
+            android:entries="@array/accent_color_items"
+            android:entryValues="@array/accent_color_values"
+            android:key="accent_color"
+            android:summary="%s"
+            android:title="@string/accent_color" />
 
-    <com.gh4a.widget.IntegerListPreference
-        app:iconSpaceReserved="false"
-        android:defaultValue="2"
-        android:entries="@array/text_size_items"
-        android:entryValues="@array/text_size_values"
-        android:key="webview_initial_zoom"
-        android:summary="%s"
-        android:title="@string/menu_text_size" />
+        <ListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue=""
+            android:entries="@array/language_items"
+            android:entryValues="@array/language_values"
+            android:key="language"
+            android:summary="%s"
+            android:title="@string/language" />
 
-    <ListPreference
-        app:iconSpaceReserved="false"
-        android:defaultValue="1.0"
-        android:entries="@array/font_scale_items"
-        android:entryValues="@array/font_scale_values"
-        android:key="font_scale"
-        android:summary="%s"
-        android:title="@string/font_size" />
+        <ListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="newsfeed"
+            android:entries="@array/start_page_items"
+            android:entryValues="@array/start_page_values"
+            android:key="start_page"
+            android:summary="%s"
+            android:title="@string/start_page" />
 
-    <com.gh4a.widget.IntegerListPreference
-        app:iconSpaceReserved="false"
-        android:defaultValue="1"
-        android:entries="@array/load_gif_mode_items"
-        android:entryValues="@array/load_gif_mode_values"
-        android:key="http_gif_load_mode"
-        android:summary="%s"
-        android:title="@string/menu_gif_load_mode" />
+        <ListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="1.0"
+            android:entries="@array/font_scale_items"
+            android:entryValues="@array/font_scale_values"
+            android:key="font_scale"
+            android:summary="%s"
+            android:title="@string/font_size" />
 
-    <SwitchPreference
-        app:iconSpaceReserved="false"
-        android:defaultValue="true"
-        android:key="use_custom_tabs"
-        android:summaryOn="@string/open_links_inside_app"
-        android:summaryOff="@string/open_links_external_browser"
-        android:title="@string/use_custom_tabs" />
+        <com.gh4a.widget.IntegerListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="2"
+            android:entries="@array/text_size_items"
+            android:entryValues="@array/text_size_values"
+            android:key="webview_initial_zoom"
+            android:summary="%s"
+            android:title="@string/menu_text_size" />
 
-    <SwitchPreference
-        app:iconSpaceReserved="false"
-        android:defaultValue="false"
-        android:key="notifications"
-        android:title="@string/notifications" />
+    </PreferenceCategory>
 
-    <com.gh4a.widget.IntegerListPreference
+    <PreferenceCategory
         app:iconSpaceReserved="false"
-        android:defaultValue="15"
-        android:dependency="notifications"
-        android:entries="@array/notification_interval_items"
-        android:entryValues="@array/notification_interval_values"
-        android:key="notification_interval"
-        android:summary="%s"
-        android:title="@string/notification_interval" />
+        android:title="@string/settings_category_browsing">
 
-    <Preference
-        app:iconSpaceReserved="false"
-        android:key="customize_drawer"
-        android:title="@string/customize_drawer"
-        android:summary="@string/drawer_customize_summary" />
+        <Preference
+            app:iconSpaceReserved="false"
+            android:key="customize_drawer"
+            android:title="@string/customize_drawer"
+            android:summary="@string/drawer_customize_summary" />
 
-    <Preference
-        app:iconSpaceReserved="false"
-        android:key="translation_settings"
-        android:title="@string/translation_settings"
-        android:summary="@string/translation_settings_summary" />
+        <SwitchPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="true"
+            android:key="use_custom_tabs"
+            android:summaryOn="@string/open_links_inside_app"
+            android:summaryOff="@string/open_links_external_browser"
+            android:title="@string/use_custom_tabs" />
 
-    <Preference
-        app:iconSpaceReserved="false"
-        android:key="about"
-        android:title="@string/about" />
+        <com.gh4a.widget.IntegerListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="1"
+            android:entries="@array/load_gif_mode_items"
+            android:entryValues="@array/load_gif_mode_values"
+            android:key="http_gif_load_mode"
+            android:summary="%s"
+            android:title="@string/menu_gif_load_mode" />
 
-    <Preference
+    </PreferenceCategory>
+
+    <PreferenceCategory
         app:iconSpaceReserved="false"
-        android:key="open_source_components"
-        android:title="@string/open_source_components" />
+        android:title="@string/settings_category_account">
+
+        <Preference
+            app:iconSpaceReserved="false"
+            android:key="account_manage"
+            android:title="@string/account_manage"
+            android:summary="@string/account_manage_summary" />
+
+        <SwitchPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="false"
+            android:key="notifications"
+            android:title="@string/notifications" />
+
+        <com.gh4a.widget.IntegerListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="15"
+            android:dependency="notifications"
+            android:entries="@array/notification_interval_items"
+            android:entryValues="@array/notification_interval_values"
+            android:key="notification_interval"
+            android:summary="%s"
+            android:title="@string/notification_interval" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        app:iconSpaceReserved="false"
+        android:title="@string/settings_category_network">
+
+        <SwitchPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="false"
+            android:key="mirror_enabled"
+            android:title="@string/mirror_enabled"
+            android:summary="@string/mirror_enabled_summary" />
+
+        <ListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="https://gh-proxy.com"
+            android:dependency="mirror_enabled"
+            android:entries="@array/mirror_preset_items"
+            android:entryValues="@array/mirror_preset_values"
+            android:key="mirror_preset"
+            android:summary="%s"
+            android:title="@string/mirror_preset" />
+
+        <EditTextPreference
+            app:iconSpaceReserved="false"
+            android:dependency="mirror_enabled"
+            android:key="mirror_custom_url"
+            android:title="@string/mirror_custom_url"
+            android:summary="@string/mirror_custom_url_summary"
+            android:dialogTitle="@string/mirror_custom_url" />
+
+        <Preference
+            app:iconSpaceReserved="false"
+            android:dependency="mirror_enabled"
+            android:key="mirror_test"
+            android:title="@string/mirror_test"
+            android:summary="@string/mirror_test_summary" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        app:iconSpaceReserved="false"
+        android:title="@string/settings_category_updates">
+
+        <Preference
+            app:iconSpaceReserved="false"
+            android:key="check_update"
+            android:title="@string/check_update"
+            android:summary="@string/check_update_summary" />
+
+        <SwitchPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="false"
+            android:key="auto_check_update"
+            android:title="@string/auto_check_update"
+            android:summary="@string/auto_check_update_summary" />
+
+        <SwitchPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="false"
+            android:key="release_radar_notifications"
+            android:title="@string/release_radar_notifications" />
+
+        <com.gh4a.widget.IntegerListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="360"
+            android:dependency="release_radar_notifications"
+            android:entries="@array/release_radar_interval_items"
+            android:entryValues="@array/release_radar_interval_values"
+            android:key="release_radar_interval"
+            android:summary="%s"
+            android:title="@string/release_radar_interval" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        app:iconSpaceReserved="false"
+        android:title="@string/settings_category_translation">
+
+        <Preference
+            app:iconSpaceReserved="false"
+            android:key="translation_settings"
+            android:title="@string/translation_settings"
+            android:summary="@string/translation_settings_summary" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        app:iconSpaceReserved="false"
+        android:title="@string/settings_category_about">
+
+        <Preference
+            app:iconSpaceReserved="false"
+            android:key="about"
+            android:title="@string/about" />
+
+        <Preference
+            app:iconSpaceReserved="false"
+            android:key="open_source_components"
+            android:title="@string/open_source_components" />
+
+    </PreferenceCategory>
 
 </PreferenceScreen>

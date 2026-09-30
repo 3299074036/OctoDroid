@@ -26,4 +26,26 @@
         <item>3 小时</item>
         <item>6 小时</item>
     </string-array>
+
+    <string-array name="mirror_preset_items">
+        <item>gh-proxy.com</item>
+        <item>mirror.ghproxy.com</item>
+        <item>自定义</item>
+    </string-array>
+    <string-array name="mirror_preset_values">
+        <item>https://gh-proxy.com</item>
+        <item>https://mirror.ghproxy.com</item>
+        <item>custom</item>
+    </string-array>
+
+    <string-array name="release_radar_interval_items">
+        <item>6 小时</item>
+        <item>12 小时</item>
+        <item>24 小时</item>
+    </string-array>
+    <string-array name="release_radar_interval_values">
+        <item>360</item>
+        <item>720</item>
+        <item>1440</item>
+    </string-array>
 </resources>

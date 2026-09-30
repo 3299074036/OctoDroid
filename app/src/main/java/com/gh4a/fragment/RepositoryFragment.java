@@ -39,6 +39,7 @@ import com.gh4a.R;
 import com.gh4a.ServiceFactory;
 import com.gh4a.utils.translate.ReadmeTranslator;
 import com.gh4a.utils.translate.TranslationManager;
+import com.gh4a.utils.translate.TranslationUiHelper;
 import com.gh4a.utils.translate.Translator;
 import com.gh4a.activities.CollaboratorListActivity;
 import com.gh4a.activities.ContributorListActivity;
@@ -137,9 +138,9 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         mTranslateButton = mContentView.findViewById(R.id.btn_translate_readme);
         if (mTranslateButton != null) {
             mTranslateButton.setOnClickListener(v -> onTranslateButtonClicked());
-            // long-press: pick among configured providers and (re-)translate
+            // long-press: pick a provider, remember it as default, re-translate
             mTranslateButton.setOnLongClickListener(v -> {
-                showProviderPickerAndTranslate();
+                pickProviderAndRetranslate();
                 return true;
             });
         }
@@ -560,44 +561,40 @@ public class RepositoryFragment extends LoadingFragmentBase implements
             updateTranslateButton();
             return;
         }
-        showProviderPickerAndTranslate();
+        // Tap: translate directly with the default provider, no dialog.
+        startWithDefaultProvider();
     }
 
     /**
-     * Let the user pick which configured provider to translate with.
-     * Skips the dialog when there is only one usable provider.
-     * The choice becomes the default provider in settings.
+     * Tap gesture: translate directly with the saved default provider.
      */
-    private void showProviderPickerAndTranslate() {
+    private void startWithDefaultProvider() {
         if (getActivity() == null || mOriginalReadmeHtml == null || mIsTranslating) {
             return;
         }
-        Context context = getActivity();
-        List<String> providers = TranslationManager.getConfiguredProviders(context);
-        if (providers.size() <= 1) {
-            startReadmeTranslation(providers.get(0));
+        boolean started = TranslationUiHelper.runWithDefaultProvider(
+                getActivity(), this::startReadmeTranslation);
+        if (!started && getActivity() != null) {
+            Toast.makeText(getActivity(), R.string.translate_no_provider,
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /**
+     * Long-press gesture: pop the provider picker, remember the choice as
+     * the default provider, and re-translate with it.
+     */
+    private void pickProviderAndRetranslate() {
+        if (getActivity() == null || mOriginalReadmeHtml == null || mIsTranslating) {
             return;
         }
-        String current = TranslationManager.getProvider(context);
-        String[] names = new String[providers.size()];
-        int checked = 0;
-        for (int i = 0; i < providers.size(); i++) {
-            names[i] = TranslationManager.getProviderDisplayName(context, providers.get(i));
-            if (providers.get(i).equals(current)) {
-                checked = i;
-            }
-        }
-        final int[] selected = { checked };
-        new AlertDialog.Builder(context)
-                .setTitle(R.string.translate_choose_provider)
-                .setSingleChoiceItems(names, checked, (dialog, which) -> selected[0] = which)
-                .setPositiveButton(R.string.translate, (dialog, which) -> {
-                    String provider = providers.get(selected[0]);
-                    TranslationManager.setProvider(context.getApplicationContext(), provider);
-                    startReadmeTranslation(provider);
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        TranslationUiHelper.pickProviderAndRun(getActivity(), provider -> {
+            String name = TranslationManager.getProviderDisplayName(getActivity(), provider);
+            Toast.makeText(getActivity(),
+                    getString(R.string.translate_provider_switched, name),
+                    Toast.LENGTH_SHORT).show();
+            startReadmeTranslation(provider);
+        });
     }
 
     private void startReadmeTranslation(String provider) {

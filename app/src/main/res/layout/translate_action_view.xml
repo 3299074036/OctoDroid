@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Whole-thread translate button shown directly in the toolbar.
+     Tap: translate with the default provider. Long-press: pick provider. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:text="@string/translate"
+    android:textColor="@android:color/white"
+    android:textSize="15sp"
+    android:background="?attr/selectableItemBackgroundBorderless" />

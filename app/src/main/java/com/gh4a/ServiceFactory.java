@@ -4,6 +4,7 @@ import android.content.Context;
 import android.util.Log;
 
 import com.gh4a.utils.ApiHelpers;
+import com.gh4a.utils.MirrorHelper;
 import com.meisolsson.githubsdk.core.ByteArrayResponseConverterFactory;
 import com.meisolsson.githubsdk.core.GitHubPaginationInterceptor;
 import com.meisolsson.githubsdk.core.ServiceGenerator;
@@ -214,6 +215,16 @@ public class ServiceFactory {
                 .build();
         sImageHttpClient = sApiHttpClient.newBuilder()
                 .cache(new Cache(new File(context.getCacheDir(), "image-http"), twentyMB))
+                .addInterceptor(chain -> {
+                    // 国内加速：头像、markdown 图片、图片查看器的资源走镜像
+                    Request request = chain.request();
+                    String original = request.url().toString();
+                    String rewritten = MirrorHelper.rewriteUrl(context, original);
+                    if (!rewritten.equals(original)) {
+                        request = request.newBuilder().url(rewritten).build();
+                    }
+                    return chain.proceed(request);
+                })
                 .build();
     }
 }

@@ -49,6 +49,32 @@
     <string name="readme">Readme</string>
     <string name="save">Save</string>
     <string name="delete">Delete</string>
+    <string name="account_manage">Account management</string>
+    <string name="account_manage_summary">Switch, add or remove signed-in accounts</string>
+    <string name="current_account">Current account</string>
+    <string name="delete_account">Delete account</string>
+    <string name="delete_account_confirm">Delete account %1$s? Its token will be removed from this device.</string>
+    <string name="account_added">Account %1$s added</string>
+    <string name="login_failed">Login failed</string>
+    <string name="settings_category_appearance">Appearance</string>
+    <string name="settings_category_browsing">General</string>
+    <string name="settings_category_account">Account &amp; notifications</string>
+    <string name="settings_category_network">Network acceleration</string>
+    <string name="settings_category_updates">Updates</string>
+    <string name="settings_category_translation">Translation</string>
+    <string name="settings_category_about">About</string>
+    <string name="check_update">Check for updates</string>
+    <string name="check_update_summary">Check if a newer version is available on GitHub</string>
+    <string name="auto_check_update">Auto-check for updates</string>
+    <string name="auto_check_update_summary">Automatically check for updates once a day on startup</string>
+    <string name="update_available">Update available</string>
+    <string name="update_available_message">New version %1$s is available (current: %2$s).\n\n%3$s</string>
+    <string name="download_update">Download update</string>
+    <string name="already_latest">You\'re on the latest version</string>
+    <string name="checking_update">Checking for updates…</string>
+    <string name="update_check_failed">Update check failed: %1$s</string>
+    <string name="downloading_update">Downloading update…</string>
+    <string name="allow_install_unknown_apps">Please allow installing unknown apps, then retry</string>
     <string name="reply">Reply</string>
     <string name="reply_selected">Reply (Selected)</string>
     <string name="add_comment">Add comment</string>
@@ -603,7 +629,7 @@
     <string name="share_line_subject">Line %1$d in file %2$s at %3$s</string>
 
     <!-- Webview text size -->
-    <string name="menu_text_size">Code view text size</string>
+    <string name="menu_text_size">Code font size</string>
     <string name="menu_gif_load_mode">Animated GIF loading</string>
 
     <!-- Print document titles -->
@@ -656,7 +682,7 @@
     <string name="notification_subject_pr">PR</string>
     <string name="notification_subject_release">Release</string>
     <string name="notification_subject_discussion">Discussion</string>
-    <string name="notification_interval">Sync interval</string>
+    <string name="notification_interval">Notification check interval</string>
     <string name="detach">Open in new window</string>
 
     <string name="theme_light">Day</string>
@@ -671,14 +697,14 @@
     <string name="theme_toggle">Dark mode</string>
 
     <!-- Drawer customization -->
-    <string name="customize_drawer">Customize navigation drawer</string>
+    <string name="customize_drawer">Customize sidebar</string>
     <string name="drag_to_reorder">Drag to reorder</string>
     <string name="reset_to_default">Reset to default</string>
-    <string name="drawer_customize_summary">Reorder and show/hide drawer items</string>
+    <string name="drawer_customize_summary">Reorder and show/hide sidebar items</string>
 
     <!-- Translation -->
-    <string name="translation_settings">Translation</string>
-    <string name="translation_settings_summary">Configure README translation provider</string>
+    <string name="translation_settings">Translation service</string>
+    <string name="translation_settings_summary">Configure translation provider</string>
     <string name="translation_provider">Translation provider</string>
     <string name="translation_api_key">API key</string>
     <string name="translation_api_key_summary">API key required by the provider</string>
@@ -698,6 +724,10 @@
     <string name="translate_failed">Translation failed, check network and settings</string>
     <string name="translate_no_provider">Translation provider not configured</string>
     <string name="translate_cancelled">Translation cancelled</string>
+    <string name="translate_thread">Translate thread</string>
+    <string name="translate_thread_progress">Translating %1$d/%2$d</string>
+    <string name="translate_provider_switched">Switched to %1$s</string>
+    <string name="translate_nothing_to_translate">Nothing to translate</string>
     <string name="translation_test">Test translation</string>
     <string name="translation_test_summary">Translate a short sample with the current provider settings</string>
     <string name="translate_choose_provider">Choose translation provider</string>
@@ -731,5 +761,22 @@
     <string name="star_group_delete_confirm">Delete group \u201c%1$s\u201d? Repositories stay starred.</string>
     <string name="rename">Rename</string>
     <string name="remove">Remove</string>
+    <string name="mirror_enabled">Enable mirror acceleration</string>
+    <string name="mirror_enabled_summary">Load images, avatars and downloads via a mirror when the network to GitHub is slow</string>
+    <string name="mirror_preset">Mirror</string>
+    <string name="mirror_custom_url">Custom mirror URL</string>
+    <string name="mirror_custom_url_summary">e.g. https://gh-proxy.com — used when the mirror is set to Custom</string>
+    <string name="mirror_test">Test connectivity</string>
+    <string name="mirror_test_summary">Check whether the selected mirror is reachable</string>
+    <string name="mirror_test_ok">Mirror works</string>
+    <string name="mirror_test_failed">Mirror unavailable: %1$s</string>
+    <string name="mirror_test_no_url">Please enter a mirror URL first</string>
+    <string name="release_radar_notifications">Starred repo release alerts</string>
+    <string name="release_radar_interval">Star update check interval</string>
+    <string name="channel_release_radar_name">Release updates</string>
+    <string name="channel_release_radar_description">Notifications when starred repositories publish new releases</string>
+    <string name="release_radar_notify_title">%1$s has a new release</string>
+    <string name="release_radar_notify_text">New version: %1$s</string>
+    <string name="release_radar_notify_summary_title">New releases</string>
 
 </resources>

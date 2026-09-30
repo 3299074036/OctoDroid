@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Issue #1684: 全局字号（字体大小）设置 -->
-    <string name="font_size">字号</string>
+    <string name="font_size">字体大小</string>
 
     <string-array name="font_scale_items">
         <item>小</item>

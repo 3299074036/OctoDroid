@@ -12,9 +12,13 @@ import androidx.coordinatorlayout.widget.CoordinatorLayout;
 import androidx.recyclerview.widget.RecyclerView;
 
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 
 import com.gh4a.R;
 import com.gh4a.ServiceFactory;
@@ -27,6 +31,8 @@ import com.gh4a.utils.ActivityResultHelpers;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.IntentUtils;
 import com.gh4a.utils.RxUtils;
+import com.gh4a.utils.translate.CommentTranslator;
+import com.gh4a.utils.translate.ThreadTranslateController;
 import com.gh4a.widget.EditorBottomSheet;
 
 import com.meisolsson.githubsdk.model.GitHubCommentBase;
@@ -54,12 +60,18 @@ import retrofit2.Response;
 
 public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implements
         TimelineItemAdapter.OnCommentAction, ConfirmationDialogFragment.Callback,
-        EditorBottomSheet.Callback, EditorBottomSheet.Listener {
+        EditorBottomSheet.Callback, EditorBottomSheet.Listener,
+        ThreadTranslateController.Host {
 
     private static final String EXTRA_SELECTED_REPLY_COMMENT_ID = "selected_reply_comment_id";
 
     @Nullable
     private TimelineItemAdapter mAdapter;
+    private CommentTranslator mCommentTranslator;
+    private MenuItem mTranslateThreadItem;
+    private TextView mTranslateActionView;
+    private final ThreadTranslateController mThreadController =
+            new ThreadTranslateController(this);
     private EditorBottomSheet mBottomSheet;
 
     private final ActivityResultLauncher<Intent> mEditLauncher = registerForActivityResult(
@@ -102,6 +114,7 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
         if (savedInstanceState != null) {
             mSelectedReplyCommentId = savedInstanceState.getLong(EXTRA_SELECTED_REPLY_COMMENT_ID);
         }
+        setHasOptionsMenu(true);
     }
 
     @Override
@@ -124,6 +137,7 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
     @Override
     public void onViewCreated(View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+        mCommentTranslator = new CommentTranslator();
         getBaseActivity().addAppBarOffsetListener(mBottomSheet);
     }
 
@@ -136,6 +150,10 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        if (mCommentTranslator != null) {
+            mCommentTranslator.destroy();
+            mCommentTranslator = null;
+        }
         getBaseActivity().removeAppBarOffsetListener(mBottomSheet);
     }
 
@@ -290,6 +308,108 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
         if (mInitialComment != null) {
             highlightInitialComment(data);
         }
+
+        // Newly paged-in comments follow the whole-thread translation mode.
+        if (mThreadController.getState() != ThreadTranslateController.STATE_IDLE) {
+            List<CommentTranslator.TranslatableItem> newItems = new ArrayList<>();
+            for (TimelineItem item : data) {
+                collectItem(item, newItems);
+            }
+            mThreadController.onNewItems(newItems);
+        }
+    }
+
+    @Override
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+        super.onCreateOptionsMenu(menu, inflater);
+        inflater.inflate(R.menu.review_fragment_menu, menu);
+        mTranslateThreadItem = menu.findItem(R.id.translate_thread);
+        // Direct toolbar button (not hidden in the overflow menu) so it
+        // supports tap-to-translate and long-press-to-pick-provider.
+        mTranslateThreadItem.setActionView(R.layout.translate_action_view);
+        View translateActionView = mTranslateThreadItem.getActionView();
+        translateActionView.setOnClickListener(v -> mThreadController.toggle());
+        translateActionView.setOnLongClickListener(v -> {
+            mThreadController.onLongPress();
+            return true;
+        });
+        mTranslateActionView = (TextView) translateActionView;
+        updateTranslateThreadItem();
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.translate_thread) {
+            // Fallback: taps normally go to the action view's own listener.
+            mThreadController.toggle();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void updateTranslateThreadItem() {
+        if (mTranslateActionView == null) {
+            return;
+        }
+        switch (mThreadController.getState()) {
+            case ThreadTranslateController.STATE_TRANSLATING:
+                mTranslateActionView.setText(getString(R.string.translate_thread_progress,
+                        mThreadController.getDone(), mThreadController.getTotal()));
+                break;
+            case ThreadTranslateController.STATE_DONE:
+                mTranslateActionView.setText(R.string.show_original);
+                break;
+            default:
+                mTranslateActionView.setText(R.string.translate);
+                break;
+        }
+    }
+
+    private void collectItem(TimelineItem item,
+            List<CommentTranslator.TranslatableItem> items) {
+        if (item instanceof TimelineItem.TimelineComment) {
+            GitHubCommentBase comment = ((TimelineItem.TimelineComment) item).comment();
+            if (comment.bodyHtml() != null && !comment.bodyHtml().isEmpty()) {
+                items.add(new CommentTranslator.TranslatableItem(
+                        comment.id(), comment.bodyHtml()));
+            }
+        } else if (item instanceof TimelineItem.TimelineReview) {
+            Review review = ((TimelineItem.TimelineReview) item).review();
+            if (review.bodyHtml() != null && !review.bodyHtml().isEmpty()) {
+                items.add(new CommentTranslator.TranslatableItem(
+                        review.id(), review.bodyHtml()));
+            }
+        }
+    }
+
+    // ThreadTranslateController.Host
+
+    @Override
+    public CommentTranslator getTranslator() {
+        return mCommentTranslator;
+    }
+
+    @Override
+    public List<CommentTranslator.TranslatableItem> collectThreadItems() {
+        List<CommentTranslator.TranslatableItem> items = new ArrayList<>();
+        if (mAdapter != null) {
+            for (int i = 0; i < mAdapter.getCount(); i++) {
+                collectItem(mAdapter.getItem(i), items);
+            }
+        }
+        return items;
+    }
+
+    @Override
+    public void onTranslationsChanged() {
+        if (mAdapter != null) {
+            mAdapter.notifyDataSetChanged();
+        }
+    }
+
+    @Override
+    public void onTranslateStateChanged() {
+        updateTranslateThreadItem();
     }
 
     private void selectAndRemoveFirstReply(List<TimelineItem> data) {
@@ -368,6 +488,23 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
     public void deleteComment(final GitHubCommentBase comment) {
         ConfirmationDialogFragment.show(this, R.string.delete_comment_message,
                 R.string.delete, comment, "deleteconfirm");
+    }
+
+    @Override
+    public void translateBody(long id, String bodyHtml) {
+        if (getActivity() == null || mCommentTranslator == null) {
+            return;
+        }
+        mCommentTranslator.toggleTranslation(getActivity(), id, bodyHtml, () -> {
+            if (mAdapter != null) {
+                mAdapter.notifyDataSetChanged();
+            }
+        });
+    }
+
+    @Override
+    public String getTranslatedBody(long id) {
+        return mCommentTranslator != null ? mCommentTranslator.getTranslatedHtml(id) : null;
     }
 
     @Override

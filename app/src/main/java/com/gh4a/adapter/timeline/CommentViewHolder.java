@@ -64,6 +64,9 @@ class CommentViewHolder
         Single<List<Reaction>> loadReactionDetails(TimelineItem.TimelineComment item, boolean bypassCache);
         Single<Reaction> addReaction(TimelineItem.TimelineComment item, String content);
         Single<Boolean> deleteReaction(TimelineItem.TimelineComment item, long reactionId);
+        /** Translated body HTML for the comment, or null to show the original. */
+        @Nullable
+        String getTranslatedBodyHtml(long commentId);
     }
 
     public CommentViewHolder(View view, HttpImageGetter imageGetter, String repoOwner,
@@ -135,8 +138,14 @@ class CommentViewHolder
             tvEditTimestamp.setVisibility(View.VISIBLE);
         }
 
-        // Body
-        mImageGetter.bind(tvDesc, item.comment().bodyHtml(), item.comment().id());
+        // Body (translated variant gets its own image-getter cache entry,
+        // so toggling back to the original doesn't show stale content)
+        String translatedBody = mCallback.getTranslatedBodyHtml(item.comment().id());
+        if (translatedBody != null) {
+            mImageGetter.bind(tvDesc, translatedBody, item.comment().id() + "-translated");
+        } else {
+            mImageGetter.bind(tvDesc, item.comment().bodyHtml(), item.comment().id());
+        }
 
         // Extra view
         SpannableStringBuilder userName = ApiHelpers.getUserLoginWithType(mContext, user, true);

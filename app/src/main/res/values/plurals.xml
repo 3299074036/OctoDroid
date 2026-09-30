@@ -70,4 +70,9 @@
         <item quantity="other">%d repositories</item>
     </plurals>
 
+    <plurals name="release_radar_notify_summary_text">
+        <item quantity="one">1 repository has a new release</item>
+        <item quantity="other">%d repositories have new releases</item>
+    </plurals>
+
 </resources>

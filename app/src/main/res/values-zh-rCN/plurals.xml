@@ -69,4 +69,8 @@
         <item quantity="other">%d 个仓库</item>
     </plurals>
 
+    <plurals name="release_radar_notify_summary_text">
+        <item quantity="other">%d 个仓库有新版本</item>
+    </plurals>
+
 </resources>

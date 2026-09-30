@@ -48,10 +48,13 @@ import com.gh4a.utils.IntentUtils;
 import com.gh4a.utils.RxUtils;
 import com.gh4a.utils.StringUtils;
 import com.gh4a.utils.UiUtils;
+import com.gh4a.utils.translate.CommentTranslator;
+import com.gh4a.utils.translate.ThreadTranslateController;
 import com.gh4a.widget.EditorBottomSheet;
 import com.gh4a.widget.ReactionBar;
 import com.meisolsson.githubsdk.model.GitHubCommentBase;
 import com.meisolsson.githubsdk.model.Issue;
+import com.meisolsson.githubsdk.model.Review;
 import com.meisolsson.githubsdk.model.IssueEventType;
 import com.meisolsson.githubsdk.model.Label;
 import com.meisolsson.githubsdk.model.Reaction;
@@ -62,6 +65,7 @@ import com.meisolsson.githubsdk.model.request.ReactionRequest;
 import com.meisolsson.githubsdk.service.issues.IssueCommentService;
 import com.meisolsson.githubsdk.service.reactions.ReactionService;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -77,7 +81,8 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
         View.OnClickListener, TimelineItemAdapter.OnCommentAction,
         ConfirmationDialogFragment.Callback,
         EditorBottomSheet.Callback, EditorBottomSheet.Listener,
-        ReactionBar.Callback, ReactionBar.Item, ReactionBar.ReactionDetailsCache.Listener {
+        ReactionBar.Callback, ReactionBar.Item, ReactionBar.ReactionDetailsCache.Listener,
+        ThreadTranslateController.Host {
     protected static final List<IssueEventType> INTERESTING_EVENTS = Arrays.asList(
             IssueEventType.Closed, IssueEventType.Reopened, IssueEventType.Merged,
             IssueEventType.Referenced, IssueEventType.Assigned, IssueEventType.Unassigned,
@@ -107,6 +112,11 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     private TimelineItemAdapter mAdapter;
     private HttpImageGetter mImageGetter;
     private EditorBottomSheet mBottomSheet;
+    private CommentTranslator mCommentTranslator;
+    private MenuItem mTranslateThreadItem;
+    private TextView mTranslateActionView;
+    private final ThreadTranslateController mThreadController =
+            new ThreadTranslateController(this);
 
     protected final ActivityResultLauncher<Intent> mEditLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -165,6 +175,7 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     @Override
     public void onViewCreated(View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+        mCommentTranslator = new CommentTranslator();
         if (mInitialComment == null) {
             // We want to make the user able to read the issue/PR while the rest of the conversation is still loading,
             // but at the same time we want to avoid item pop-in when the conversation loads quickly
@@ -189,6 +200,10 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        if (mCommentTranslator != null) {
+            mCommentTranslator.destroy();
+            mCommentTranslator = null;
+        }
         mReactionDetailsCache.destroy();
         mImageGetter.destroy();
         mImageGetter = null;
@@ -276,11 +291,47 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
                     reactItem.getSubMenu(), this, this, mReactionDetailsCache);
             mReactionMenuHelper.startLoadingIfNeeded();
         }
+
+        mTranslateThreadItem = menu.findItem(R.id.translate_thread);
+        // Direct toolbar button (not hidden in the overflow menu) so it
+        // supports tap-to-translate and long-press-to-pick-provider.
+        mTranslateThreadItem.setActionView(R.layout.translate_action_view);
+        View translateActionView = mTranslateThreadItem.getActionView();
+        translateActionView.setOnClickListener(v -> mThreadController.toggle());
+        translateActionView.setOnLongClickListener(v -> {
+            mThreadController.onLongPress();
+            return true;
+        });
+        mTranslateActionView = (TextView) translateActionView;
+        updateTranslateThreadItem();
+    }
+
+    private void updateTranslateThreadItem() {
+        if (mTranslateActionView == null) {
+            return;
+        }
+        switch (mThreadController.getState()) {
+            case ThreadTranslateController.STATE_TRANSLATING:
+                mTranslateActionView.setText(getString(R.string.translate_thread_progress,
+                        mThreadController.getDone(), mThreadController.getTotal()));
+                break;
+            case ThreadTranslateController.STATE_DONE:
+                mTranslateActionView.setText(R.string.show_original);
+                break;
+            default:
+                mTranslateActionView.setText(R.string.translate);
+                break;
+        }
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (mReactionMenuHelper != null && mReactionMenuHelper.onItemClick(item)) {
+            return true;
+        }
+        if (item.getItemId() == R.id.translate_thread) {
+            // Fallback: taps normally go to the action view's own listener.
+            mThreadController.toggle();
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -324,6 +375,15 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
 
         updateMentionUsers();
         removeLoadingIndicator(adapter);
+
+        // Newly paged-in comments follow the whole-thread translation mode.
+        if (mThreadController.getState() != ThreadTranslateController.STATE_IDLE) {
+            List<CommentTranslator.TranslatableItem> newItems = new ArrayList<>();
+            for (TimelineItem item : data) {
+                collectItem(item, newItems);
+            }
+            mThreadController.onNewItems(newItems);
+        }
     }
 
     private void showLoadingIndicator(View loadingView) {
@@ -396,7 +456,7 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
         String body = mIssue.bodyHtml();
         TextView descriptionView = mListHeaderView.findViewById(R.id.tv_desc);
         if (!StringUtils.isBlank(body)) {
-            mImageGetter.bind(descriptionView, body, mIssue.id());
+            bindIssueBody(descriptionView, body);
 
             if (!isLocked()) {
                 descriptionView.setCustomSelectionActionModeCallback(
@@ -454,6 +514,99 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
 
         assignHighlightColor();
         bindSpecialViews(mListHeaderView);
+    }
+
+    /** Bind the issue/PR body, preferring the translated HTML when available. */
+    private void bindIssueBody(TextView descriptionView, String bodyHtml) {
+        String translated = mCommentTranslator != null ? mCommentTranslator.getTranslatedHtml(mIssue.id()) : null;
+        if (translated != null) {
+            mImageGetter.bind(descriptionView, translated, mIssue.id() + "-translated");
+        } else {
+            mImageGetter.bind(descriptionView, bodyHtml, mIssue.id());
+        }
+    }
+
+    /** Refresh the issue/PR body after its translation finished or was toggled off. */
+    private void refreshIssueBody() {
+        if (mListHeaderView == null || mIssue == null || mImageGetter == null) {
+            return;
+        }
+        String body = mIssue.bodyHtml();
+        if (!StringUtils.isBlank(body)) {
+            TextView descriptionView = mListHeaderView.findViewById(R.id.tv_desc);
+            bindIssueBody(descriptionView, body);
+        }
+    }
+
+    @Override
+    public void translateBody(long id, String bodyHtml) {
+        if (getActivity() == null || mCommentTranslator == null) {
+            return;
+        }
+        mCommentTranslator.toggleTranslation(getActivity(), id, bodyHtml, () -> {
+            if (id == mIssue.id()) {
+                refreshIssueBody();
+            }
+            if (mAdapter != null) {
+                mAdapter.notifyDataSetChanged();
+            }
+        });
+    }
+
+    @Override
+    public String getTranslatedBody(long id) {
+        return mCommentTranslator != null ? mCommentTranslator.getTranslatedHtml(id) : null;
+    }
+
+    // ThreadTranslateController.Host
+
+    @Override
+    public CommentTranslator getTranslator() {
+        return mCommentTranslator;
+    }
+
+    @Override
+    public List<CommentTranslator.TranslatableItem> collectThreadItems() {
+        List<CommentTranslator.TranslatableItem> items = new ArrayList<>();
+        if (mIssue != null && !StringUtils.isBlank(mIssue.bodyHtml())) {
+            items.add(new CommentTranslator.TranslatableItem(mIssue.id(), mIssue.bodyHtml()));
+        }
+        if (mAdapter != null) {
+            for (int i = 0; i < mAdapter.getCount(); i++) {
+                collectItem(mAdapter.getItem(i), items);
+            }
+        }
+        return items;
+    }
+
+    private void collectItem(TimelineItem item,
+            List<CommentTranslator.TranslatableItem> items) {
+        if (item instanceof TimelineItem.TimelineComment) {
+            GitHubCommentBase comment = ((TimelineItem.TimelineComment) item).comment();
+            if (!StringUtils.isBlank(comment.bodyHtml())) {
+                items.add(new CommentTranslator.TranslatableItem(
+                        comment.id(), comment.bodyHtml()));
+            }
+        } else if (item instanceof TimelineItem.TimelineReview) {
+            Review review = ((TimelineItem.TimelineReview) item).review();
+            if (!StringUtils.isBlank(review.bodyHtml())) {
+                items.add(new CommentTranslator.TranslatableItem(
+                        review.id(), review.bodyHtml()));
+            }
+        }
+    }
+
+    @Override
+    public void onTranslationsChanged() {
+        refreshIssueBody();
+        if (mAdapter != null) {
+            mAdapter.notifyDataSetChanged();
+        }
+    }
+
+    @Override
+    public void onTranslateStateChanged() {
+        updateTranslateThreadItem();
     }
 
     private void fillLabels(List<Label> labels) {

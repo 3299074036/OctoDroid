@@ -65,6 +65,12 @@ class ReviewViewHolder
         boolean canQuote();
 
         void quoteText(CharSequence text);
+
+        /** Translate (or toggle back) the review body, keyed by review id. */
+        void translateBody(long id, String bodyHtml);
+
+        /** Translated review body HTML, or null to show the original. */
+        String getTranslatedBody(long id);
     }
 
     public ReviewViewHolder(View itemView, HttpImageGetter imageGetter,
@@ -115,7 +121,12 @@ class ReviewViewHolder
         mAvatarContainer.setTag(review.user());
 
         formatTitle(review);
-        mImageGetter.bind(mBodyView, review.bodyHtml(), review.id());
+        String translatedBody = mCallback.getTranslatedBody(review.id());
+        if (translatedBody != null) {
+            mImageGetter.bind(mBodyView, translatedBody, review.id() + "-translated");
+        } else {
+            mImageGetter.bind(mBodyView, review.bodyHtml(), review.id());
+        }
 
         if (mCallback.canQuote()) {
             mBodyView.setCustomSelectionActionModeCallback(mQuoteActionModeCallback);

@@ -32,6 +32,8 @@ import com.gh4a.activities.TranslationSettingsActivity;
 import com.gh4a.activities.IssueListActivity;
 import com.gh4a.activities.RepositoryActivity;
 import com.gh4a.worker.NotificationsWorker;
+import com.gh4a.worker.ReleaseRadarWorker;
+import com.gh4a.utils.MirrorHelper;
 import com.gh4a.widget.IntegerListPreference;
 
 public class SettingsFragment extends PreferenceFragmentCompat implements
@@ -53,9 +55,23 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     public static final String KEY_CUSTOM_TABS = "use_custom_tabs";
     public static final String KEY_NOTIFICATIONS = "notifications";
     public static final String KEY_NOTIFICATION_INTERVAL = "notification_interval";
+    public static final String KEY_MIRROR_ENABLED = "mirror_enabled";
+    public static final String KEY_MIRROR_PRESET = "mirror_preset";
+    public static final String KEY_MIRROR_CUSTOM_URL = "mirror_custom_url";
+    private static final String KEY_MIRROR_TEST = "mirror_test";
+    public static final String KEY_RELEASE_RADAR_NOTIFICATIONS = "release_radar_notifications";
+    public static final String KEY_RELEASE_RADAR_INTERVAL = "release_radar_interval";
     private static final String KEY_ABOUT = "about";
     private static final String KEY_CUSTOMIZE_DRAWER = "customize_drawer";
+    private static final String KEY_ACCOUNT_MANAGE = "account_manage";
     private static final String KEY_TRANSLATION_SETTINGS = "translation_settings";
+    private static final String KEY_CHECK_UPDATE = "check_update";
+    public static final String KEY_AUTO_CHECK_UPDATE = "auto_check_update";
+
+    public static boolean isAutoCheckUpdateEnabled(android.content.Context context) {
+        return context.getSharedPreferences(PREF_NAME, android.content.Context.MODE_PRIVATE)
+                .getBoolean(KEY_AUTO_CHECK_UPDATE, false);
+    }
     private static final String KEY_OPEN_SOURCE_COMPONENTS = "open_source_components";
 
     private OnStateChangeListener mListener;
@@ -65,6 +81,8 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private Preference mOpenSourcePref;
     private TwoStatePreference mNotificationsPref;
     private IntegerListPreference mNotificationIntervalPref;
+    private TwoStatePreference mReleaseRadarPref;
+    private IntegerListPreference mReleaseRadarIntervalPref;
 
     @Override
     public void onAttach(Context context) {
@@ -104,6 +122,12 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         Preference customizeDrawerPref = findPreference(KEY_CUSTOMIZE_DRAWER);
         customizeDrawerPref.setOnPreferenceClickListener(this);
 
+        Preference accountManagePref = findPreference(KEY_ACCOUNT_MANAGE);
+        accountManagePref.setOnPreferenceClickListener(this);
+
+        Preference checkUpdatePref = findPreference(KEY_CHECK_UPDATE);
+        checkUpdatePref.setOnPreferenceClickListener(this);
+
         Preference translationSettingsPref = findPreference(KEY_TRANSLATION_SETTINGS);
         if (translationSettingsPref != null) {
             translationSettingsPref.setOnPreferenceClickListener(this);
@@ -114,6 +138,17 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
 
         mNotificationIntervalPref = findPreference(KEY_NOTIFICATION_INTERVAL);
         mNotificationIntervalPref.setOnPreferenceChangeListener(this);
+
+        Preference mirrorTestPref = findPreference(KEY_MIRROR_TEST);
+        if (mirrorTestPref != null) {
+            mirrorTestPref.setOnPreferenceClickListener(this);
+        }
+
+        mReleaseRadarPref = findPreference(KEY_RELEASE_RADAR_NOTIFICATIONS);
+        mReleaseRadarPref.setOnPreferenceChangeListener(this);
+
+        mReleaseRadarIntervalPref = findPreference(KEY_RELEASE_RADAR_INTERVAL);
+        mReleaseRadarIntervalPref.setOnPreferenceChangeListener(this);
     }
 
     public static void applyLanguage(String languageTag) {
@@ -167,6 +202,27 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             }
             return true;
         }
+        if (pref == mReleaseRadarPref) {
+            if ((boolean) newValue) {
+                ReleaseRadarWorker.createNotificationChannels(getActivity());
+                ReleaseRadarWorker.schedule(getContext(),
+                        Integer.valueOf(mReleaseRadarIntervalPref.getValue()));
+                // On Android 13 and up, notification permissions must be granted manually
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        getActivity().checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    getActivity().requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 0);
+                }
+            } else {
+                ReleaseRadarWorker.cancel(getContext());
+            }
+            return true;
+        }
+        if (pref == mReleaseRadarIntervalPref) {
+            if (mReleaseRadarPref.isChecked()) {
+                ReleaseRadarWorker.schedule(getContext(), Integer.parseInt((String) newValue));
+            }
+            return true;
+        }
         return false;
     }
 
@@ -183,8 +239,27 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         } else if (KEY_CUSTOMIZE_DRAWER.equals(pref.getKey())) {
             startActivity(com.gh4a.activities.DrawerEditActivity.makeIntent(getActivity()));
             return true;
+        } else if (KEY_ACCOUNT_MANAGE.equals(pref.getKey())) {
+            startActivity(com.gh4a.activities.AccountManageActivity.makeIntent(getActivity()));
+            return true;
+        } else if (KEY_CHECK_UPDATE.equals(pref.getKey())) {
+            com.gh4a.utils.UpdateCheckUi.checkManually(
+                    (com.gh4a.BaseActivity) getActivity());
+            return true;
         } else if (KEY_TRANSLATION_SETTINGS.equals(pref.getKey())) {
             TranslationSettingsActivity.start(getActivity());
+            return true;
+        } else if (KEY_MIRROR_TEST.equals(pref.getKey())) {
+            MirrorHelper.testMirror(getActivity(), (ok, message) -> {
+                if (!isAdded()) {
+                    return;
+                }
+                String toast = ok ? getString(R.string.mirror_test_ok)
+                        : message == null ? getString(R.string.mirror_test_no_url)
+                        : getString(R.string.mirror_test_failed, message);
+                android.widget.Toast.makeText(getActivity(), toast,
+                        android.widget.Toast.LENGTH_LONG).show();
+            });
             return true;
         }
         return false;

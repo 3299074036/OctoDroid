@@ -40,7 +40,7 @@ import com.gh4a.fragment.LoginModeChooserFragment;
 import com.gh4a.fragment.NotificationListFragment;
 import com.gh4a.fragment.RepositoryListContainerFragment;
 import com.gh4a.fragment.SettingsFragment;
-import com.gh4a.fragment.SettingsFragment;
+import com.gh4a.utils.UpdateCheckUi;
 import com.gh4a.utils.ActivityResultHelpers;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.AvatarHandler;
@@ -144,6 +144,11 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
         mFactory.onStartLoadingData();
         setupThemeToggle();
         showLastCrashIfAny();
+
+        if (savedInstanceState == null
+                && SettingsFragment.isAutoCheckUpdateEnabled(this)) {
+            UpdateCheckUi.checkAutomatically(this);
+        }
     }
 
     /** Shows the previous crash's stack trace so the user can report it. */

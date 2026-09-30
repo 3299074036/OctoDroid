@@ -208,6 +208,8 @@ public class DownloadUtils {
             return;
         }
 
+        // 国内加速：release 附件、源码包等下载走镜像
+        url = MirrorHelper.rewriteUrl(context, url);
         final Uri uri = Uri.parse(url);
         if (!downloadNeedsWarning(context)) {
             enqueueDownload(context, uri, fileName, description, mimeType, mediaType, false, addAuthHeader);
