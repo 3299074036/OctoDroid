@@ -21,6 +21,7 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.method.LinkMovementMethod;
@@ -29,11 +30,16 @@ import android.text.style.ForegroundColorSpan;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.gh4a.Gh4Application;
 import com.gh4a.R;
 import com.gh4a.ServiceFactory;
+import com.gh4a.utils.translate.ReadmeTranslator;
+import com.gh4a.utils.translate.TranslationManager;
+import com.gh4a.utils.translate.Translator;
 import com.gh4a.activities.CollaboratorListActivity;
 import com.gh4a.activities.ContributorListActivity;
 import com.gh4a.activities.ForkListActivity;
@@ -103,10 +109,17 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     private TextView mReadmeView;
     private View mLoadingView;
     private TextView mReadmeTitleView;
+    private Button mTranslateButton;
     private Boolean mIsWatching = null;
     private Boolean mIsStarring = null;
     private boolean mIsReadmeLoaded = false;
     private boolean mIsReadmeExpanded = false;
+    // README translation state
+    private String mOriginalReadmeHtml = null;
+    private String mTranslatedReadmeHtml = null;
+    private boolean mShowingTranslated = false;
+    private boolean mIsTranslating = false;
+    private ReadmeTranslator mReadmeTranslator = null;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -121,12 +134,25 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         mReadmeView = mContentView.findViewById(R.id.readme);
         mLoadingView = mContentView.findViewById(R.id.pb_readme);
         mReadmeTitleView = mContentView.findViewById(R.id.readme_title);
+        mTranslateButton = mContentView.findViewById(R.id.btn_translate_readme);
+        if (mTranslateButton != null) {
+            mTranslateButton.setOnClickListener(v -> onTranslateButtonClicked());
+            // long-press: pick among configured providers and (re-)translate
+            mTranslateButton.setOnLongClickListener(v -> {
+                showProviderPickerAndTranslate();
+                return true;
+            });
+        }
         return mContentView;
     }
 
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        if (mReadmeTranslator != null) {
+            mReadmeTranslator.cancel();
+            mReadmeTranslator = null;
+        }
         mImageGetter.destroy();
         mImageGetter = null;
     }
@@ -484,14 +510,178 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                 })
                 .subscribe(readmeOpt -> {
                     if (readmeOpt.isPresent()) {
-                        mImageGetter.bind(mReadmeView, readmeOpt.get(), id);
+                        mOriginalReadmeHtml = readmeOpt.get();
+                        mTranslatedReadmeHtml = null;
+                        mShowingTranslated = false;
+                        mImageGetter.bind(mReadmeView, mOriginalReadmeHtml, id);
                     } else {
+                        mOriginalReadmeHtml = null;
+                        mTranslatedReadmeHtml = null;
+                        mShowingTranslated = false;
                         mReadmeView.setText(R.string.repo_no_readme);
                         mReadmeView.setTypeface(Typeface.DEFAULT, Typeface.ITALIC);
                     }
                     mIsReadmeLoaded = true;
                     updateReadmeVisibility();
+                    updateTranslateButton();
                 }, this::handleLoadFailure);
+    }
+
+    private void onTranslateButtonClicked() {
+        if (mIsTranslating) {
+            // allow cancelling a stuck translation (e.g. dead provider)
+            if (mReadmeTranslator != null) {
+                mReadmeTranslator.cancel();
+                mReadmeTranslator = null;
+            }
+            mIsTranslating = false;
+            if (getActivity() != null) {
+                Toast.makeText(getActivity(), R.string.translate_cancelled,
+                        Toast.LENGTH_SHORT).show();
+            }
+            updateTranslateButton();
+            return;
+        }
+        if (mShowingTranslated) {
+            // switch back to original
+            mShowingTranslated = false;
+            if (mOriginalReadmeHtml != null) {
+                mImageGetter.rebind(mReadmeView.getContext(), mReadmeView,
+                        mOriginalReadmeHtml, mRepository.id());
+            }
+            updateTranslateButton();
+            return;
+        }
+        if (mTranslatedReadmeHtml != null) {
+            // show cached translation
+            mShowingTranslated = true;
+            mImageGetter.rebind(mReadmeView.getContext(), mReadmeView,
+                    mTranslatedReadmeHtml, mRepository.id());
+            updateTranslateButton();
+            return;
+        }
+        showProviderPickerAndTranslate();
+    }
+
+    /**
+     * Let the user pick which configured provider to translate with.
+     * Skips the dialog when there is only one usable provider.
+     * The choice becomes the default provider in settings.
+     */
+    private void showProviderPickerAndTranslate() {
+        if (getActivity() == null || mOriginalReadmeHtml == null || mIsTranslating) {
+            return;
+        }
+        Context context = getActivity();
+        List<String> providers = TranslationManager.getConfiguredProviders(context);
+        if (providers.size() <= 1) {
+            startReadmeTranslation(providers.get(0));
+            return;
+        }
+        String current = TranslationManager.getProvider(context);
+        String[] names = new String[providers.size()];
+        int checked = 0;
+        for (int i = 0; i < providers.size(); i++) {
+            names[i] = TranslationManager.getProviderDisplayName(context, providers.get(i));
+            if (providers.get(i).equals(current)) {
+                checked = i;
+            }
+        }
+        final int[] selected = { checked };
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.translate_choose_provider)
+                .setSingleChoiceItems(names, checked, (dialog, which) -> selected[0] = which)
+                .setPositiveButton(R.string.translate, (dialog, which) -> {
+                    String provider = providers.get(selected[0]);
+                    TranslationManager.setProvider(context.getApplicationContext(), provider);
+                    startReadmeTranslation(provider);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void startReadmeTranslation(String provider) {
+        if (mOriginalReadmeHtml == null || getActivity() == null) {
+            return;
+        }
+        Context context = getActivity();
+        Translator translator;
+        try {
+            translator = TranslationManager.createTranslator(context, provider);
+        } catch (Exception e) {
+            Toast.makeText(context, R.string.translate_no_provider, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String targetLang = TranslationManager.getTargetLanguage(context);
+        mIsTranslating = true;
+        updateTranslateButton();
+
+        mReadmeTranslator = new ReadmeTranslator(translator, "auto", targetLang);
+        mReadmeTranslator.translate(mOriginalReadmeHtml, new ReadmeTranslator.Callback() {
+            @Override
+            public void onProgress(int done, int total) {
+                if (!mIsTranslating || getActivity() == null || mReadmeView == null) {
+                    return;
+                }
+                // Seamless: never touch the visible README while translating.
+                // Only the button counter ticks; the translated content is
+                // rendered once, when everything is done.
+                if (mTranslateButton != null) {
+                    mTranslateButton.setText(getString(R.string.translating)
+                            + " " + done + "/" + total);
+                }
+            }
+
+            @Override
+            public void onComplete(String translatedHtml) {
+                if (!mIsTranslating) {
+                    return;
+                }
+                mIsTranslating = false;
+                mTranslatedReadmeHtml = translatedHtml;
+                mShowingTranslated = true;
+                if (getActivity() != null && mReadmeView != null) {
+                    mImageGetter.rebind(mReadmeView.getContext(), mReadmeView,
+                            translatedHtml, mRepository.id());
+                }
+                updateTranslateButton();
+            }
+
+            @Override
+            public void onError(Exception e) {
+                if (!mIsTranslating) {
+                    return;
+                }
+                mIsTranslating = false;
+                if (getActivity() != null) {
+                    String msg = e.getMessage() != null ? e.getMessage() : "";
+                    Toast.makeText(getActivity(),
+                            getString(R.string.translate_failed) + (msg.isEmpty() ? "" : ": " + msg),
+                            Toast.LENGTH_LONG).show();
+                }
+                updateTranslateButton();
+            }
+        });
+    }
+
+    private void updateTranslateButton() {
+        if (mTranslateButton == null) {
+            return;
+        }
+        if (mOriginalReadmeHtml == null) {
+            mTranslateButton.setVisibility(View.GONE);
+            return;
+        }
+        mTranslateButton.setVisibility(View.VISIBLE);
+        // keep enabled during translation so the user can tap to cancel
+        mTranslateButton.setEnabled(true);
+        if (mIsTranslating) {
+            mTranslateButton.setText(R.string.translating);
+        } else if (mShowingTranslated) {
+            mTranslateButton.setText(R.string.show_original);
+        } else {
+            mTranslateButton.setText(R.string.translate);
+        }
     }
 
     private void loadPullRequestCount(boolean force) {

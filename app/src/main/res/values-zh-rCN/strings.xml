@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OctoDroid 中文版</string>
+    <string name="app_name">OctoDroid</string>
 
     <!-- Common -->
     <string name="introduction">要充分使用本应用的全部功能，请点击下方按钮登录 GitHub。\n\n您也可以通过左侧滑出菜单浏览 GitHub 的部分内容。</string>
@@ -675,6 +675,36 @@
     <string name="drag_to_reorder">拖动排序</string>
     <string name="reset_to_default">恢复默认</string>
     <string name="drawer_customize_summary">调整导航栏项目的顺序和显示</string>
+
+    <!-- Translation -->
+    <string name="translation_settings">翻译</string>
+    <string name="translation_settings_summary">配置自述文件翻译服务</string>
+    <string name="translation_provider">翻译服务商</string>
+    <string name="translation_api_key">API 密钥</string>
+    <string name="translation_api_key_summary">服务商需要的 API 密钥</string>
+    <string name="translation_key_summary_youdao">有道智云控制台 → 应用总览 → 应用 ID</string>
+    <string name="translation_key_summary_baidu">百度翻译开放平台 → 管理控制台 → APP ID</string>
+    <string name="translation_key_summary_deepl">deepl.com 申请的 Auth Key（免费版以 :fx 结尾，自动走免费接口）</string>
+    <string name="translation_baidu_appid">APP ID</string>
+    <string name="translation_baidu_secret">密钥</string>
+    <string name="translation_secret_summary_baidu">百度翻译开放平台应用的密钥</string>
+    <string name="translation_deepl_key">API Key</string>
+    <string name="translation_api_secret">API 密钥 Secret</string>
+    <string name="translation_api_secret_summary">有道应用的 appSecret</string>
+    <string name="translation_youdao_appkey">应用 AppKey</string>
+    <string name="translate">翻译</string>
+    <string name="show_original">原文</string>
+    <string name="translating">翻译中…</string>
+    <string name="translate_failed">翻译失败，请检查网络和翻译设置</string>
+    <string name="translate_no_provider">未配置翻译服务</string>
+    <string name="translate_cancelled">已取消翻译</string>
+    <string name="translation_test">测试翻译</string>
+    <string name="translation_test_summary">用当前服务商配置翻译一句示例文本</string>
+    <string name="translate_choose_provider">选择翻译服务</string>
+    <string name="password_toggle">显示/隐藏密码</string>
+    <string name="translation_testing">测试中…</string>
+    <string name="translation_test_ok">测试成功：%1$s</string>
+    <string name="translation_test_fail">测试失败：%1$s</string>
 
     <!-- Recent history -->
     <string name="recent_history">最近浏览</string>

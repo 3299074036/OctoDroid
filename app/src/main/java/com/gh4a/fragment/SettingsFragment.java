@@ -28,6 +28,7 @@ import android.widget.TextView;
 
 import com.gh4a.Gh4Application;
 import com.gh4a.R;
+import com.gh4a.activities.TranslationSettingsActivity;
 import com.gh4a.activities.IssueListActivity;
 import com.gh4a.activities.RepositoryActivity;
 import com.gh4a.worker.NotificationsWorker;
@@ -54,6 +55,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     public static final String KEY_NOTIFICATION_INTERVAL = "notification_interval";
     private static final String KEY_ABOUT = "about";
     private static final String KEY_CUSTOMIZE_DRAWER = "customize_drawer";
+    private static final String KEY_TRANSLATION_SETTINGS = "translation_settings";
     private static final String KEY_OPEN_SOURCE_COMPONENTS = "open_source_components";
 
     private OnStateChangeListener mListener;
@@ -101,6 +103,11 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
 
         Preference customizeDrawerPref = findPreference(KEY_CUSTOMIZE_DRAWER);
         customizeDrawerPref.setOnPreferenceClickListener(this);
+
+        Preference translationSettingsPref = findPreference(KEY_TRANSLATION_SETTINGS);
+        if (translationSettingsPref != null) {
+            translationSettingsPref.setOnPreferenceClickListener(this);
+        }
 
         mNotificationsPref = findPreference(KEY_NOTIFICATIONS);
         mNotificationsPref.setOnPreferenceChangeListener(this);
@@ -175,6 +182,9 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             return true;
         } else if (KEY_CUSTOMIZE_DRAWER.equals(pref.getKey())) {
             startActivity(com.gh4a.activities.DrawerEditActivity.makeIntent(getActivity()));
+            return true;
+        } else if (KEY_TRANSLATION_SETTINGS.equals(pref.getKey())) {
+            TranslationSettingsActivity.start(getActivity());
             return true;
         }
         return false;

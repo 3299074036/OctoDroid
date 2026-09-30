@@ -393,6 +393,21 @@ public class HttpImageGetter {
         findOrCreateInfo(id).bind(view, html);
     }
 
+    /**
+     * Re-bind a view with new HTML, discarding any previously cached
+     * content for the id. Needed when the HTML for an id changes
+     * (e.g. showing translated README instead of the original):
+     * plain {@link #bind} would keep applying the first-bound HTML.
+     */
+    public void rebind(final Context context, final TextView view,
+            final String html, final Object id) {
+        unbind(view);
+        ObjectInfo info = findOrCreateInfo(id);
+        info.clearHtmlCache();
+        info.encode(context, html);
+        info.bind(view, html);
+    }
+
     private void unbind(final TextView view) {
         for (ObjectInfo info : mObjectInfos.values()) {
             info.unbind(view);

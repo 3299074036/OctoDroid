@@ -676,6 +676,36 @@
     <string name="reset_to_default">Reset to default</string>
     <string name="drawer_customize_summary">Reorder and show/hide drawer items</string>
 
+    <!-- Translation -->
+    <string name="translation_settings">Translation</string>
+    <string name="translation_settings_summary">Configure README translation provider</string>
+    <string name="translation_provider">Translation provider</string>
+    <string name="translation_api_key">API key</string>
+    <string name="translation_api_key_summary">API key required by the provider</string>
+    <string name="translation_key_summary_youdao">From 有道智云 console → app overview → app ID</string>
+    <string name="translation_key_summary_baidu">From 百度翻译开放平台 console → APP ID</string>
+    <string name="translation_key_summary_deepl">Auth Key from deepl.com (free keys end with :fx and use the free endpoint automatically)</string>
+    <string name="translation_baidu_appid">APP ID</string>
+    <string name="translation_baidu_secret">Secret key</string>
+    <string name="translation_secret_summary_baidu">Secret key of your Baidu Translate app</string>
+    <string name="translation_deepl_key">API Key</string>
+    <string name="translation_api_secret">API secret</string>
+    <string name="translation_api_secret_summary">Youdao appSecret</string>
+    <string name="translation_youdao_appkey">AppKey</string>
+    <string name="translate">Translate</string>
+    <string name="show_original">Original</string>
+    <string name="translating">Translating…</string>
+    <string name="translate_failed">Translation failed, check network and settings</string>
+    <string name="translate_no_provider">Translation provider not configured</string>
+    <string name="translate_cancelled">Translation cancelled</string>
+    <string name="translation_test">Test translation</string>
+    <string name="translation_test_summary">Translate a short sample with the current provider settings</string>
+    <string name="translate_choose_provider">Choose translation provider</string>
+    <string name="password_toggle">Show/hide password</string>
+    <string name="translation_testing">Testing…</string>
+    <string name="translation_test_ok">Test succeeded: %1$s</string>
+    <string name="translation_test_fail">Test failed: %1$s</string>
+
     <!-- Recent history -->
     <string name="recent_history">Recent</string>
     <string name="no_recent_history">No recent history yet</string>

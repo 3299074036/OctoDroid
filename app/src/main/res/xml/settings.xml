@@ -88,6 +88,12 @@
 
     <Preference
         app:iconSpaceReserved="false"
+        android:key="translation_settings"
+        android:title="@string/translation_settings"
+        android:summary="@string/translation_settings_summary" />
+
+    <Preference
+        app:iconSpaceReserved="false"
         android:key="about"
         android:title="@string/about" />
 

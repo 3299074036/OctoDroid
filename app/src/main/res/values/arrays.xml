@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string-array name="translation_provider_items">
+        <item>Google</item>
+        <item>有道</item>
+        <item>百度翻译</item>
+        <item>DeepL</item>
+    </string-array>
+    <string-array name="translation_provider_values" translatable="false">
+        <item>google</item>
+        <item>youdao</item>
+        <item>baidu</item>
+        <item>deepl</item>
+    </string-array>
     <string-array name="accent_color_items">
         <item>@string/accent_green</item>
         <item>@string/accent_blue</item>

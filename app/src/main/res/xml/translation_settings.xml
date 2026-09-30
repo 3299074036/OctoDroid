@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <ListPreference
+        app:iconSpaceReserved="false"
+        android:defaultValue="google"
+        android:entries="@array/translation_provider_items"
+        android:entryValues="@array/translation_provider_values"
+        android:key="translation_provider"
+        android:summary="%s"
+        android:title="@string/translation_provider" />
+
+    <EditTextPreference
+        app:iconSpaceReserved="false"
+        android:dialogTitle="@string/translation_api_key"
+        android:key="translation_api_key"
+        android:summary="@string/translation_api_key_summary"
+        android:title="@string/translation_api_key" />
+
+    <com.gh4a.fragment.PasswordEditTextPreference
+        app:iconSpaceReserved="false"
+        android:dialogTitle="@string/translation_api_secret"
+        android:key="translation_api_secret"
+        android:summary="@string/translation_api_secret_summary"
+        android:title="@string/translation_api_secret" />
+
+    <Preference
+        app:iconSpaceReserved="false"
+        android:key="translation_test"
+        android:summary="@string/translation_test_summary"
+        android:title="@string/translation_test" />
+
+</PreferenceScreen>

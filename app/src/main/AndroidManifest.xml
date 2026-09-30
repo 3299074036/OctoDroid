@@ -150,6 +150,10 @@
             android:title="@string/settings" />
 
         <activity
+            android:name=".activities.TranslationSettingsActivity"
+            android:title="@string/translation_settings" />
+
+        <activity
             android:name=".activities.DrawerEditActivity"
             android:title="@string/customize_drawer" />
 
