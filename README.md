@@ -1,88 +1,82 @@
-<img alt="Octodroid" align="right" src="https://raw.githubusercontent.com/slapperwan/gh4a/master/app/src/main/res/drawable-xxhdpi/octodroid.png">
+<img alt="OctoDroid" align="right" src="https://raw.githubusercontent.com/3299074036/OctoDroid/master/app/src/main/res/drawable-xxhdpi/octodroid.png">
 
 OctoDroid
 =========
-This application provides access to [GitHub](https://github.com/) and lets you stay connected with your network
 
-Download
---------
-[<img src="https://f-droid.org/badge/get-it-on.png" alt="Get it on F-Droid" height="80px">](https://f-droid.org/packages/com.gh4a/)
+OctoDroid 是一款开源的 GitHub Android 客户端，让你随时随地刷 GitHub、看代码、管 Issue。
+本仓库是基于 [slapperwan/gh4a](https://github.com/slapperwan/gh4a) 的中文定制版：全量中文汉化，并加入了多项实用功能。
 
-Main features
--------------
+下载
+----
 
-### Repository
-* List repositories
-* Watch/unwatch repository
-* View branches/tags
-* View pull requests
-* View contributors
-* View watchers/networks
-* View issues
+前往 [Releases](https://github.com/3299074036/OctoDroid/releases) 下载最新 APK。
 
-### User
-* View basic information
-* Activity feeds
-* Follow/unfollow user
-* View public/watched repositories
-* View followers/following
-* View organizations (if type is user)
-* View members (if type is organization)
+主要功能
+---------
 
-### Issue
-* List issues
-* Filter by label, assignee or milestone
-* Create/edit/close/reopen issue
-* Comment on issue
-* Manage labels
-* Manage milestones
+### 仓库
+* 浏览仓库、分支、标签
+* 关注 / 取消关注仓库
+* 查看 Pull Request、贡献者、Issue
+* 私有仓库 ZIP 下载、Release 页面源码包下载
+* **README 一键翻译**：支持 Google / 有道 / 百度 / DeepL，跳过代码块、无感并行翻译、可切回原文
 
-### Commit
-* View commit (shows files changed/added/deleted)
-* Diff viewer with colorized HTML
-* View commit history on each file
+### 用户
+* 查看资料、动态时间线
+* 关注 / 取关、粉丝 / 正在关注
+* 查看公开仓库、Star、组织
 
-### Tree/File browser
-* Browse source code
-* View code with syntax highlighting
+### Issue / PR
+* 列表、筛选（标签、经办人、里程碑）
+* 创建 / 编辑 / 关闭 / 重开 Issue，评论
+* Issue 模板自动加载
 
-### Gist
-* List public gists
-* View gist content
+### 提交与代码
+* 提交详情、文件 Diff（彩色高亮）
+* 代码浏览、语法高亮
+* **内置图片查看器**：手势缩放、旋转
 
-### Explore Github
-* Public timeline
-* Trending repos (today, week, month, forever)
-* GitHub blog
+### 探索
+* 公开时间线、趋势仓库（日 / 周 / 月 / 总榜）
+* **Topic 发现**：搜任意 topic，12 个热门标签
+* GitHub 博客
 
-*..and many more*
+### 本版新增
+* **导航栏自定义**：拖拽排序、显示 / 隐藏任意入口
+* **Star 更新**：一页看完所有 Star 仓库的最新 Release
+* **最近浏览**：看过的仓库 / Issue / PR 本地记录
+* **Star 分组**：给 Star 仓库建分组管理
+* 深色模式开关、语言选择（中文 / 英文 / 跟随系统）
+* 搜索排序、全局字号、通知逐页加载
 
-How to Build Octodroid
-----------------------
-- Ensure Android SDK platform and build-tools are installed
-- Register an application for your OctoDroid usage under your [GitHub settings](https://github.com/settings/developers)
-  * naming is up to you
-  * callback URL must be gh4a://oauth
-- Create a client.properties file with the following content:
+如何构建
+---------
+
+- 安装 Android SDK platform 与 build-tools
+- 在 [GitHub 开发者设置](https://github.com/settings/developers) 为自己注册一个 OAuth 应用
+  * 名字随意
+  * 回调 URL 必须填 `gh4a://oauth`
+- 在仓库根目录创建 `client.properties`，内容如下（该文件已加入 `.gitignore`，不会被提交）：
 ```
-ClientId="<CLIENT ID DISPLAYED IN APPLICATION SETTINGS>"
-ClientSecret="<CLIENT SECRET DISPLAYED IN APPLICATION SETTINGS>"
+ClientId="<应用设置里显示的 CLIENT ID>"
+ClientSecret="<应用设置里显示的 CLIENT SECRET>"
 ```
 
-- Build using Gradle
+- 用 Gradle 构建：
 
 ```bash
 ./gradlew assembleDebug
 ```
 
-- To get a full list of available tasks
+- 查看全部可用任务：
 
 ```bash
 ./gradlew tasks
 ```
 
-Open Source Libraries
----------------------
+用到的开源库
+-------------
+
 * [android-gif-drawable](https://github.com/koral--/android-gif-drawable)
 * [AndroidSVG](https://github.com/BigBadaboom/androidsvg)
 * [AndroidX](https://github.com/androidx/androidx)
@@ -99,12 +93,10 @@ Open Source Libraries
 * [RxLoader](https://github.com/maniac103/RxLoader)
 * [SmoothProgressBar](https://github.com/castorflex/SmoothProgressBar)
 
-Contributions
--------------
-* [kageiit](https://github.com/kageiit) - Improvements and bug fixes
-* [maniac103](https://github.com/maniac103) - Improvements, bug fixes and new features
-* [ARoiD](https://github.com/ARoiD) - Testing
-* [extremis (Steven Mautone)](https://github.com/extremis) - OctoDroid name and the new icon
-* [zquestz](https://github.com/zquestz) - Thanks for the application icon
-* [cketti](https://github.com/cketti)
-* [Tunous](https://github.com/Tunous) - Improvements, bug fixes and new features
+致谢
+----
+
+* 上游项目 [slapperwan/gh4a](https://github.com/slapperwan/gh4a) 及所有贡献者
+* [maniac103](https://github.com/maniac103) - 功能改进与修 bug
+* [Tunous](https://github.com/Tunous) - 功能改进与修 bug
+* [zquestz](https://github.com/zquestz) - 应用图标
