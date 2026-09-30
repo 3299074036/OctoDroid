@@ -109,11 +109,11 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
                 renderItems(cached);
                 setContentShown(true);
                 updateEmptyState();
-                setStage("[4.6.30] 显示缓存数据，后台刷新中…");
+                setStage("显示缓存数据，后台刷新中…");
             } else {
                 setContentShown(true);
                 updateEmptyState();
-                setStage("[4.6.30] 正在加载…");
+                setStage("正在加载…");
             }
             startDirectLoad(false);
         }
@@ -161,7 +161,7 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
             }
             setContentShown(true);
             updateEmptyState();
-            setStage("[4.6.30] 正在加载…");
+            setStage("正在加载…");
         }
         mDirectLoad = RxUtils.doInBackground(RadarGraphQL.fetch(mLogin))
                 // A single request now; 30s is plenty, then surface the error.
@@ -220,7 +220,7 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
         if (mAdapter.getItemCount() > 0 || getContext() == null) {
             return;
         }
-        String msg = "[4.6.30] Star 的仓库最近没有新版本";
+        String msg = "Star 的仓库最近没有新版本";
         Toast.makeText(getContext(), msg, Toast.LENGTH_LONG).show();
         setStage(msg);
     }
@@ -248,7 +248,7 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
             }
             // Stamp the error on the empty view too: a Toast can be missed,
             // this stays until the next load.
-            setStage("[4.6.30] 加载失败 " + msg);
+            setStage("加载失败 " + msg);
             handleLoadFailure(error);
         }
     }

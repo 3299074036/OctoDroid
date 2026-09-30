@@ -78,10 +78,10 @@
             android:title="@string/search"
             android:icon="@drawable/icon_search"/>
     </group>
-    <!-- 底部固定区 -->
+    <!-- 设置和深色模式开关（菜单形式） -->
     <group android:id="@+id/settings">
         <item
-            android:id="@id/settings"
+            android:id="@+id/settings"
             android:title="@string/settings"
             android:icon="@drawable/icon_settings"/>
         <item

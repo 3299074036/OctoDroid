@@ -11,7 +11,9 @@ import android.os.Bundle;
 import androidx.annotation.NonNull;
 import androidx.fragment.app.DialogFragment;
 import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.appcompat.app.AppCompatDialog;
+import androidx.core.os.LocaleListCompat;
 import androidx.preference.Preference;
 import androidx.preference.ListPreference;
 import androidx.preference.PreferenceFragmentCompat;
@@ -41,6 +43,8 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     public static final String PREF_NAME = "Gh4a-pref";
 
     public static final String KEY_THEME = "theme";
+    public static final String KEY_ACCENT_COLOR = "accent_color";
+    public static final String KEY_LANGUAGE = "language";
     public static final String KEY_START_PAGE = "start_page";
     public static final String KEY_TEXT_SIZE = "webview_initial_zoom";
     public static final String KEY_FONT_SCALE = "font_scale";
@@ -49,6 +53,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     public static final String KEY_NOTIFICATIONS = "notifications";
     public static final String KEY_NOTIFICATION_INTERVAL = "notification_interval";
     private static final String KEY_ABOUT = "about";
+    private static final String KEY_CUSTOMIZE_DRAWER = "customize_drawer";
     private static final String KEY_OPEN_SOURCE_COMPONENTS = "open_source_components";
 
     private OnStateChangeListener mListener;
@@ -74,7 +79,15 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         addPreferencesFromResource(R.xml.settings);
 
         mThemePref = findPreference(KEY_THEME);
-        mThemePref.setOnPreferenceChangeListener(this);
+        if (mThemePref != null) {
+            mThemePref.setOnPreferenceChangeListener(this);
+        }
+
+        Preference accentColorPref = findPreference(KEY_ACCENT_COLOR);
+        accentColorPref.setOnPreferenceChangeListener(this);
+
+        Preference languagePref = findPreference(KEY_LANGUAGE);
+        languagePref.setOnPreferenceChangeListener(this);
 
         mFontScalePref = findPreference(KEY_FONT_SCALE);
         mFontScalePref.setOnPreferenceChangeListener(this);
@@ -86,6 +99,9 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         mOpenSourcePref = findPreference(KEY_OPEN_SOURCE_COMPONENTS);
         mOpenSourcePref.setOnPreferenceClickListener(this);
 
+        Preference customizeDrawerPref = findPreference(KEY_CUSTOMIZE_DRAWER);
+        customizeDrawerPref.setOnPreferenceClickListener(this);
+
         mNotificationsPref = findPreference(KEY_NOTIFICATIONS);
         mNotificationsPref.setOnPreferenceChangeListener(this);
 
@@ -93,10 +109,27 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         mNotificationIntervalPref.setOnPreferenceChangeListener(this);
     }
 
+    public static void applyLanguage(String languageTag) {
+        LocaleListCompat locales = languageTag == null || languageTag.isEmpty()
+                ? LocaleListCompat.create(new java.util.Locale[0])
+                : LocaleListCompat.forLanguageTags(languageTag);
+        AppCompatDelegate.setApplicationLocales(locales);
+    }
+
     @Override
     public boolean onPreferenceChange(Preference pref, Object newValue) {
         if (pref == mThemePref) {
             mListener.onThemeChanged();
+            return true;
+        }
+        if (KEY_ACCENT_COLOR.equals(pref.getKey())) {
+            // Accent color needs a full restart like theme change
+            mListener.onThemeChanged();
+            return true;
+        }
+        if (KEY_LANGUAGE.equals(pref.getKey())) {
+            applyLanguage((String) newValue);
+            mListener.onThemeChanged(); // restart stack to apply
             return true;
         }
         if (pref == mFontScalePref) {
@@ -132,14 +165,16 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
 
     @Override
     public boolean onPreferenceClick(Preference pref) {
-        if (pref == mAboutPref) {
-            boolean loggedIn = Gh4Application.get().isAuthorized();
+        if (pref == mAboutPref) {            boolean loggedIn = Gh4Application.get().isAuthorized();
             AboutDialogFragment.newInstance(getAppName(), loggedIn)
                     .show(getChildFragmentManager(), "about");
             return true;
         } else if (pref == mOpenSourcePref) {
             new OpenSourceComponentListDialogFragment()
                     .show(getChildFragmentManager(), "opensource");
+            return true;
+        } else if (KEY_CUSTOMIZE_DRAWER.equals(pref.getKey())) {
+            startActivity(com.gh4a.activities.DrawerEditActivity.makeIntent(getActivity()));
             return true;
         }
         return false;

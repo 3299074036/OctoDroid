@@ -34,10 +34,10 @@
     <string name="my_profile">我的主页</string>
     <string name="user_context">账号</string>
     <string name="add_account">添加账号</string>
-    <string name="my_email">slapperwan@gmail.com</string>
-    <string name="my_web">http://slapperwan.github.com/gh4a</string>
-    <string name="my_username">slapperwan</string>
-    <string name="my_repo">gh4a</string>
+    <string name="my_email">zolayuren@gmail.com</string>
+    <string name="my_web">https://github.com/3299074036/OctoDroid</string>
+    <string name="my_username">3299074036</string>
+    <string name="my_repo">OctoDroid</string>
     <string name="source_code">源代码</string>
     <string name="feedback_text">如果您遇到任何问题或有任何建议，请联系我。非常感谢您的任何反馈。</string>
     <string name="feedback_by_email">通过邮件</string>
@@ -62,7 +62,17 @@
     <string name="closed">已关闭</string>
     <string name="merged">已合并</string>
     <string name="draft">草稿</string>
-    <string name="theme">主题</string>
+    <string name="accent_color">主题颜色</string>
+    <string name="accent_green">绿色</string>
+    <string name="accent_blue">蓝色</string>
+    <string name="accent_red">红色</string>
+    <string name="accent_orange">橙色</string>
+    <string name="accent_purple">紫色</string>
+    <string name="accent_teal">青色</string>
+    <string name="language">语言</string>
+    <string name="language_system_default">系统默认</string>
+    <string name="language_chinese">中文</string>
+    <string name="language_english">英文</string>
     <string name="pub_timeline">公开时间线</string>
     <string name="load_failure_explanation">从 GitHub 加载数据失败。请检查网络连接是否正常，然后重试。</string>
     <string name="load_failure_explanation_dmca">该仓库因法律原因被下架。\n详情请参阅 %1$s。</string>
@@ -121,7 +131,7 @@
     <string name="download_permission_rationale">下载文件需要写入 USB 存储或 SD 卡的权限。</string>
     <string name="load_auth_failure_notice">您的登录凭据已失效，请重新登录。</string>
     <string name="unset">未设置</string>
-    <string name="copyright_notice">\u00a9 2014 Azwan Adli, Danny Baumann</string>
+    <string name="copyright_notice">\u00a9 2026 7Z1H</string>
     <string name="actions">操作</string>
     <string name="created">创建的</string>
     <string name="assigned">指派给我的</string>
@@ -659,6 +669,12 @@
 
     <!-- Theme toggle -->
     <string name="theme_toggle">深色模式</string>
+
+    <!-- Drawer customization -->
+    <string name="customize_drawer">自定义导航栏</string>
+    <string name="drag_to_reorder">拖动排序</string>
+    <string name="reset_to_default">恢复默认</string>
+    <string name="drawer_customize_summary">调整导航栏项目的顺序和显示</string>
 
     <!-- Recent history -->
     <string name="recent_history">最近浏览</string>

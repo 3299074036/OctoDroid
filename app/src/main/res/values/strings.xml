@@ -34,10 +34,10 @@
     <string name="my_profile">My profile</string>
     <string name="user_context">Account</string>
     <string name="add_account">Add account</string>
-    <string name="my_email">slapperwan@gmail.com</string>
-    <string name="my_web">http://slapperwan.github.com/gh4a</string>
-    <string name="my_username">slapperwan</string>
-    <string name="my_repo">gh4a</string>
+    <string name="my_email">zolayuren@gmail.com</string>
+    <string name="my_web">https://github.com/3299074036/OctoDroid</string>
+    <string name="my_username">3299074036</string>
+    <string name="my_repo">OctoDroid</string>
     <string name="source_code">Source Code</string>
     <string name="feedback_text">If you have any issues or suggestions, please contact me.  Any kind of feedback is greatly appreciated.</string>
     <string name="feedback_by_email">By Email</string>
@@ -62,7 +62,17 @@
     <string name="closed">Closed</string>
     <string name="merged">Merged</string>
     <string name="draft">Draft</string>
-    <string name="theme">Theme</string>
+    <string name="accent_color">Accent color</string>
+    <string name="accent_green">Green</string>
+    <string name="accent_blue">Blue</string>
+    <string name="accent_red">Red</string>
+    <string name="accent_orange">Orange</string>
+    <string name="accent_purple">Purple</string>
+    <string name="accent_teal">Teal</string>
+    <string name="language">Language</string>
+    <string name="language_system_default">System default</string>
+    <string name="language_chinese">Chinese</string>
+    <string name="language_english">English</string>
     <string name="pub_timeline">Public Timeline</string>
     <string name="load_failure_explanation">Loading the data from GitHub failed. Please verify you have a working network connection and try again.</string>
     <string name="load_failure_explanation_dmca">This repository was taken down for legal reasons.\nPlease see %1$s for details.</string>
@@ -121,7 +131,7 @@
     <string name="download_permission_rationale">Permission to write to USB storage or SD card is required in order to download files.</string>
     <string name="load_auth_failure_notice">Your authentication credentials aren\'t valid anymore, please log in again.</string>
     <string name="unset">Unset</string>
-    <string name="copyright_notice">\u00a9 2014 Azwan Adli, Danny Baumann</string>
+    <string name="copyright_notice">\u00a9 2026 7Z1H</string>
     <string name="actions">Actions</string>
     <string name="created">Created</string>
     <string name="assigned">Assigned</string>
@@ -659,6 +669,12 @@
 
     <!-- Theme toggle -->
     <string name="theme_toggle">Dark mode</string>
+
+    <!-- Drawer customization -->
+    <string name="customize_drawer">Customize navigation drawer</string>
+    <string name="drag_to_reorder">Drag to reorder</string>
+    <string name="reset_to_default">Reset to default</string>
+    <string name="drawer_customize_summary">Reorder and show/hide drawer items</string>
 
     <!-- Recent history -->
     <string name="recent_history">Recent</string>

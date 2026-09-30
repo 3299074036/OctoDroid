@@ -72,6 +72,8 @@ public class Gh4Application extends Application implements
         installRxErrorHandler();
 
         SharedPreferences prefs = getPrefs();
+        // Apply saved language before anything else
+        SettingsFragment.applyLanguage(prefs.getString(SettingsFragment.KEY_LANGUAGE, ""));
 
         int prefsVersion = prefs.getInt(KEY_VERSION, 0);
         if (prefsVersion < 4) {

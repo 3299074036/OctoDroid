@@ -44,6 +44,7 @@ import com.gh4a.fragment.SettingsFragment;
 import com.gh4a.utils.ActivityResultHelpers;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.AvatarHandler;
+import com.gh4a.utils.DrawerManager;
 import com.gh4a.utils.UiUtils;
 import com.meisolsson.githubsdk.model.User;
 import com.meisolsson.githubsdk.service.activity.NotificationService;
@@ -246,6 +247,19 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
     protected int getInitialLeftDrawerSelection(Menu menu) {
         mLeftDrawerMenu = menu;
 
+        // Apply user customization: reorder/hide drawer items
+        applyDrawerCustomization(menu);
+
+        // If the selected page was hidden by the user, fall back to first visible
+        if (menu.findItem(mSelectedFactoryId) == null) {
+            java.util.List<DrawerManager.DrawerItemDef> visible =
+                    DrawerManager.getVisibleOrderedItems(this);
+            if (!visible.isEmpty()) {
+                mSelectedFactoryId = visible.get(0).menuId;
+                mFactory = getFactoryForItem(mSelectedFactoryId);
+            }
+        }
+
         mNotificationsMenuItem = menu.findItem(R.id.notifications);
         if (mNotificationsMenuItem != null) {
             View actionView = mNotificationsMenuItem.getActionView();
@@ -254,6 +268,31 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
         }
 
         return mSelectedFactoryId;
+    }
+
+    /**
+     * Rebuilds the customizable drawer items according to the user's order
+     * and visibility settings. Items are placed in a single flat group;
+     * the bottom fixed area (settings, theme) is left untouched.
+     */
+    private void applyDrawerCustomization(Menu menu) {
+        // Remove all customizable items defined in XML
+        for (DrawerManager.DrawerItemDef def : DrawerManager.getDefaultItems()) {
+            menu.removeItem(def.menuId);
+        }
+        // Re-add visible items in user order
+        java.util.List<DrawerManager.DrawerItemDef> visible =
+                DrawerManager.getVisibleOrderedItems(this);
+        int order = 0;
+        for (DrawerManager.DrawerItemDef def : visible) {
+            MenuItem item = menu.add(R.id.my_items, def.menuId, order++, def.titleRes);
+            item.setIcon(def.iconRes);
+            if (def.menuId == R.id.notifications) {
+                // Re-attach the unread indicator action view
+                item.setActionView(R.layout.notifications_indicator);
+            }
+        }
+        menu.setGroupCheckable(R.id.my_items, true, true);
     }
 
     @Override

@@ -1,12 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string-array name="theme_items">
-        <item>@string/theme_light</item>
-        <item>@string/theme_dark</item>
+    <string-array name="accent_color_items">
+        <item>@string/accent_green</item>
+        <item>@string/accent_blue</item>
+        <item>@string/accent_red</item>
+        <item>@string/accent_orange</item>
+        <item>@string/accent_purple</item>
+        <item>@string/accent_teal</item>
     </string-array>
-    <string-array name="theme_values" translatable="false">
-        <item>1</item>
-        <item>0</item>
+    <string-array name="accent_color_values" translatable="false">
+        <item>green</item>
+        <item>blue</item>
+        <item>red</item>
+        <item>orange</item>
+        <item>purple</item>
+        <item>teal</item>
+    </string-array>
+    <string-array name="language_items">
+        <item>@string/language_system_default</item>
+        <item>@string/language_chinese</item>
+        <item>@string/language_english</item>
+    </string-array>
+    <string-array name="language_values" translatable="false">
+        <item></item>
+        <item>zh</item>
+        <item>en</item>
     </string-array>
     <string-array name="start_page_items" translatable="false">
         <item>@string/start_page_last_selected</item>

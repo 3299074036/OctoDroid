@@ -149,6 +149,10 @@
             android:name=".activities.SettingsActivity"
             android:title="@string/settings" />
 
+        <activity
+            android:name=".activities.DrawerEditActivity"
+            android:title="@string/customize_drawer" />
+
         <activity android:name=".resolver.BrowseFilter"
             android:excludeFromRecents="true"
             android:taskAffinity=""

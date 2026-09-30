@@ -4,6 +4,18 @@
     <color name="primary_dark">#5aa03d</color>
     <color name="accent">@color/primary</color>
 
+    <!-- Accent color options -->
+    <color name="accent_blue">#2196F3</color>
+    <color name="accent_blue_dark">#1976D2</color>
+    <color name="accent_red">#F44336</color>
+    <color name="accent_red_dark">#D32F2F</color>
+    <color name="accent_orange">#FF9800</color>
+    <color name="accent_orange_dark">#F57C00</color>
+    <color name="accent_purple">#9C27B0</color>
+    <color name="accent_purple_dark">#7B1FA2</color>
+    <color name="accent_teal">#009688</color>
+    <color name="accent_teal_dark">#00796B</color>
+
     <color name="link_text">@color/primary_dark</color>
 
     <color name="label_fg_dark">#ff000000</color>

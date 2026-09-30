@@ -186,6 +186,7 @@ public abstract class BaseActivity extends AppCompatActivity implements
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        applyAccentTheme();
         Bundle extras = getIntent().getExtras();
         if (extras != null) {
             onInitExtras(extras);
@@ -456,6 +457,22 @@ public abstract class BaseActivity extends AppCompatActivity implements
 
     protected SharedPreferences getPrefs() {
         return getSharedPreferences(SettingsFragment.PREF_NAME, MODE_PRIVATE);
+    }
+
+    private void applyAccentTheme() {
+        // Called before super.onCreate(), so don't use getPrefs() (Activity not yet created).
+        // Use application context which is safe at this point.
+        String accent = getApplicationContext()
+                .getSharedPreferences(SettingsFragment.PREF_NAME, MODE_PRIVATE)
+                .getString(SettingsFragment.KEY_ACCENT_COLOR, "green");
+        switch (accent) {
+            case "blue": setTheme(R.style.AppTheme_Blue); break;
+            case "red": setTheme(R.style.AppTheme_Red); break;
+            case "orange": setTheme(R.style.AppTheme_Orange); break;
+            case "purple": setTheme(R.style.AppTheme_Purple); break;
+            case "teal": setTheme(R.style.AppTheme_Teal); break;
+            default: break; // green is the default AppTheme
+        }
     }
 
     public void addAppBarOffsetListener(AppBarLayout.OnOffsetChangedListener l) {

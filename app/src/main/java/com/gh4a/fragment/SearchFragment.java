@@ -33,6 +33,7 @@ import android.widget.SpinnerAdapter;
 import android.widget.TextView;
 
 import com.gh4a.R;
+import com.gh4a.Gh4Application;
 import com.gh4a.ServiceFactory;
 import com.gh4a.activities.FileViewerActivity;
 import com.gh4a.activities.RepositoryActivity;
@@ -49,6 +50,7 @@ import com.meisolsson.githubsdk.model.SearchCode;
 import com.meisolsson.githubsdk.model.TextMatch;
 import com.meisolsson.githubsdk.model.User;
 import com.meisolsson.githubsdk.service.search.SearchService;
+import com.meisolsson.githubsdk.service.repositories.RepositoryService;
 
 import io.reactivex.Single;
 import retrofit2.Response;
@@ -218,6 +220,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     @Override
     protected Single<Response<Page<Object>>> loadPage(int page, boolean bypassCache) {
         if (TextUtils.isEmpty(mQuery)) {
+            // Show user's own repositories by default when searching repos with empty query
+            if (mSelectedSearchType == SEARCH_TYPE_REPO) {
+                return makeDefaultRepoSingle(page, bypassCache);
+            }
             return Single.just(Response.success(new ApiHelpers.DummyPage<>()));
         }
         switch (mSelectedSearchType) {
@@ -226,6 +232,15 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             case SEARCH_TYPE_CODE: return makeCodeSearchSingle(page, bypassCache);
         }
         throw new IllegalStateException("Unexpected search type " + mSelectedSearchType);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Single<Response<Page<Object>>> makeDefaultRepoSingle(int page, boolean bypassCache) {
+        RepositoryService service = ServiceFactory.get(RepositoryService.class, bypassCache);
+        String login = Gh4Application.get().getAuthLogin();
+        // Page<Repository> is safely readable as Page<Object>
+        return (Single<Response<Page<Object>>>) (Single<?>)
+                service.getUserRepositories(login, null, page);
     }
 
     @Override
