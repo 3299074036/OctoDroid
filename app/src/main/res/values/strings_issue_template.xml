@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #1676: explicit "blank issue" entry in the issue template selection dialog -->
+    <string name="issue_template_blank">Blank issue</string>
+</resources>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #1678: sort options for global search -->
+    <string name="search_sort_title">排序</string>
+    <string name="search_sort_best_match">最佳匹配</string>
+
+    <string name="search_sort_repo_stars_desc">Star 数最多</string>
+    <string name="search_sort_repo_stars_asc">Star 数最少</string>
+    <string name="search_sort_repo_forks_desc">Fork 数最多</string>
+    <string name="search_sort_repo_forks_asc">Fork 数最少</string>
+    <string name="search_sort_repo_updated_desc">最近更新</string>
+    <string name="search_sort_repo_updated_asc">最久未更新</string>
+
+    <string name="search_sort_user_followers_desc">粉丝数最多</string>
+    <string name="search_sort_user_followers_asc">粉丝数最少</string>
+    <string name="search_sort_user_repositories_desc">仓库数最多</string>
+    <string name="search_sort_user_repositories_asc">仓库数最少</string>
+    <string name="search_sort_user_joined_desc">最近加入</string>
+    <string name="search_sort_user_joined_asc">最早加入</string>
+
+    <string name="search_sort_code_indexed_desc">最近收录</string>
+    <string name="search_sort_code_indexed_asc">最早收录</string>
+</resources>

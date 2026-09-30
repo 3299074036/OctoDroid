@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/type"
+        android:title="@string/search_type"
+        android:orderInCategory="10"
+        app:showAsAction="always"
+        app:actionViewClass="android.widget.Spinner" />
+    <!-- Sort comes before the SearchView in menu order on purpose: the expanded
+         SearchView consumes all remaining toolbar width during measurement, so any
+         item placed after it would be measured with 0 width and become invisible
+         (without even falling into the overflow menu, since it is marked always). -->
+    <item
+        android:id="@+id/sort"
+        android:title="@string/search_sort_title"
+        android:icon="@drawable/menu_sort_order"
+        android:orderInCategory="20"
+        app:showAsAction="always">
+        <menu />
+    </item>
+    <item
+        android:id="@+id/search"
+        android:title="@string/search"
+        android:icon="@drawable/menu_search"
+        android:orderInCategory="30"
+        app:showAsAction="always"
+        app:actionViewClass="androidx.appcompat.widget.SearchView" />
+
+</menu>

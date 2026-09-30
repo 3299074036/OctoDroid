@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <group android:checkableBehavior="single">
+        <item
+            android:id="@+id/search_sort_best_match"
+            android:title="@string/search_sort_best_match" />
+        <item
+            android:id="@+id/search_sort_code_indexed_desc"
+            android:title="@string/search_sort_code_indexed_desc" />
+        <item
+            android:id="@+id/search_sort_code_indexed_asc"
+            android:title="@string/search_sort_code_indexed_asc" />
+    </group>
+</menu>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="image_viewer_retry">Retry</string>
+    <string name="image_viewer_error_format">Failed to load image: %1$s</string>
+    <string name="image_viewer_error_unknown">Unknown error</string>
+    <string name="image_viewer_error_http">HTTP %1$d</string>
+    <string name="image_viewer_error_empty">Empty response</string>
+    <string name="image_viewer_error_decode">Could not decode image</string>
+    <string name="image_viewer_error_too_large">Image is too large to display</string>
+</resources>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #1678: sort options for global search -->
+    <string name="search_sort_title">Sort</string>
+    <string name="search_sort_best_match">Best match</string>
+
+    <string name="search_sort_repo_stars_desc">Most stars</string>
+    <string name="search_sort_repo_stars_asc">Fewest stars</string>
+    <string name="search_sort_repo_forks_desc">Most forks</string>
+    <string name="search_sort_repo_forks_asc">Fewest forks</string>
+    <string name="search_sort_repo_updated_desc">Most recently updated</string>
+    <string name="search_sort_repo_updated_asc">Least recently updated</string>
+
+    <string name="search_sort_user_followers_desc">Most followers</string>
+    <string name="search_sort_user_followers_asc">Fewest followers</string>
+    <string name="search_sort_user_repositories_desc">Most repositories</string>
+    <string name="search_sort_user_repositories_asc">Fewest repositories</string>
+    <string name="search_sort_user_joined_desc">Recently joined</string>
+    <string name="search_sort_user_joined_asc">Least recently joined</string>
+
+    <string name="search_sort_code_indexed_desc">Recently indexed</string>
+    <string name="search_sort_code_indexed_asc">Least recently indexed</string>
+</resources>

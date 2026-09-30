@@ -1,0 +1,689 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OctoDroid 中文版</string>
+
+    <!-- Common -->
+    <string name="introduction">要充分使用本应用的全部功能，请点击下方按钮登录 GitHub。\n\n您也可以通过左侧滑出菜单浏览 GitHub 的部分内容。</string>
+    <string name="repo_not_found_toast">未找到该仓库</string>
+    <string name="loading_msg">正在加载\u2026</string>
+    <string name="saving_msg">正在保存\u2026</string>
+    <string name="deleting_msg">正在删除\u2026</string>
+    <string name="closing_msg">正在关闭\u2026</string>
+    <string name="opening_msg">正在打开\u2026</string>
+    <string name="merging_msg">正在合并\u2026</string>
+    <string name="reviewing_msg">正在添加审查\u2026</string>
+    <string name="authenticating">正在验证身份\u2026</string>
+    <string name="search">搜索</string>
+    <string name="search_code">搜索代码</string>
+    <string name="logout">退出登录</string>
+    <string name="login">登录</string>
+    <string name="login_oauth">通过 OAuth 登录</string>
+    <string name="login_token">使用访问令牌登录</string>
+    <string name="login_summary_oauth">通过 OAuth 网页流程登录 GitHub。\n由于登录过程在浏览器中完成，且同一时间只能有一个账号处于登录状态，因此在登录新账号之前，请确保已在浏览器中退出 GitHub 登录。\n\n请访问 <a href="https://github.com/logout">GitHub 的退出登录页面</a>，完成退出流程后关闭浏览器窗口，回到本应用继续登录。\n如果您确定当前未登录，也可以直接继续登录流程。</string>
+    <string name="credentials_error_empty">此字段不能为空。</string>
+    <string name="credentials_error_invalid_token">输入的内容看起来不是有效的访问令牌。</string>
+    <string name="credentials_token">访问令牌</string>
+    <string name="try_again">重试</string>
+    <string name="report_issue">报告问题</string>
+    <string name="ok">确定</string>
+    <string name="cancel">取消</string>
+    <string name="settings">设置</string>
+    <string name="about">关于</string>
+    <string name="retry">重试</string>
+    <string name="open_source_components">开源组件</string>
+    <string name="my_profile">我的主页</string>
+    <string name="user_context">账号</string>
+    <string name="add_account">添加账号</string>
+    <string name="my_email">slapperwan@gmail.com</string>
+    <string name="my_web">http://slapperwan.github.com/gh4a</string>
+    <string name="my_username">slapperwan</string>
+    <string name="my_repo">gh4a</string>
+    <string name="source_code">源代码</string>
+    <string name="feedback_text">如果您遇到任何问题或有任何建议，请联系我。非常感谢您的任何反馈。</string>
+    <string name="feedback_by_email">通过邮件</string>
+    <string name="feedback_by_gh4a">通过 OctoDroid</string>
+    <string name="bookmarks">书签</string>
+    <string name="bookmarks_and_stars">书签和星标</string>
+    <string name="other_info">其他信息</string>
+    <string name="view">查看</string>
+    <string name="readme">自述文件</string>
+    <string name="save">保存</string>
+    <string name="delete">删除</string>
+    <string name="reply">回复</string>
+    <string name="reply_selected">回复（已选中）</string>
+    <string name="add_comment">添加评论</string>
+    <string name="add_reaction">添加回应</string>
+    <string name="remove_reaction">移除回应</string>
+    <string name="add_reaction_error">添加回应失败</string>
+    <string name="remove_reaction_error">移除回应失败</string>
+    <string name="edit">编辑</string>
+    <string name="members">成员</string>
+    <string name="open">打开</string>
+    <string name="closed">已关闭</string>
+    <string name="merged">已合并</string>
+    <string name="draft">草稿</string>
+    <string name="theme">主题</string>
+    <string name="pub_timeline">公开时间线</string>
+    <string name="load_failure_explanation">从 GitHub 加载数据失败。请检查网络连接是否正常，然后重试。</string>
+    <string name="load_failure_explanation_dmca">该仓库因法律原因被下架。\n详情请参阅 %1$s。</string>
+    <string name="load_failure_explanation_parsing">解析 GitHub 的响应时出错。您可以使用下方按钮将此问题报告给应用开发者。</string>
+    <string name="load_failure_explanation_with_reason">从 GitHub 加载数据失败。GitHub 返回了以下原因：\n%1$s</string>
+    <string name="snackbar_network_error">%1$s。请检查您的网络连接。</string>
+    <string name="snackbar_application_error">%1$s。您可以复制错误日志，以便在向应用开发者报告问题时提供更多详细信息。</string>
+    <string name="snackbar_github_api_error">%1$s：%2$s</string>
+    <string name="snackbar_copy_error_msg_action">复制错误信息</string>
+    <string name="snackbar_copy_error_log_action">复制错误日志</string>
+    <string name="issue_reported">问题已报告，谢谢！</string>
+    <string name="find_next">查找下一个</string>
+    <string name="find_previous">查找上一个</string>
+    <string name="share">分享</string>
+    <string name="print">打印</string>
+    <string name="downloads">下载</string>
+    <string name="releases">版本发布</string>
+    <string name="open_in_browser">在浏览器中打开</string>
+    <string name="no_browser_found">无法打开链接：您的设备上没有找到浏览器</string>
+    <string name="link_copied">链接已复制</string>
+    <string name="wrap_lines">自动换行</string>
+    <string name="follow_renames">跟随重命名</string>
+    <string name="unknown">未知</string>
+    <string name="history">历史</string>
+    <string name="download">下载</string>
+    <string name="deleted">（已删除）</string>
+    <string name="go_to">前往</string>
+    <string name="forked_from">复刻自 %1$s</string>
+    <string name="menu_user">用户 %1$s</string>
+    <string name="menu_repo">仓库 %1$s</string>
+    <string name="menu_compare">比较 %1$s</string>
+    <string name="menu_commit">提交 %1$s</string>
+    <string name="menu_issue">议题 %1$d</string>
+    <string name="menu_gist">Gist %1$s</string>
+    <string name="menu_file">文件 %1$s</string>
+    <string name="menu_fork">复刻的仓库 %1$s</string>
+    <string name="menu_wiki">在浏览器中打开 Wiki</string>
+    <string name="menu_pull">拉取请求 %1$d</string>
+    <string name="menu_issues">打开的议题</string>
+    <string name="menu_pulls">打开的拉取请求</string>
+    <string name="delete_comment_message">要删除这条评论吗？</string>
+    <string name="saving_comment">正在保存评论\u2026</string>
+    <string name="ellipse" translatable="false">\u2026</string>
+    <string name="view_more">查看更多\u2026</string>
+    <string name="view_video">查看视频</string>
+    <string name="pulls">拉取请求</string>
+    <string name="issue_milestone_hint">里程碑</string>
+    <string name="issue_assignee_hint">指派人</string>
+    <string name="link_not_openable">无法打开链接</string>
+    <string name="download_created">已创建 %1$s</string>
+    <string name="download_failed">下载失败，请检查网络连接或访问权限</string>
+    <string name="download_mobile_warning_title">使用移动网络下载</string>
+    <string name="download_mobile_warning_message">要使用移动网络下载此文件吗？\n您也可以选择在下次连接 Wi-Fi 时再下载。</string>
+    <string name="download_now_button">立即下载</string>
+    <string name="download_wifi_button">使用 Wi-Fi 下载</string>
+    <string name="download_permission_rationale">下载文件需要写入 USB 存储或 SD 卡的权限。</string>
+    <string name="load_auth_failure_notice">您的登录凭据已失效，请重新登录。</string>
+    <string name="unset">未设置</string>
+    <string name="copyright_notice">\u00a9 2014 Azwan Adli, Danny Baumann</string>
+    <string name="actions">操作</string>
+    <string name="created">创建的</string>
+    <string name="assigned">指派给我的</string>
+    <string name="mentioned">提到我的</string>
+    <string name="participating">我参与的</string>
+    <string name="my_repositories">我的仓库</string>
+    <string name="my_issues">我的议题</string>
+    <string name="my_pull_requests">我的拉取请求</string>
+    <string name="my_gists">我的 Gist</string>
+    <string name="start_page">起始页</string>
+    <string name="start_page_last_selected">上次选择的</string>
+    <string name="comment_editor_locked_hint">只有协作者才能发表评论</string>
+    <string name="user_type_bot">机器人</string>
+    <string name="user_type_mannequin">替身账号</string>
+    <string name="user_type_org">组织</string>
+    <string name="clear_suggestions">清除建议</string>
+    <string name="quote">引用</string>
+    <string name="fork">复刻</string>
+    <string name="notifications">通知</string>
+    <string name="mark_all_as_read">全部标为已读</string>
+    <string name="mark_as_read">标为已读</string>
+    <string name="unsubscribe">取消订阅</string>
+    <string name="unsubscribe_success">已取消订阅该会话</string>
+    <string name="mark_repository_as_read_question">要将 %1$s 的所有通知标为已读吗？</string>
+    <string name="mark_all_as_read_question">要将所有通知标为已读吗？</string>
+    <string name="unread">未读</string>
+    <string name="undo">撤销</string>
+    <string name="raw">原始文本</string>
+    <string name="view_in_file">在文件中查看</string>
+    <string name="reviewed_files">已审查的文件：</string>
+    <string name="show_details">显示详情</string>
+    <string name="preview">预览</string>
+    <string name="restore">恢复</string>
+    <string name="restore_branch">恢复分支</string>
+    <string name="delete_branch">删除分支</string>
+    <string name="restore_branch_question">真的要恢复拉取请求分支吗？</string>
+    <string name="delete_branch_question">真的要删除拉取请求分支吗？</string>
+    <string name="restore_branch_error">恢复分支失败</string>
+    <string name="delete_branch_error">删除分支失败</string>
+
+    <string name="reaction_plus_one" translatable="false">+1</string>
+    <string name="reaction_minus_one" translatable="false">-1</string>
+    <string name="reaction_laugh">大笑</string>
+    <string name="reaction_confused">困惑</string>
+    <string name="reaction_heart">爱心</string>
+    <string name="reaction_hooray">欢呼</string>
+    <string name="reaction_rocket">火箭</string>
+    <string name="reaction_eyes">眼睛</string>
+
+    <string name="repo_type_all">全部</string>
+    <string name="repo_type_owner">我拥有的</string>
+    <string name="repo_type_member">我是成员的</string>
+    <string name="repo_type_public">公开</string>
+    <string name="repo_type_private">私有</string>
+    <string name="repo_type_sources">源仓库</string>
+    <string name="repo_type_forks">复刻</string>
+    <string name="repo_type_watched">关注的</string>
+    <string name="repo_type_starred">已加星标的</string>
+    <string name="repo_filter">筛选</string>
+    <string name="repo_sort">排序方式</string>
+    <string name="repo_sort_order_name_asc">按名称（A-Z）</string>
+    <string name="repo_sort_order_name_desc">按名称（Z-A）</string>
+    <string name="repo_sort_order_creation_desc">最新创建</string>
+    <string name="repo_sort_order_creation_asc">最早创建</string>
+    <string name="repo_sort_order_pushed_desc">最近推送</string>
+    <string name="repo_sort_order_pushed_asc">最久未推送</string>
+    <string name="filter_and_sort">筛选和排序</string>
+
+    <string name="no_blogs_found">没有找到博客。</string>
+    <string name="no_comments_found">还没有人评论。</string>
+    <string name="no_files_found">没有找到文件。</string>
+    <string name="no_trends_found">没有找到趋势仓库。</string>
+    <string name="no_open_milestones_found">该仓库没有任何开放的里程碑。</string>
+    <string name="no_closed_milestones_found">该仓库没有任何已关闭的里程碑。</string>
+    <string name="no_commits_found">没有找到提交。</string>
+    <string name="no_followers_found">没有找到关注者。</string>
+    <string name="no_following_found">还没有关注任何用户。</string>
+    <string name="no_forks_found">该仓库还没有被复刻过。</string>
+    <string name="no_issues_found">还没有人报告议题。</string>
+    <string name="no_search_issues_found">没有找到符合条件的议题。</string>
+    <string name="no_search_pull_requests_found">没有找到符合条件的拉取请求。</string>
+    <string name="no_events_found">没有找到动态。</string>
+    <string name="no_pull_requests_found">还没有人发起拉取请求。</string>
+    <string name="no_repos_found">没有找到仓库。</string>
+    <string name="no_search_repos_found">没有找到符合条件的仓库。</string>
+    <string name="no_search_users_found">没有找到符合条件的用户。</string>
+    <string name="no_search_code_found">没有找到符合条件的代码。</string>
+    <string name="no_starred_repos_found">还没有给任何仓库加星标。</string>
+    <string name="no_watched_repos_found">还没有关注任何仓库。</string>
+    <string name="no_watchers_found">还没有人关注该仓库。</string>
+    <string name="no_stargazers_found">还没有人给该仓库加星标。</string>
+    <string name="stargazers_restricted_title">无法查看星标列表</string>
+    <string name="stargazers_restricted_message">GitHub 自 2026 年 6 月起限制了星标用户列表的查看，仅仓库管理员或协作者可见。如果你是该仓库的协作者，可以选择继续尝试打开。</string>
+    <string name="watchers_restricted_title">无法查看关注者列表</string>
+    <string name="watchers_restricted_message">GitHub 自 2026 年 6 月起限制了关注者列表的查看，仅仓库管理员或协作者可见。如果你是该仓库的协作者，可以选择继续尝试打开。</string>
+    <string name="try_open_anyway">继续尝试打开</string>
+    <string name="no_contributors_found">该仓库还没有人贡献过。</string>
+    <string name="no_releases_found">该仓库还没有创建过版本发布。</string>
+    <string name="no_gists_found">还没有创建过 Gist。</string>
+    <string name="no_starred_gists_found">还没有给任何 Gist 加星标。</string>
+    <string name="no_bookmarks">还没有创建过书签。</string>
+    <string name="no_wiki_updates_found">没有找到最近的 Wiki 更新。</string>
+    <string name="no_notifications_found">没有找到通知。</string>
+    <string name="no_org_members_found">该组织没有任何成员。</string>
+    <string name="no_collaborators_found">该仓库没有任何协作者。</string>
+
+    <!-- Activity event -->
+    <string name="event_push_title">推送到了 [b]%1$s[/b] 的 [b]%2$s[/b]</string>
+    <string name="event_watch_title">给 [b]%1$s[/b] 加了星标</string>
+    <string name="event_create_gist_title">创建了 Gist [b]%1$s[/b]</string>
+    <string name="event_update_gist_title">更新了 Gist [b]%1$s[/b]</string>
+    <string name="event_fork_title">复刻了 [b]%1$s[/b]</string>
+    <string name="event_commit_comment_title">评论了 [b]%2$s[/b] 上的提交 [b]%1$s[/b]</string>
+    <string name="event_fork_apply_title">将复刻的提交应用到了 [b]%1$s[/b]</string>
+    <string name="event_follow_title">开始关注 [b]%1$s[/b]</string>
+    <string name="event_create_repo_title">创建了一个仓库</string>
+    <string name="event_create_branch_title">在 [b]%2$s[/b] 上创建了分支 [b]%1$s[/b]</string>
+    <string name="event_create_tag_title">在 [b]%2$s[/b] 上创建了标签 [b]%1$s[/b]</string>
+    <string name="event_issues_open_title">在 [b]%2$s[/b] 上提出了议题 [b]%1$d[/b]</string>
+    <string name="event_issues_close_title">关闭了 [b]%2$s[/b] 上的议题 [b]%1$d[/b]</string>
+    <string name="event_issues_reopen_title">重新打开了 [b]%2$s[/b] 上的议题 [b]%1$d[/b]</string>
+    <string name="event_issues_assign_title">指派了 [b]%2$s[/b] 上的议题 [b]%1$d[/b]</string>
+    <string name="event_issues_unassign_title">取消指派了 [b]%2$s[/b] 上的议题 [b]%1$d[/b]</string>
+    <string name="event_issues_label_title">给 [b]%2$s[/b] 上的议题 [b]%1$d[/b] 添加了标签 [label]</string>
+    <string name="event_issues_unlabel_title">移除了 [b]%2$s[/b] 上议题 [b]%1$d[/b] 的标签 [label]</string>
+    <string name="event_delete_branch_title">删除了 [b]%2$s[/b] 上的分支 [b]%1$s[/b]</string>
+    <string name="event_delete_tag_title">删除了 [b]%2$s[/b] 上的标签 [b]%1$s[/b]</string>
+    <string name="event_pr_open_title">在 [b]%2$s[/b] 上发起了拉取请求 [b]%1$d[/b]</string>
+    <string name="event_pr_close_title">关闭了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
+    <string name="event_pr_merge_title">[b]%2$s[/b] 上的拉取请求 [b]%1$d[/b] 已被合并[/b]</string>
+    <string name="event_pr_reopen_title">重新打开了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
+    <string name="event_pr_update_title">更新了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
+    <string name="event_pr_assign_title">指派了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
+    <string name="event_pr_unassign_title">取消指派了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
+    <string name="event_pr_label_title">给 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b] 添加了标签 [label]</string>
+    <string name="event_pr_unlabel_title">移除了 [b]%2$s[/b] 上拉取请求 [b]%1$d[/b] 的标签 [label]</string>
+    <string name="event_pull_request_review_comment_title">评论了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
+    <string name="event_member_title">将 [b]%1$s[/b] 添加到了 [b]%2$s[/b]</string>
+    <string name="event_download_title">上传了一个文件到 [b]%1$s[/b]</string>
+    <string name="event_gollum_title">编辑了 [b]%2$s[/b] 上 Wiki 的 %1$s</string>
+    <string name="event_public_title">将 [b]%1$s[/b] 开源了</string>
+    <string name="event_release_title">在 [b]%1$s[/b] 中创建了一个版本发布</string>
+    <string name="event_issue_comment">评论了 [b]%2$s[/b] 上的议题 [b]%1$d[/b]</string>
+    <string name="event_pull_request_comment">评论了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
+    <string name="event_team_repo_add">将仓库 [b]%1$s[/b] 添加到了团队 [b]%2$s[/b]</string>
+    <string name="event_review_title">审查了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
+
+    <string name="event_issue_assigned_desc">该议题现已指派给 [b]%1$s[/b]</string>
+    <string name="event_issue_unassigned_desc">该议题已取消指派</string>
+    <string name="event_pull_request_desc">%1$s\n%2$d 个提交，%3$d 处新增，%4$d 处删除</string>
+    <string name="event_follow_desc">%1$s 有 %2$d 个仓库和 %3$d 个关注者</string>
+    <string name="event_fork_desc">复刻的仓库位于 %1$s</string>
+    <string name="event_create_repo_desc">新仓库位于 %1$s</string>
+    <string name="event_gollum_desc">查看 %1$s</string>
+    <string name="event_push_desc">还有 %1$d 个提交\u2026</string>
+    <string name="event_team_add_desc">%1$s 现在有 %2$d 个成员和 %3$d 个仓库</string>
+
+    <string name="user_following">正在关注</string>
+    <string name="user_followers">关注者</string>
+    <string name="user_members">成员</string>
+    <string name="user_created_at">%1$s 加入</string>
+    <string name="user_pub_repos">仓库</string>
+    <string name="user_news_feed">动态</string>
+    <string name="user_public_activity">公开动态</string>
+    <string name="user_organizations">组织</string>
+    <string name="user_follow_action">关注</string>
+    <string name="user_unfollow_action">取消关注</string>
+    <string name="user_no_repos">没有找到仓库</string>
+
+    <!-- Repository -->
+    <string name="repo_forks">复刻</string>
+    <string name="repo_language">使用 %1$s 编写</string>
+    <string name="repo_watchers">关注者</string>
+    <string name="repo_stargazers">星标数</string>
+    <string name="repo_watch_action">关注</string>
+    <string name="repo_star_action">加星标</string>
+    <string name="repo_select_ref">选择分支</string>
+    <string name="repo_select_ref_dialog_title">选择分支或标签</string>
+    <string name="repo_unwatch_action">取消关注</string>
+    <string name="repo_unstar_action">取消星标</string>
+    <string name="repo_download_action">下载代码（ZIP）</string>
+    <string name="repo_contributors">贡献者</string>
+    <string name="repo_collaborators">协作者</string>
+    <string name="repo_discussions">讨论</string>
+    <string name="repo_files">文件</string>
+    <string name="repo_short">仓库</string>
+    <string name="repo_no_readme">没有找到 README 文件</string>
+    <string name="repo_issue_on">%2$s/%3$s 上的 #%1$d</string>
+    <string name="repo_activity">动态</string>
+
+    <!-- Issue events -->
+    <string name="issue_event_closed_completed">[b]%1$s[/b] 以“已完成”关闭了该议题 [time]</string>
+    <string name="issue_event_closed_completed_with_commit">[b]%1$s[/b] 在 [commit] 中以“已完成”关闭了该议题 [time]</string>
+    <string name="issue_event_closed_not_planned">[b]%1$s[/b] 以“不计划处理”关闭了该议题 [time]</string>
+    <string name="issue_event_closed_not_planned_with_commit">[b]%1$s[/b] 在 [commit] 中以“不计划处理”关闭了该议题 [time]</string>
+    <string name="issue_event_closed_duplicate">[b]%1$s[/b] 以“重复”关闭了该议题 [time]</string>
+    <string name="issue_event_closed_duplicate_with_commit">[b]%1$s[/b] 在 [commit] 中以“重复”关闭了该议题 [time]</string>
+    <string name="issue_event_reopened">[b]%1$s[/b] 重新打开了该议题 [time]</string>
+    <string name="issue_event_referenced">[b]%1$s[/b] 引用了该议题 [time]</string>
+    <string name="issue_event_referenced_with_commit">[b]%1$s[/b] 在提交 [commit] 中引用了该议题 [time]</string>
+    <string name="issue_event_assigned">[b]%1$s[/b] 指派了 [b]%2$s[/b] [time]</string>
+    <string name="issue_event_assigned_self">[b]%1$s[/b] 将该议题指派给了自己 [time]</string>
+    <string name="issue_event_unassigned">[b]%1$s[/b] 取消指派了 [b]%2$s[/b] [time]</string>
+    <string name="issue_event_unassigned_self">[b]%1$s[/b] 移除了自己的指派 [time]</string>
+    <string name="issue_event_labeled">[b]%1$s[/b] 添加了 [label] 标签 [time]</string>
+    <string name="issue_event_unlabeled">[b]%1$s[/b] 移除了 [label] 标签 [time]</string>
+    <string name="issue_event_milestoned">[b]%1$s[/b] 将其加入了 [b]%2$s[/b] 里程碑 [time]</string>
+    <string name="issue_event_demilestoned">[b]%1$s[/b] 将其移出了 [b]%2$s[/b] 里程碑 [time]</string>
+    <string name="issue_event_renamed">[b]%1$s[/b] 将标题从 [b]%2$s[/b] 改为 [b]%3$s[/b] [time]</string>
+    <string name="issue_event_locked">[b]%1$s[/b] 锁定了会话，仅限协作者参与 [time]</string>
+    <string name="issue_event_locked_with_reason">[b]%1$s[/b] 以 [b]%2$s[/b] 为由锁定，仅限协作者参与 [time]</string>
+    <string name="issue_event_unlocked">[b]%1$s[/b] 解锁了该会话 [time]</string>
+    <string name="issue_event_mentioned">[b]%1$s[/b] 在 [b][source][/b] 中提到了该议题 [time]</string>
+    <string name="issue_event_transferred">[b]%1$s[/b] 从另一个仓库转入了该议题 [time]</string>
+
+    <!-- Pull request events -->
+    <string name="pull_request_event_closed">[b]%1$s[/b] 关闭了该拉取请求 [time]</string>
+    <string name="pull_request_event_closed_with_commit">[b]%1$s[/b] 在 [commit] 中关闭了该拉取请求 [time]</string>
+    <string name="pull_request_event_reopened">[b]%1$s[/b] 重新打开了该拉取请求 [time]</string>
+    <string name="pull_request_event_merged">[b]%1$s[/b] 合并了该拉取请求 [time]</string>
+    <string name="pull_request_event_merged_with_commit">[b]%1$s[/b] 以提交 [commit] 合并了该拉取请求 [time]</string>
+    <string name="pull_request_event_referenced">[b]%1$s[/b] 引用了该拉取请求 [time]</string>
+    <string name="pull_request_event_referenced_with_commit">[b]%1$s[/b] 在提交 [commit] 中引用了该拉取请求 [time]</string>
+    <string name="pull_request_event_assigned_self">[b]%1$s[/b] 将该拉取请求指派给了自己 [time]</string>
+    <string name="pull_request_event_review_approved">[b]%1$s[/b] 批准了这些更改 [time]</string>
+    <string name="pull_request_event_review_requested_changes">[b]%1$s[/b] 请求更改 [time]</string>
+    <string name="pull_request_event_review_reviewed">[b]%1$s[/b] 进行了审查 [time]</string>
+    <string name="pull_request_event_review_previously_reviewed">[b]%1$s[/b] 之前已审查过 [time]</string>
+    <string name="pull_request_event_review_dismissed">[b]%1$s[/b] 驳回了一条过时的审查 [time]</string>
+    <string name="pull_request_event_review_dismissed_via_commit">[b]%1$s[/b] 通过 [commit] 驳回了一条过时的审查 [time]</string>
+    <string name="pull_request_event_review_started_review">[b]%1$s[/b] 开始了一次审查 [time]</string>
+    <string name="pull_request_event_review_requested">[b]%1$s[/b] 请求 [b]%2$s[/b] 进行审查 [time]</string>
+    <string name="pull_request_event_review_request_removed">[b]%1$s[/b] 移除了对 [b]%2$s[/b] 的审查请求 [time]</string>
+    <string name="pull_request_event_team_review_requested">[b]%1$s[/b] 请求团队 [b]%2$s[/b] 进行审查 [time]</string>
+    <string name="pull_request_event_team_review_request_removed">[b]%1$s[/b] 移除了对团队 [b]%2$s[/b] 的审查请求 [time]</string>
+    <string name="pull_request_event_ref_deleted">[b]%1$s[/b] 删除了拉取请求分支 [time]</string>
+    <string name="pull_request_event_ref_restored">[b]%1$s[/b] 恢复了拉取请求分支 [time]</string>
+    <string name="pull_request_event_ref_force_pushed">[b]%1$s[/b] 强推了拉取请求分支 [time]</string>
+    <string name="pull_request_event_auto_merge_disabled">[b]%1$s[/b] 禁用了自动合并 [time]</string>
+    <string name="pull_request_event_auto_merge_enabled">[b]%1$s[/b] 启用了自动合并 [time]</string>
+    <string name="pull_request_event_auto_rebase_enabled">[b]%1$s[/b] 启用了自动合并（变基） [time]</string>
+    <string name="pull_request_event_auto_squash_enabled">[b]%1$s[/b] 启用了自动合并（压缩） [time]</string>
+    <string name="pull_request_event_added_to_merge_queue">[b]%1$s[/b] 将该拉取请求加入了合并队列 [time]</string>
+    <string name="pull_request_event_removed_from_merge_queue">[b]%1$s[/b] 将该拉取请求移出了合并队列 [time]</string>
+    <string name="pull_request_event_comment_deleted">[b]%1$s[/b] 删除了一条评论 [time]</string>
+    <string name="pull_request_event_convert_to_draft">[b]%1$s[/b] 将该拉取请求标记为草稿 [time]</string>
+    <string name="pull_request_event_ready_for_review">[b]%1$s[/b] 将该拉取请求标记为可审查 [time]</string>
+    <string name="pull_request_event_mentioned">[b]%1$s[/b] 在 [b][source][/b] 中提到了该拉取请求 [time]</string>
+
+    <!-- Commit -->
+    <string name="commit_title">提交 %1$s</string>
+    <string name="commit">提交</string>
+    <string name="commits">提交</string>
+    <string name="commit_changed">有更改的文件</string>
+    <string name="commit_added">新增的文件</string>
+    <string name="commit_renamed">重命名的文件</string>
+    <string name="commit_deleted">删除的文件</string>
+    <string name="commit_summary">%1$d 个文件有更改，新增 %2$d 处，删除 %3$d 处。</string>
+    <string name="commit_compare">比较视图</string>
+    <string name="commit_comment_hint">评论该提交</string>
+    <string name="commit_details">[b]%1$s[/b] 提交于 %2$s</string>
+    <string name="commit_comment_dialog_title">评论第 -%1$d / +%2$d 行</string>
+    <string name="error_delete_commit_comment">删除提交评论失败</string>
+    <string name="error_delete_comment">删除评论失败</string>
+    <string name="commit_use_as_ref">选为分支引用</string>
+
+    <!-- Release -->
+    <string name="release_title">版本发布</string>
+    <string name="released_at">发布于 %1$s</string>
+    <string name="release_details">[b]%1$s[/b] 发布于 %2$s</string>
+    <string name="release_tag">位于标签 %1$s</string>
+    <string name="release_notes">版本说明</string>
+    <string name="release_type_final">正式版本</string>
+    <string name="release_type_draft">草稿</string>
+    <string name="release_type_prerelease">预发布版本</string>
+    <string name="release_no_releasenotes">没有提供版本说明。</string>
+
+    <string name="issues">议题</string>
+    <string name="issue">议题</string>
+    <string name="issues_open">开放的议题</string>
+    <string name="issues_closed">已关闭的议题</string>
+    <string name="issues_menu_show_open">显示开放的</string>
+    <string name="issues_menu_show_closed">显示已关闭的</string>
+    <string name="issue_comments">评论</string>
+    <string name="issue_title">标题</string>
+    <string name="issue_body">正文</string>
+    <string name="issue_create">新建议题</string>
+    <string name="issue_loading_template_hint">正在加载议题正文模板\u2026</string>
+    <string name="issue_error_title">请输入标题</string>
+    <string name="issue_edit_title">编辑议题 #%1$d</string>
+    <string name="issue_error_close">关闭议题 #%1$d 失败</string>
+    <string name="issue_error_reopen">重新打开议题 #%1$d 失败</string>
+    <string name="issue_sort_order">排序方式</string>
+    <string name="issue_sort_created_asc">最早创建</string>
+    <string name="issue_sort_created_desc">最新创建</string>
+    <string name="issue_sort_updated_asc">最久未更新</string>
+    <string name="issue_sort_updated_desc">最近更新</string>
+    <string name="issue_sort_comments_asc">评论最少</string>
+    <string name="issue_sort_comments_desc">评论最多</string>
+    <string name="issue_manage">管理</string>
+    <string name="issue_manage_labels">管理标签</string>
+    <string name="issue_manage_milestones">管理里程碑</string>
+    <string name="issue_labels">标签</string>
+    <string name="issue_milestones">里程碑</string>
+    <string name="issue_dialog_delete_message">真的要删除 %1$s 吗？</string>
+    <string name="issue_error_comment">发表评论失败</string>
+    <string name="issue_error_create">创建议题失败</string>
+    <string name="issue_error_edit">编辑议题 #%1$d 失败</string>
+    <string name="issue_error_create_label">创建标签 \'%1$s\' 失败</string>
+    <string name="issue_error_edit_label">编辑标签 \'%1$s\' 失败</string>
+    <string name="issue_error_delete_label">删除标签 \'%1$s\' 失败</string>
+    <string name="issue_error_create_milestone">创建里程碑 \'%1$s\' 失败</string>
+    <string name="issue_error_edit_milestone">编辑里程碑 \'%1$s\' 失败</string>
+    <string name="issue_error_delete_milestone">删除里程碑失败</string>
+    <string name="issue_error_milestone_title">请输入标题</string>
+    <string name="issue_label_new">新建标签</string>
+    <string name="issue_milestone_new">新建里程碑</string>
+    <string name="issue_milestone_edit">编辑里程碑</string>
+    <string name="issue_milestone_open_issues">%d 个开放</string>
+    <string name="issue_milestone_closed_issues">%d 个已关闭</string>
+    <string name="issue_milestone_close_message">真的要关闭该里程碑吗？</string>
+    <string name="issue_milestone_reopen_message">真的要重新打开该里程碑吗？</string>
+    <string name="issue_milestone_close_error">关闭里程碑失败</string>
+    <string name="issue_milestone_reopen_error">重新打开里程碑失败</string>
+    <string name="issue_filter">筛选</string>
+    <string name="issue_filter_by_label">按标签筛选</string>
+    <string name="issue_filter_by_milestone">按里程碑筛选</string>
+    <string name="issue_filter_by_assignee">按指派人筛选</string>
+    <string name="issue_filter_by_participating">按参与状态筛选</string>
+    <string name="issue_filter_by_any_label">任意标签</string>
+    <string name="issue_filter_by_no_label">无标签</string>
+    <string name="issue_filter_by_any_milestone">任意里程碑</string>
+    <string name="issue_filter_by_no_milestone">未设置里程碑</string>
+    <string name="issue_filter_by_any_assignee">任意指派人</string>
+    <string name="issue_filter_by_no_assignee">未指派</string>
+    <string name="issue_filter_remove">移除筛选</string>
+    <string name="issue_clear_milestone">无里程碑</string>
+    <string name="issue_clear_assignee">无指派人</string>
+    <string name="issue_no_labels">未分配标签</string>
+    <string name="issue_milestone_due_date">截止日期</string>
+    <string name="issue_milestone_due_unset">未设置日期</string>
+    <string name="issue_comment_hint">评论该议题</string>
+    <string name="commit_comment_header">%1$s 添加了一条备注 %2$s</string>
+    <string name="issue_no_description">未提供描述。</string>
+    <string name="reopen_issue_confirm">真的要重新打开该议题吗？</string>
+    <string name="close_issue_dialog_title">将议题关闭为\u2026</string>
+    <string name="issue_reason_not_planned">不计划处理</string>
+    <string name="issue_reason_not_planned_description">不修复、无法复现、已过时</string>
+    <string name="issue_reason_duplicate">重复</string>
+    <string name="issue_reason_duplicate_description">与另一个议题重复</string>
+    <string name="issue_reason_completed">已完成</string>
+    <string name="issue_reason_completed_description">已完成、已关闭、已修复、已解决</string>
+    <string name="close_issue">关闭议题</string>
+    <string name="issue_template_dialog_title">选择议题类型</string>
+
+    <!-- Pull Request -->
+    <string name="pull_request_title">拉取请求</string>
+    <string name="review_title_format">拉取请求 #%1$d - 审查</string>
+    <string name="pull_request_conversation">会话</string>
+    <string name="pull_request_add_review">审查</string>
+    <string name="pull_request_files">文件</string>
+    <string name="pull_requests">拉取请求</string>
+    <string name="pull_requests_open">开放的拉取请求</string>
+    <string name="pull_requests_closed">已关闭的拉取请求</string>
+    <string name="pull_request_comment_hint">评论该拉取请求</string>
+    <string name="view_pull_request">查看拉取请求</string>
+    <string name="pull_request_reopen">重新打开</string>
+    <string name="pull_request_close">关闭</string>
+    <string name="pull_request_merge">合并</string>
+    <string name="pull_request_merged">已合并</string>
+    <string name="pull_error_merge">合并拉取请求 #%1$d 失败</string>
+    <string name="pull_message_dialog_title">合并拉取请求 #%1$d</string>
+    <string name="pull_merge_title_description">合并提交标题</string>
+    <string name="pull_merge_title_helper">留空则使用 GitHub 提供的默认标题。</string>
+    <string name="pull_merge_message_description">合并提交详情</string>
+    <string name="pull_merge_status_loading">正在加载拉取请求状态…</string>
+    <string name="pull_merge_status_behind">该分支已落后于基分支</string>
+    <string name="pull_merge_status_blocked">合并已被阻止</string>
+    <string name="pull_merge_status_clean">所有检查均已通过</string>
+    <string name="pull_merge_status_pending">部分检查尚未完成</string>
+    <string name="pull_merge_status_unstable">部分检查未通过</string>
+    <string name="pull_merge_status_mergable">该拉取请求可以合并</string>
+    <string name="pull_merge_status_dirty">该拉取请求存在冲突，需要手动解决</string>
+    <string name="pull_merge_status_draft">该拉取请求仍在进行中</string>
+    <string name="pull_merge_status_unknown">无法确定该拉取请求的状态</string>
+    <string name="pull_merge_method">合并方式</string>
+    <string name="pull_merge_method_merge">创建合并提交</string>
+    <string name="pull_merge_method_squash">压缩为一个提交</string>
+    <string name="pull_merge_method_rebase">变基后合并</string>
+    <string name="pull_no_commit_status">该拉取请求没有附加其他检查</string>
+    <string name="pull_request_from">来自 [b][ref][/b]</string>
+    <string name="pull_request_to">合并到 [b][ref][/b]</string>
+    <string name="close_pull_request_confirm">真的要关闭该拉取请求吗？</string>
+    <string name="reopen_pull_request_confirm">真的要重新打开该拉取请求吗？</string>
+    <string name="pull_request_edit_title">编辑拉取请求 #%1$d</string>
+    <string name="review_reply_hint">回复所选分组</string>
+    <string name="no_reply_group_selected_hint">选择要回复的分组</string>
+    <string name="pull_request_review_dialog_title">审查拉取请求 #%1$d</string>
+    <string name="pull_request_review_event">审查类型</string>
+    <string name="pull_request_review_event_comment">评论</string>
+    <string name="pull_request_review_event_approve">批准</string>
+    <string name="pull_request_review_event_request_changes">请求更改</string>
+    <string name="pull_request_review_body">审查摘要</string>
+    <string name="pull_request_review_description">请在下方留下对本次审查的评论。</string>
+    <string name="pull_request_review_button_affirm">评论</string>
+    <string name="pull_request_review_error">为拉取请求 #%1$d 添加审查失败</string>
+    <string name="pull_request_review_changes">审查</string>
+    <string name="review_create_error">创建审查失败</string>
+
+    <!-- Object -->
+    <string name="object_view_file_at">查看文件 @ %1$s</string>
+
+    <!-- Gist -->
+    <string name="mine">我的</string>
+    <string name="starred">已加星标</string>
+    <string name="gists">Gist</string>
+    <string name="gist_title">Gist %1$s</string>
+    <string name="gist_no_description">&lt;无描述&gt;</string>
+    <string name="gist_files">文件</string>
+
+    <!-- Trending repos -->
+    <string name="trend">趋势仓库</string>
+    <string name="trend_today">今日</string>
+    <string name="trend_week">本周</string>
+
+    <!-- Topic discovery -->
+    <string name="topic_discovery">Topic 发现</string>
+    <string name="topic_discovery_hint">输入 topic，如 android</string>
+    <string name="topic_discovery_popular">热门 Topic</string>
+    <string name="no_topic_repos_found">该 topic 下没有找到仓库</string>
+    <string name="trend_month">本月</string>
+    <string name="trend_stars_today">今日 %1$d，总计 %2$d</string>
+    <string name="trend_stars_week">本周 %1$d，总计 %2$d</string>
+    <string name="trend_stars_month">本月 %1$d，总计 %2$d</string>
+
+    <!-- GitHub Blog -->
+    <string name="blog">GitHub 博客</string>
+
+    <!-- Recent Wiki Updates -->
+    <string name="recent_wiki">最近的 Wiki 更新</string>
+
+    <!-- Bookmarks -->
+    <string name="bookmark">书签</string>
+    <string name="remove_bookmark">移除书签</string>
+    <string name="bookmark_saved">书签已保存</string>
+    <string name="bookmark_removed">书签已移除</string>
+
+    <!-- Search -->
+    <string name="search_type">搜索类型</string>
+    <string name="search_type_repo">仓库</string>
+    <string name="search_type_user">用户</string>
+    <string name="search_type_code">代码</string>
+    <string name="search_hint_repo">搜索仓库</string>
+    <string name="search_hint_user">搜索用户</string>
+    <string name="search_hint_code">搜索代码</string>
+
+    <!-- Sharing -->
+    <string name="send_email_title">选择邮件应用</string>
+    <string name="share_title">分享到</string>
+    <string name="share_file_subject">%2$s 上的 %1$s</string>
+    <string name="share_gist_subject">%2$s 的 Gist %1$s</string>
+    <string name="share_issue_subject">%3$s 上的议题 #%1$d（%2$s）</string>
+    <string name="share_pull_subject">%3$s 上的拉取请求 #%1$d（%2$s）</string>
+    <string name="share_commit_subject">%2$s 上的提交 #%1$s</string>
+    <string name="share_user_subject">用户 %1$s（%2$s）</string>
+    <string name="share_user_subject_loginonly">用户 %1$s</string>
+    <string name="share_comment_subject">%3$s 上议题 %2$d 中的评论 #%1$d</string>
+    <string name="share_commit_comment_subject">%2$s 上的提交评论 #%1$d</string>
+    <string name="share_line_subject">%3$s 上文件 %2$s 的第 %1$d 行</string>
+
+    <!-- Webview text size -->
+    <string name="menu_text_size">代码视图文字大小</string>
+    <string name="menu_gif_load_mode">动态 GIF 加载</string>
+
+    <!-- Print document titles -->
+    <string name="diff_print_document_title">%3$s/%4$s 中提交 %2$s 的文件 %1$s 的差异</string>
+    <string name="gist_print_document_title">%3$s 的 Gist %2$s 中的 %1$s</string>
+    <string name="file_print_document_title">%2$s/%3$s 中的 %1$s</string>
+    <string name="file_print_document_at_ref_title">%2$s/%3$s（%4$s）中的 %1$s</string>
+    <string name="wiki_print_document_title">%2$s/%3$s 中 Wiki 页面 %1$s</string>
+
+    <string name="repository_owner_avatar">仓库所有者头像</string>
+    <string name="collaborator">协作者</string>
+    <string name="contributor">贡献者</string>
+    <string name="first_time_contributor">首次贡献者</string>
+    <string name="first_timer">新手</string>
+    <string name="member">成员</string>
+    <string name="owner">所有者</string>
+    <string name="copy_number">复制编号</string>
+    <string name="copy_link">复制链接</string>
+    <string name="copy_sha">复制 SHA</string>
+    <string name="copy_clone_url">复制克隆地址</string>
+    <string name="check_failing">%1$d 项失败</string>
+    <string name="check_pending">%1$d 项待处理</string>
+    <string name="check_successful">%1$d 项成功</string>
+    <string name="check_pending_description">等待运行</string>
+    <string name="check_running_description">运行中</string>
+    <string name="check_runtime_description">%1$s 后完成</string>
+    <string name="check_runtime_format_seconds">%3$d 秒</string>
+    <string name="check_runtime_format_minutes">%2$d 分 %3$d 秒</string>
+    <string name="check_runtime_format_hours">%1$d 小时 %2$d 分</string>
+
+    <plurals name="checks_summary">
+        <item quantity="one">%1$s 项检查</item>
+        <item quantity="other">%1$s 项检查</item>
+    </plurals>
+
+    <string name="channel_notifications_name">GitHub 通知</string>
+    <string name="channel_notifications_description">从 GitHub 收到的通知。</string>
+    <string name="unread_notifications_summary_title">未读的 GitHub 通知</string>
+    <plurals name="unread_notifications_summary_text">
+        <item quantity="zero">没有未读通知</item>
+        <item quantity="one">1 条未读通知</item>
+        <item quantity="other">%1$d 条未读通知</item>
+    </plurals>
+    <plurals name="notification">
+        <item quantity="one">1 条通知</item>
+        <item quantity="other">%1$d 条通知</item>
+    </plurals>
+    <string name="notification_subject_commit">提交</string>
+    <string name="notification_subject_issue">议题</string>
+    <string name="notification_subject_pr">拉取请求</string>
+    <string name="notification_subject_release">版本发布</string>
+    <string name="notification_subject_discussion">讨论</string>
+    <string name="notification_interval">同步间隔</string>
+    <string name="detach">在新窗口中打开</string>
+
+    <string name="theme_light">白天</string>
+    <string name="theme_dark">夜间</string>
+    <string name="theme_system">跟随系统设置</string>
+
+    <string name="use_custom_tabs">使用内置浏览器</string>
+    <string name="open_links_inside_app">在应用内打开链接</string>
+    <string name="open_links_external_browser">在外部浏览器中打开链接</string>
+
+    <!-- Theme toggle -->
+    <string name="theme_toggle">深色模式</string>
+
+    <!-- Recent history -->
+    <string name="recent_history">最近浏览</string>
+    <string name="no_recent_history">还没有浏览记录</string>
+    <string name="clear_history">清空记录</string>
+    <string name="recent_history_issue">Issue #%d</string>
+    <string name="recent_history_pr">PR #%d</string>
+    <string name="recent_history_repo">仓库</string>
+
+    <!-- Release radar -->
+    <string name="release_radar">Star 更新</string>
+    <string name="no_release_radar_items">Star 的仓库最近没有新版本</string>
+
+    <!-- Star groups -->
+    <string name="star_groups">Star 分组</string>
+    <string name="no_star_groups">还没有分组。新建分组来整理 Star 的仓库吧。</string>
+    <string name="no_star_group_repos">这个分组还没有仓库。长按 Star 列表里的仓库可以加入分组。</string>
+    <string name="star_group_create">新建分组</string>
+    <string name="star_group_create_title">分组名称</string>
+    <string name="star_group_create_new">新建分组\u2026</string>
+    <string name="star_group_rename_title">重命名分组</string>
+    <string name="star_group_assign_title">加入分组</string>
+    <string name="star_group_remove_confirm">把 %1$s 移出这个分组？</string>
+    <string name="star_group_delete_confirm">删除分组 \u201c%1$s\u201d？仓库的 Star 不会受影响。</string>
+    <string name="rename">重命名</string>
+    <string name="remove">移出</string>
+
+</resources>

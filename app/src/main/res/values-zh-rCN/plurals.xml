@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="issue">
+        <item quantity="one">1 个议题</item>
+        <item quantity="other">%d 个议题</item>
+    </plurals>
+
+    <plurals name="pull_request">
+        <item quantity="one">1 个拉取请求</item>
+        <item quantity="other">%d 个拉取请求</item>
+    </plurals>
+
+    <plurals name="star">
+        <item quantity="one">1 个星标</item>
+        <item quantity="other">%d 个星标</item>
+    </plurals>
+
+    <plurals name="fork">
+        <item quantity="one">1 个复刻</item>
+        <item quantity="other">%d 个复刻</item>
+    </plurals>
+
+    <plurals name="follower">
+        <item quantity="one">有 1 位用户关注</item>
+        <item quantity="other">有 %d 位用户关注</item>
+    </plurals>
+
+    <plurals name="follower_and_self">
+        <item quantity="one">你和另外 1 位用户关注</item>
+        <item quantity="other">你和另外 %d 位用户关注</item>
+    </plurals>
+
+    <plurals name="following">
+        <item quantity="one">正在关注 1 位用户</item>
+        <item quantity="other">正在关注 %d 位用户</item>
+    </plurals>
+
+    <plurals name="gist">
+        <item quantity="one">1 个 Gist</item>
+        <item quantity="other">%d 个 Gist</item>
+    </plurals>
+
+    <plurals name="member">
+        <item quantity="one">1 位成员</item>
+        <item quantity="other">%d 位成员</item>
+    </plurals>
+
+    <plurals name="repository">
+        <item quantity="one">1 个仓库</item>
+        <item quantity="other">%d 个仓库</item>
+    </plurals>
+
+    <plurals name="watcher">
+        <item quantity="one">1 位关注者</item>
+        <item quantity="other">%d 位关注者</item>
+    </plurals>
+
+    <plurals name="page">
+        <item quantity="one">一页</item>
+        <item quantity="other">%d 页</item>
+    </plurals>
+
+    <plurals name="contributor_extra_data">
+        <item quantity="one">%1$d 次贡献</item>
+        <item quantity="other">%1$d 次贡献</item>
+    </plurals>
+
+    <plurals name="star_group_repo_count">
+        <item quantity="other">%d 个仓库</item>
+    </plurals>
+
+</resources>

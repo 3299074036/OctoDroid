@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #1683: synthetic source archive entries on the release page -->
+    <string name="source_code_zip">源代码 (zip)</string>
+    <string name="source_code_tar_gz">源代码 (tar.gz)</string>
+</resources>
