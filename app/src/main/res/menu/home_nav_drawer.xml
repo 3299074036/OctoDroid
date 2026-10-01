@@ -36,6 +36,10 @@
             android:title="@string/recent_history"
             android:icon="@drawable/icon_history"/>
         <item
+            android:id="@+id/download_manager"
+            android:title="@string/download_manager"
+            android:icon="@drawable/download_small"/>
+        <item
             android:id="@+id/my_issues"
             android:title="@string/my_issues"
             android:icon="@drawable/icon_issues"/>

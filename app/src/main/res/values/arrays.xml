@@ -135,4 +135,16 @@
         <item>720</item>
         <item>1440</item>
     </string-array>
+
+    <string-array name="dark_mode_items">
+        <item>Manual</item>
+        <item>Follow system</item>
+        <item>Scheduled</item>
+    </string-array>
+    <string-array name="dark_mode_values">
+        <item>manual</item>
+        <item>system</item>
+        <item>scheduled</item>
+    </string-array>
+
 </resources>

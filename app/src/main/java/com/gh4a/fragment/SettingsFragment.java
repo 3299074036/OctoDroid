@@ -37,7 +37,8 @@ import com.gh4a.utils.MirrorHelper;
 import com.gh4a.widget.IntegerListPreference;
 
 public class SettingsFragment extends PreferenceFragmentCompat implements
-        Preference.OnPreferenceClickListener, Preference.OnPreferenceChangeListener {
+        Preference.OnPreferenceClickListener, Preference.OnPreferenceChangeListener,
+        DarkModeScheduleDialogFragment.SettingsRefreshListener {
     public interface OnStateChangeListener {
         void onThemeChanged();
         void onFontScaleChanged();
@@ -67,6 +68,9 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private static final String KEY_TRANSLATION_SETTINGS = "translation_settings";
     private static final String KEY_CHECK_UPDATE = "check_update";
     public static final String KEY_AUTO_CHECK_UPDATE = "auto_check_update";
+    private static final String KEY_DARK_MODE = "dark_mode";
+    private static final String KEY_DARK_MODE_SCHEDULE_TIME = "dark_mode_schedule_time";
+    private static final String KEY_BACKUP_RESTORE = "backup_restore";
 
     public static boolean isAutoCheckUpdateEnabled(android.content.Context context) {
         return context.getSharedPreferences(PREF_NAME, android.content.Context.MODE_PRIVATE)
@@ -83,6 +87,17 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private IntegerListPreference mNotificationIntervalPref;
     private TwoStatePreference mReleaseRadarPref;
     private IntegerListPreference mReleaseRadarIntervalPref;
+    private Preference mDarkModeScheduleTimePref;
+    private ListPreference mDarkModePref;
+
+    private final androidx.activity.result.ActivityResultLauncher<String[]> mRestoreLauncher =
+            registerForActivityResult(
+                    new androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+                    uri -> {
+                        if (uri != null && isAdded()) {
+                            confirmAndApplyRestore(uri);
+                        }
+                    });
 
     @Override
     public void onAttach(Context context) {
@@ -149,6 +164,21 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
 
         mReleaseRadarIntervalPref = findPreference(KEY_RELEASE_RADAR_INTERVAL);
         mReleaseRadarIntervalPref.setOnPreferenceChangeListener(this);
+
+        mDarkModePref = findPreference(KEY_DARK_MODE);
+        if (mDarkModePref != null) {
+            mDarkModePref.setOnPreferenceChangeListener(this);
+        }
+        mDarkModeScheduleTimePref = findPreference(KEY_DARK_MODE_SCHEDULE_TIME);
+        if (mDarkModeScheduleTimePref != null) {
+            mDarkModeScheduleTimePref.setOnPreferenceClickListener(this);
+            refreshDarkModeScheduleSummary();
+        }
+
+        Preference backupRestorePref = findPreference(KEY_BACKUP_RESTORE);
+        if (backupRestorePref != null) {
+            backupRestorePref.setOnPreferenceClickListener(this);
+        }
     }
 
     public static void applyLanguage(String languageTag) {
@@ -223,7 +253,103 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             }
             return true;
         }
+        if (KEY_DARK_MODE.equals(pref.getKey())) {
+            // apply() runs on next onPreferenceChange after the value is persisted,
+            // but the ListPreference already wrote it; apply now and refresh summary
+            com.gh4a.utils.DarkModeScheduler.apply(getContext());
+            refreshDarkModeScheduleSummary();
+            // recreate to apply the new night mode immediately
+            mListener.onThemeChanged();
+            return true;
+        }
         return false;
+    }
+
+    /** Updates the "深色时段" summary and enables it only in scheduled mode. */
+    public void refreshDarkModeScheduleSummary() {
+        if (mDarkModeScheduleTimePref == null) {
+            return;
+        }
+        android.content.Context context = getContext();
+        boolean scheduled = com.gh4a.utils.DarkModeScheduler.isScheduled(context);
+        mDarkModeScheduleTimePref.setEnabled(scheduled);
+        if (scheduled) {
+            mDarkModeScheduleTimePref.setSummary(getString(
+                    R.string.dark_mode_schedule_summary,
+                    com.gh4a.utils.DarkModeScheduler.formatMinutes(
+                            com.gh4a.utils.DarkModeScheduler.getStartMinutes(context)),
+                    com.gh4a.utils.DarkModeScheduler.formatMinutes(
+                            com.gh4a.utils.DarkModeScheduler.getEndMinutes(context))));
+        } else {
+            mDarkModeScheduleTimePref.setSummary("");
+        }
+    }
+
+    private void showBackupRestoreDialog() {
+        new AlertDialog.Builder(getActivity())
+                .setTitle(R.string.backup_restore)
+                .setItems(new CharSequence[]{
+                        getString(R.string.backup), getString(R.string.backup_restore_action)}, (dialog, which) -> {
+                    if (which == 0) {
+                        doBackup();
+                    } else {
+                        mRestoreLauncher.launch(new String[]{"application/json"});
+                    }
+                })
+                .show();
+    }
+
+    private void doBackup() {
+        new Thread(() -> {
+            try {
+                org.json.JSONObject backup =
+                        com.gh4a.utils.SettingsBackupManager.collectBackup(getContext());
+                String fileName =
+                        com.gh4a.utils.SettingsBackupManager.writeBackupFile(getContext(), backup);
+                showToast(getString(R.string.backup_saved) + ": " + fileName);
+            } catch (Exception e) {
+                showToast(getString(R.string.backup_failed, e.getMessage()));
+            }
+        }).start();
+    }
+
+    private void confirmAndApplyRestore(final android.net.Uri uri) {
+        new AlertDialog.Builder(getActivity())
+                .setMessage(R.string.restore_confirm)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> doRestore(uri))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void doRestore(final android.net.Uri uri) {
+        new Thread(() -> {
+            boolean ok;
+            try {
+                org.json.JSONObject backup =
+                        com.gh4a.utils.SettingsBackupManager.readBackupFile(getContext(), uri);
+                ok = com.gh4a.utils.SettingsBackupManager.applyBackup(getContext(), backup);
+            } catch (Exception e) {
+                ok = false;
+            }
+            if (ok) {
+                // restored dark-mode setting takes effect on next start
+                com.gh4a.utils.DarkModeScheduler.apply(getContext());
+            }
+            final boolean result = ok;
+            if (isAdded()) {
+                getActivity().runOnUiThread(() -> android.widget.Toast.makeText(getActivity(),
+                        result ? R.string.restore_success : R.string.restore_failed,
+                        android.widget.Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    private void showToast(final String message) {
+        if (!isAdded()) {
+            return;
+        }
+        getActivity().runOnUiThread(() -> android.widget.Toast.makeText(
+                getActivity(), message, android.widget.Toast.LENGTH_LONG).show());
     }
 
     @Override
@@ -260,6 +386,13 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 android.widget.Toast.makeText(getActivity(), toast,
                         android.widget.Toast.LENGTH_LONG).show();
             });
+            return true;
+        } else if (KEY_BACKUP_RESTORE.equals(pref.getKey())) {
+            showBackupRestoreDialog();
+            return true;
+        } else if (KEY_DARK_MODE_SCHEDULE_TIME.equals(pref.getKey())) {
+            DarkModeScheduleDialogFragment.newInstance()
+                    .show(getChildFragmentManager(), "dark_schedule");
             return true;
         }
         return false;

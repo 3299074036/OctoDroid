@@ -152,6 +152,8 @@ public class Gh4Application extends Application implements
             default: nightMode = AppCompatDelegate.MODE_NIGHT_NO; break;
         }
         AppCompatDelegate.setDefaultNightMode(nightMode);
+        // Scheduled / follow-system dark mode overrides the manual theme pref
+        com.gh4a.utils.DarkModeScheduler.apply(this);
     }
 
     @Override

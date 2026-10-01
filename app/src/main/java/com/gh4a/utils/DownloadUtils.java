@@ -101,7 +101,9 @@ public class DownloadUtils {
             request.setAllowedOverMetered(false);
         }
 
-        dm.enqueue(request);
+        long downloadId = dm.enqueue(request);
+        DownloadRecordManager.record(context, downloadId, fileName,
+                uri.toString(), description);
     }
 
     // Shared client for redirect resolution: built once, reused for every

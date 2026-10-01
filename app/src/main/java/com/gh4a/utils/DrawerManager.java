@@ -76,6 +76,8 @@ public class DrawerManager {
                 R.string.blog, R.drawable.icon_github));
         DEFAULT_ITEMS.add(new DrawerItemDef("recent_history", R.id.recent_history,
                 R.string.recent_history, R.drawable.icon_history));
+        DEFAULT_ITEMS.add(new DrawerItemDef("download_manager", R.id.download_manager,
+                R.string.download_manager, R.drawable.download_small));
     }
 
     private static SharedPreferences prefs(Context context) {

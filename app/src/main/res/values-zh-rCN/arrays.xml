@@ -48,4 +48,16 @@
         <item>720</item>
         <item>1440</item>
     </string-array>
+
+    <string-array name="dark_mode_items">
+        <item>手动</item>
+        <item>跟随系统</item>
+        <item>定时</item>
+    </string-array>
+    <string-array name="dark_mode_values">
+        <item>manual</item>
+        <item>system</item>
+        <item>scheduled</item>
+    </string-array>
+
 </resources>

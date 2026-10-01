@@ -779,4 +779,35 @@
     <string name="release_radar_notify_text">新版本：%1$s</string>
     <string name="release_radar_notify_summary_title">版本更新</string>
 
+
+    <!-- 备份与恢复 -->
+    <string name="backup_restore">备份与恢复</string>
+    <string name="backup_restore_summary">导出或导入应用设置</string>
+    <string name="backup">备份</string>
+    <string name="backup_restore_action">恢复</string>
+    <string name="backup_saved">备份已保存到下载目录</string>
+    <string name="backup_failed">备份失败：%1$s</string>
+    <string name="restore_success">恢复成功，重启应用后生效</string>
+    <string name="restore_failed">恢复失败：文件格式不正确</string>
+    <string name="restore_confirm">恢复将覆盖当前所有设置，继续吗？</string>
+    <!-- 下载管理 -->
+    <string name="download_manager">下载管理</string>
+    <string name="no_downloads">暂无下载记录</string>
+    <string name="clear_downloads">清空记录</string>
+    <string name="download_status_downloading">下载中</string>
+    <string name="download_status_completed">已完成</string>
+    <string name="download_status_failed">失败</string>
+    <string name="download_open_failed">文件不存在或无法打开</string>
+    <string name="download_record_deleted">已删除记录</string>
+    <!-- 深色模式 -->
+    <string name="dark_mode">深色模式</string>
+    <string name="dark_mode_manual">手动</string>
+    <string name="dark_mode_system">跟随系统</string>
+    <string name="dark_mode_scheduled">定时</string>
+    <string name="dark_mode_schedule_time">深色时段</string>
+    <string name="dark_mode_schedule_summary">%1$s – %2$s 使用深色</string>
+    <string name="dark_mode_switched_manual">已切换为手动模式</string>
+
+    <string name="dark_mode_start">开始时间</string>
+    <string name="dark_mode_end">结束时间</string>
 </resources>

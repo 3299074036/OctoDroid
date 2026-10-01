@@ -189,6 +189,14 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
         mThemeSwitch = (SwitchCompat) themeItem.getActionView();
         mThemeSwitch.setChecked(isNightModeActive());
         mThemeSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            // Manual toggle always wins: drop out of follow-system/scheduled mode
+            if (!com.gh4a.utils.DarkModeScheduler.MODE_MANUAL
+                    .equals(com.gh4a.utils.DarkModeScheduler.getMode(this))) {
+                getPrefs().edit().putString(com.gh4a.utils.DarkModeScheduler.KEY_DARK_MODE,
+                        com.gh4a.utils.DarkModeScheduler.MODE_MANUAL).apply();
+                android.widget.Toast.makeText(this, R.string.dark_mode_switched_manual,
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
             // Theme values mirror Gh4Application: THEME_DARK = 0, THEME_LIGHT = 1
             getPrefs().edit().putInt(SettingsFragment.KEY_THEME, isChecked ? 0 : 1).apply();
             goToToplevelActivity();
@@ -433,6 +441,8 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
                 return new ReleaseRadarFactory(this, mUserLogin);
             case R.id.recent_history:
                 return new RecentHistoryFactory(this);
+            case R.id.download_manager:
+                return new DownloadListFactory(this);
             case R.id.star_groups:
                 return new StarGroupFactory(this);
         }

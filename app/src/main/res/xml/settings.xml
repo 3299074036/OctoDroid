@@ -52,6 +52,21 @@
             android:summary="%s"
             android:title="@string/menu_text_size" />
 
+        <ListPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue="manual"
+            android:entries="@array/dark_mode_items"
+            android:entryValues="@array/dark_mode_values"
+            android:key="dark_mode"
+            android:summary="%s"
+            android:title="@string/dark_mode" />
+
+        <Preference
+            app:iconSpaceReserved="false"
+            android:key="dark_mode_schedule_time"
+            android:title="@string/dark_mode_schedule_time"
+            android:summary="@string/dark_mode_schedule_summary" />
+
     </PreferenceCategory>
 
     <PreferenceCategory
@@ -80,6 +95,12 @@
             android:key="http_gif_load_mode"
             android:summary="%s"
             android:title="@string/menu_gif_load_mode" />
+
+        <Preference
+            app:iconSpaceReserved="false"
+            android:key="backup_restore"
+            android:title="@string/backup_restore"
+            android:summary="@string/backup_restore_summary" />
 
     </PreferenceCategory>
 

@@ -779,4 +779,35 @@
     <string name="release_radar_notify_text">New version: %1$s</string>
     <string name="release_radar_notify_summary_title">New releases</string>
 
+
+    <!-- Backup & restore -->
+    <string name="backup_restore">Backup &amp; restore</string>
+    <string name="backup_restore_summary">Export or import app settings</string>
+    <string name="backup">Back up</string>
+    <string name="backup_restore_action">Restore</string>
+    <string name="backup_saved">Backup saved to Downloads</string>
+    <string name="backup_failed">Backup failed: %1$s</string>
+    <string name="restore_success">Restore succeeded, restart the app to apply</string>
+    <string name="restore_failed">Restore failed: invalid file</string>
+    <string name="restore_confirm">Restoring will overwrite all current settings. Continue?</string>
+    <!-- Download manager -->
+    <string name="download_manager">Downloads</string>
+    <string name="no_downloads">No downloads yet</string>
+    <string name="clear_downloads">Clear history</string>
+    <string name="download_status_downloading">Downloading</string>
+    <string name="download_status_completed">Completed</string>
+    <string name="download_status_failed">Failed</string>
+    <string name="download_open_failed">File not found or cannot be opened</string>
+    <string name="download_record_deleted">Record deleted</string>
+    <!-- Dark mode -->
+    <string name="dark_mode">Dark mode</string>
+    <string name="dark_mode_manual">Manual</string>
+    <string name="dark_mode_system">Follow system</string>
+    <string name="dark_mode_scheduled">Scheduled</string>
+    <string name="dark_mode_schedule_time">Dark period</string>
+    <string name="dark_mode_schedule_summary">Dark from %1$s to %2$s</string>
+    <string name="dark_mode_switched_manual">Switched to manual mode</string>
+
+    <string name="dark_mode_start">Start</string>
+    <string name="dark_mode_end">End</string>
 </resources>
