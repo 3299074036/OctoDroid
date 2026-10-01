@@ -39,6 +39,20 @@ android {
 
     signingConfigs {
         release
+        // Pin the debug key to a persistent keystore: the default
+        // ~/.android/debug.keystore lives outside the home dir and is lost
+        // whenever the VM is replaced, which breaks updates (signature
+        // conflict). Falls back to AGP's default when the file is absent
+        // (e.g. public repo checkouts).
+        debug {
+            def ks = file("../../keystores/octodroid-debug.keystore")
+            if (ks.exists()) {
+                storeFile ks
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+            }
+        }
     }
 
     buildTypes {
