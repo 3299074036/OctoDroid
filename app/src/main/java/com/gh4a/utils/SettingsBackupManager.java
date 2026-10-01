@@ -33,9 +33,13 @@ import java.util.Set;
  * Exports/imports app settings as a JSON file in the Downloads directory.
  *
  * Backed up: everything in "Gh4a-pref" except account credentials
- * (tokens, login list), the drawer customization prefs, and the
- * translation_* keys from the default shared preferences.
- * Account logins/tokens are deliberately never included.
+ * (tokens, login list) and the drawer customization prefs, plus the
+ * non-credential translation_* keys (provider selection etc.) from the
+ * default shared preferences.
+ * Never backed up: account logins/tokens, and translation API
+ * keys/secrets/endpoints (keys starting with translation_api_key,
+ * translation_api_secret or translation_url).
+ * Those stay on the device and must be re-entered after a restore.
  */
 public class SettingsBackupManager {
     private static final int BACKUP_VERSION = 1;
@@ -43,6 +47,16 @@ public class SettingsBackupManager {
     private static final String[] EXACT_EXCLUDED_KEYS = {
             "active_login", "logins",
     };
+
+    /**
+     * 翻译凭据键（含各服务商的 API key/secret/endpoint），绝不写入备份文件，
+     * 也不接受从备份恢复（防止恶意备份注入凭据）。
+     */
+    static boolean isTranslationCredentialKey(String key) {
+        return key.startsWith("translation_api_key")
+                || key.startsWith("translation_api_secret")
+                || key.startsWith("translation_url");
+    }
 
     private static boolean isExcluded(String key) {
         String lower = key.toLowerCase(Locale.US);
@@ -112,7 +126,15 @@ public class SettingsBackupManager {
         return true;
     }
 
-    private static void jsonToPrefs(JSONObject json, SharedPreferences prefs) throws JSONException {
+    /** 恢复时的键过滤器：返回 true 才允许写入。 */
+    private interface KeyFilter {
+        boolean accept(String key);
+    }
+
+    private static final KeyFilter ACCEPT_ALL = key -> true;
+
+    private static void jsonToPrefs(JSONObject json, SharedPreferences prefs,
+            KeyFilter keyFilter) throws JSONException {
         SharedPreferences.Editor editor = prefs.edit();
         JSONArray names = json.names();
         if (names == null) {
@@ -120,7 +142,7 @@ public class SettingsBackupManager {
         }
         for (int i = 0; i < names.length(); i++) {
             String key = names.getString(i);
-            if (isExcluded(key)) {
+            if (isExcluded(key) || !keyFilter.accept(key)) {
                 continue;
             }
             JSONObject holder = json.getJSONObject(key);
@@ -161,14 +183,16 @@ public class SettingsBackupManager {
                 "drawer_config", Context.MODE_PRIVATE);
         prefs.put("drawer_config", prefsToJson(drawer, false));
 
-        // Translation provider + keys live in the default shared preferences
+        // Translation provider + non-credential keys live in the default shared
+        // preferences. API keys/secrets/endpoints are never exported (H-3).
         SharedPreferences def = PreferenceManager.getDefaultSharedPreferences(context);
         JSONObject translation = new JSONObject();
         for (Map.Entry<String, ?> entry : def.getAll().entrySet()) {
-            if (entry.getKey().startsWith("translation_")) {
+            String key = entry.getKey();
+            if (key.startsWith("translation_") && !isTranslationCredentialKey(key)) {
                 JSONObject single = new JSONObject();
                 if (putTypedValue(single, entry.getValue())) {
-                    translation.put(entry.getKey(), single);
+                    translation.put(key, single);
                 }
             }
         }
@@ -236,18 +260,26 @@ public class SettingsBackupManager {
             if (!"OctoDroid".equals(backup.optString("app"))) {
                 return false;
             }
+            // 只接受当前备份版本：格式升级后旧版静默应用可能错位 (M-1)
+            if (backup.optInt("version", -1) != BACKUP_VERSION) {
+                return false;
+            }
             JSONObject prefs = backup.getJSONObject("prefs");
             if (prefs.has("Gh4a-pref")) {
                 jsonToPrefs(prefs.getJSONObject("Gh4a-pref"), context.getSharedPreferences(
-                        SettingsFragment.PREF_NAME, Context.MODE_PRIVATE));
+                        SettingsFragment.PREF_NAME, Context.MODE_PRIVATE), ACCEPT_ALL);
             }
             if (prefs.has("drawer_config")) {
                 jsonToPrefs(prefs.getJSONObject("drawer_config"),
-                        context.getSharedPreferences("drawer_config", Context.MODE_PRIVATE));
+                        context.getSharedPreferences("drawer_config", Context.MODE_PRIVATE),
+                        ACCEPT_ALL);
             }
             if (prefs.has("default")) {
+                // 翻译区只接受 translation_ 非凭据键：恶意备份无法注入 API key/secret (M-1/H-3)
                 jsonToPrefs(prefs.getJSONObject("default"),
-                        PreferenceManager.getDefaultSharedPreferences(context));
+                        PreferenceManager.getDefaultSharedPreferences(context),
+                        key -> key.startsWith("translation_")
+                                && !isTranslationCredentialKey(key));
             }
             return true;
         } catch (JSONException e) {

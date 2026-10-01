@@ -66,6 +66,12 @@ public class IntentUtils {
             return;
         }
 
+        // scheme 白名单：只放行 http/https。评论/README 里的伪装链接可能藏
+        // intent://、javascript: 等 scheme，透过会调起任意已安装应用 (H-4)
+        if (!uriScheme.equals("http") && !uriScheme.equals("https")) {
+            return;
+        }
+
         LinkParser.ParseResult result = LinkParser.parseUri(activity, uri, null);
         int headerColor = activity instanceof BaseActivity ? ((BaseActivity) activity).getCurrentHeaderColor() : 0;
         if (result == null) {

@@ -345,7 +345,7 @@ public abstract class WebViewerActivity extends BaseActivity implements
         StringBuilder content = new StringBuilder();
         content.append("<html><head><title>");
         if (title != null) {
-            content.append(title);
+            content.append(TextUtils.htmlEncode(title));
         }
         content.append("</title>");
         HtmlUtils.writeScriptInclude(content, "showdown");
@@ -354,7 +354,7 @@ public abstract class WebViewerActivity extends BaseActivity implements
 
         content.append("<body>");
         if (title != null) {
-            content.append("<h2>").append(title).append("</h2>");
+            content.append("<h2>").append(TextUtils.htmlEncode(title)).append("</h2>");
         }
         content.append("<div id='content'></div>");
 
@@ -386,7 +386,7 @@ public abstract class WebViewerActivity extends BaseActivity implements
         StringBuilder content = new StringBuilder();
         content.append("<html><head><title>");
         if (title != null) {
-            content.append(title);
+            content.append(TextUtils.htmlEncode(title));
         }
         content.append("</title>");
         HtmlUtils.writeScriptInclude(content, "codeutils");
@@ -403,7 +403,7 @@ public abstract class WebViewerActivity extends BaseActivity implements
         content.append("addClickListeners(); NativeClient.onRenderingDone(); })'");
         content.append(" onresize='scrollToHighlight();'>");
         if (title != null) {
-            content.append("<h2>").append(title).append("</h2>");
+            content.append("<h2>").append(TextUtils.htmlEncode(title)).append("</h2>");
         }
         content.append("<pre id='content' class='prettyprint linenums lang-");
         content.append(prettifyLanguageCodeFor(fileName, data)).append("'>");
@@ -438,7 +438,7 @@ public abstract class WebViewerActivity extends BaseActivity implements
         HtmlUtils.writeCssInclude(content, "markdown", cssTheme);
         content.append("<body>");
         if (title != null) {
-            content.append("<h2>").append(title).append("</h2>");
+            content.append("<h2>").append(TextUtils.htmlEncode(title)).append("</h2>");
         }
         content.append(html);
         content.append("</body>");

@@ -79,6 +79,11 @@ public class MirrorHelper {
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
         }
+        // 只接受 https 镜像：无 scheme 或 http 会在改写时产生畸形 URL (M-9)，
+        // 且明文传输可被窃听篡改；不合法视为未配置，原样直连
+        if (!base.regionMatches(true, 0, "https://", 0, 8)) {
+            return "";
+        }
         return base;
     }
 
@@ -93,7 +98,12 @@ public class MirrorHelper {
             String original = request.url().toString();
             String rewritten = rewriteUrl(appContext, original);
             if (!rewritten.equals(original)) {
-                request = request.newBuilder().url(rewritten).build();
+                // 改写目标是第三方镜像站：剥离 Authorization 等鉴权头，
+                // 镜像站本就无法使用该 token，纵深防御 (H-5)
+                request = request.newBuilder()
+                        .removeHeader("Authorization")
+                        .url(rewritten)
+                        .build();
             }
             return chain.proceed(request);
         };
@@ -237,6 +247,10 @@ public class MirrorHelper {
             }
         } catch (IOException e) {
             Log.d(TAG, "Speed probe failed: " + target.url, e);
+        } catch (RuntimeException e) {
+            // 畸形地址（如无 scheme 的自定义地址）抛 IllegalArgumentException：
+            // 返回不可用条目而不是静默丢弃，让用户在列表里看得到 (L-8)
+            Log.d(TAG, "Speed probe bad URL: " + target.url, e);
         }
         return new MirrorSpeedResult(target.name, target.url, target.presetValue, -1);
     }

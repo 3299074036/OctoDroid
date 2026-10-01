@@ -13,12 +13,16 @@ if (clientPropFile.canRead()) {
 }
 
 ext {
+    // 无 client.properties（新检出/CI）时给空默认值，保证 debug 构建不中断 (M-13)；
+    // 此时 OAuth 登录不可用，属预期行为
+    ClientId = ""
+    ClientSecret = ""
     if (clientProps.containsKey('ClientId')
             && clientProps.containsKey('ClientSecret')) {
         ClientId = clientProps['ClientId']
         ClientSecret = clientProps['ClientSecret']
     } else {
-        println 'client.properties not found or incomplete'
+        println 'client.properties not found or incomplete, using empty OAuth credentials'
     }
 }
 
@@ -28,8 +32,8 @@ android {
     defaultConfig {
         minSdkVersion 23
         targetSdkVersion 33
-        versionCode 32
-        versionName "0.0.32"
+        versionCode 33
+        versionName "0.0.33"
         applicationId "com.gh4a"
         resourceConfigurations += ['en', 'zh-rCN']
 

@@ -769,6 +769,7 @@
     <string name="mirror_speed_test">镜像测速</string>
     <string name="mirror_speed_test_summary">测试全部预设镜像及自定义地址的延迟，按快慢排序，点击选用</string>
     <string name="mirror_speed_custom_name">自定义地址</string>
+    <string name="mirror_custom_url_invalid">自定义镜像地址必须以 https:// 开头</string>
     <string name="mirror_speed_testing">正在测试各镜像延迟…</string>
     <string name="mirror_speed_title">镜像测速——点击选用</string>
     <string name="mirror_speed_item">%1$s — %2$d 毫秒</string>

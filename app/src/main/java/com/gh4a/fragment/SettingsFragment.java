@@ -159,6 +159,21 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             mirrorSpeedTestPref.setOnPreferenceClickListener(this);
         }
 
+        // 自定义镜像地址必须带 https:// scheme，否则镜像改写会产生畸形 URL (M-9)
+        Preference mirrorCustomUrlPref = findPreference(KEY_MIRROR_CUSTOM_URL);
+        if (mirrorCustomUrlPref != null) {
+            mirrorCustomUrlPref.setOnPreferenceChangeListener((pref, newValue) -> {
+                String url = String.valueOf(newValue).trim();
+                if (!url.isEmpty() && !url.regionMatches(true, 0, "https://", 0, 8)) {
+                    android.widget.Toast.makeText(getContext(),
+                            R.string.mirror_custom_url_invalid,
+                            android.widget.Toast.LENGTH_LONG).show();
+                    return false;
+                }
+                return true;
+            });
+        }
+
         mReleaseRadarPref = findPreference(KEY_RELEASE_RADAR_NOTIFICATIONS);
         mReleaseRadarPref.setOnPreferenceChangeListener(this);
 
@@ -292,7 +307,13 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 .create();
         progress.show();
         MirrorHelper.testAllMirrorsSpeed(getActivity(), results -> {
-            progress.dismiss();
+            // 先判存活再 dismiss：中途退出会导致 leaked window / IllegalArgumentException (M-5)
+            if (isAdded() && !getActivity().isFinishing()) {
+                try {
+                    progress.dismiss();
+                } catch (Exception ignored) {
+                }
+            }
             if (!isAdded()) {
                 return;
             }
@@ -349,15 +370,19 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     }
 
     private void doBackup() {
+        // Context 和文案在主线程快照，线程里不再碰 getContext() (M-4 同类问题)
+        final android.content.Context appContext = getActivity().getApplicationContext();
+        final String savedFormat = getString(R.string.backup_saved);
+        final String failedFormat = getString(R.string.backup_failed);
         new Thread(() -> {
             try {
                 org.json.JSONObject backup =
-                        com.gh4a.utils.SettingsBackupManager.collectBackup(getContext());
+                        com.gh4a.utils.SettingsBackupManager.collectBackup(appContext);
                 String fileName =
-                        com.gh4a.utils.SettingsBackupManager.writeBackupFile(getContext(), backup);
-                showToast(getString(R.string.backup_saved) + ": " + fileName);
+                        com.gh4a.utils.SettingsBackupManager.writeBackupFile(appContext, backup);
+                showToast(savedFormat + ": " + fileName);
             } catch (Exception e) {
-                showToast(getString(R.string.backup_failed, e.getMessage()));
+                showToast(String.format(failedFormat, e.getMessage()));
             }
         }).start();
     }
@@ -371,18 +396,20 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     }
 
     private void doRestore(final android.net.Uri uri) {
+        // applicationContext 快照进线程：恢复完成前离开设置页，getContext() 会是 null (M-4)
+        final android.content.Context appContext = getActivity().getApplicationContext();
         new Thread(() -> {
             boolean ok;
             try {
                 org.json.JSONObject backup =
-                        com.gh4a.utils.SettingsBackupManager.readBackupFile(getContext(), uri);
-                ok = com.gh4a.utils.SettingsBackupManager.applyBackup(getContext(), backup);
+                        com.gh4a.utils.SettingsBackupManager.readBackupFile(appContext, uri);
+                ok = com.gh4a.utils.SettingsBackupManager.applyBackup(appContext, backup);
+                if (ok) {
+                    // restored dark-mode setting takes effect on next start
+                    com.gh4a.utils.DarkModeScheduler.apply(appContext);
+                }
             } catch (Exception e) {
                 ok = false;
-            }
-            if (ok) {
-                // restored dark-mode setting takes effect on next start
-                com.gh4a.utils.DarkModeScheduler.apply(getContext());
             }
             final boolean result = ok;
             if (isAdded()) {

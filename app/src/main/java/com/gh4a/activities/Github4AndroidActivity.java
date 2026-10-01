@@ -17,6 +17,7 @@ package com.gh4a.activities;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 
@@ -59,6 +60,9 @@ public class Github4AndroidActivity extends BaseActivity implements
     private static final String PARAM_CODE = "code";
     private static final String PARAM_SCOPE = "scope";
     private static final String PARAM_CALLBACK_URI = "redirect_uri";
+    private static final String PARAM_STATE = "state";
+    /** 未完成的 OAuth 流程的随机 state，存 prefs 防进程被杀丢失。 */
+    private static final String PREF_OAUTH_STATE = "oauth_state_pending";
 
     private static final Uri CALLBACK_URI = Uri.parse("gh4a://oauth");
 
@@ -112,11 +116,25 @@ public class Github4AndroidActivity extends BaseActivity implements
 
     private boolean handleIntent(Intent intent) {
         Uri data = intent.getData();
+        // 常量在前比较：外部可传入无 scheme/host 的 data，直接 equals 会 NPE (L-1)
         if (data != null
-                && data.getScheme().equals(CALLBACK_URI.getScheme())
-                && data.getHost().equals(CALLBACK_URI.getHost())) {
+                && CALLBACK_URI.getScheme().equals(data.getScheme())
+                && CALLBACK_URI.getHost().equals(data.getHost())) {
             final String code = data.getQueryParameter(PARAM_CODE);
             if (code == null) {
+                onLoginCanceled();
+                return true;
+            }
+            // 校验 state：拒绝伪造的回调 intent（登录 CSRF，CR-2）。
+            // 无 state 或对不上的一律视为取消，不拿 code 换 token。
+            SharedPreferences prefs = androidx.preference.PreferenceManager
+                    .getDefaultSharedPreferences(this);
+            String expectedState = prefs.getString(PREF_OAUTH_STATE, null);
+            prefs.edit().remove(PREF_OAUTH_STATE).apply();
+            String actualState = data.getQueryParameter(PARAM_STATE);
+            if (expectedState == null || !expectedState.equals(actualState)) {
+                android.util.Log.w("Github4AndroidActivity",
+                        "OAuth callback state mismatch, ignoring");
                 onLoginCanceled();
                 return true;
             }
@@ -236,11 +254,16 @@ public class Github4AndroidActivity extends BaseActivity implements
     }
 
     public static void launchOauthLogin(Activity activity) {
+        // 随机 state 防登录 CSRF：回调时必须原样返回，否则拒绝 (CR-2)
+        String state = java.util.UUID.randomUUID().toString();
+        androidx.preference.PreferenceManager.getDefaultSharedPreferences(activity)
+                .edit().putString(PREF_OAUTH_STATE, state).apply();
         Uri uri = Uri.parse(OAUTH_URL)
                 .buildUpon()
                 .appendQueryParameter(PARAM_CLIENT_ID, BuildConfig.CLIENT_ID)
                 .appendQueryParameter(PARAM_SCOPE, LoginModeChooserFragment.SCOPES)
                 .appendQueryParameter(PARAM_CALLBACK_URI, CALLBACK_URI.toString())
+                .appendQueryParameter(PARAM_STATE, state)
                 .build();
         IntentUtils.openInCustomTabOrBrowser(activity, uri);
     }

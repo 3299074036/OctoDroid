@@ -55,7 +55,7 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
      */
     private void migrateRemovedProvider() {
         SharedPreferences prefs = getPreferenceManager().getSharedPreferences();
-        String provider = prefs.getString(TranslationManager.KEY_PROVIDER, "");
+        String provider = getStringSafe(prefs, TranslationManager.KEY_PROVIDER, "");
         if ("libretranslate".equals(provider) || "microsoft".equals(provider)) {
             prefs.edit().putString(TranslationManager.KEY_PROVIDER,
                     TranslationManager.PROVIDER_GOOGLE).apply();
@@ -72,7 +72,7 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
         if (isMigrationDone(prefs)) {
             return;
         }
-        String provider = prefs.getString(TranslationManager.KEY_PROVIDER,
+        String provider = getStringSafe(prefs, TranslationManager.KEY_PROVIDER,
                 TranslationManager.PROVIDER_GOOGLE);
         copyIfPresent(prefs, TranslationManager.KEY_API_KEY,
                 TranslationManager.apiKeyPrefKey(provider));
@@ -82,23 +82,40 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
     }
 
     /**
-     * 备份恢复可能把 boolean 存成 String，这里兼容读取并顺手修复类型；
-     * 直接 getBoolean 会抛 ClassCastException 导致打开翻译设置时闪退。
+     * 类型安全地读 String：备份损坏/恶意备份导致值类型错乱时返回默认值，
+     * 而不是抛 ClassCastException 让设置页必现闪退 (M-2)。
      */
-    private static boolean isMigrationDone(SharedPreferences prefs) {
+    private static String getStringSafe(SharedPreferences prefs, String key, String defValue) {
         try {
-            return prefs.getBoolean("translation_cred_migrated_v1", false);
-        } catch (ClassCastException e) {
-            boolean done = Boolean.parseBoolean(
-                    prefs.getString("translation_cred_migrated_v1", ""));
-            prefs.edit().putBoolean("translation_cred_migrated_v1", done).apply();
-            return done;
+            Object v = prefs.getAll().get(key);
+            return v instanceof String ? (String) v : defValue;
+        } catch (Exception e) {
+            return defValue;
         }
     }
 
+    /**
+     * 备份恢复可能把 boolean 存成 String（0.0.32 的 bug），这里兼容读取并顺手修复类型；
+     * 其他错乱类型一律视为未迁移并修复为 boolean，直接 getBoolean 会闪退。
+     */
+    private static boolean isMigrationDone(SharedPreferences prefs) {
+        Object v;
+        try {
+            v = prefs.getAll().get("translation_cred_migrated_v1");
+        } catch (Exception e) {
+            return false;
+        }
+        if (v instanceof Boolean) {
+            return (Boolean) v;
+        }
+        boolean done = v instanceof String && Boolean.parseBoolean((String) v);
+        prefs.edit().putBoolean("translation_cred_migrated_v1", done).apply();
+        return done;
+    }
+
     private static void copyIfPresent(SharedPreferences prefs, String from, String to) {
-        String value = prefs.getString(from, "");
-        if (!TextUtils.isEmpty(value) && TextUtils.isEmpty(prefs.getString(to, ""))) {
+        String value = getStringSafe(prefs, from, "");
+        if (!TextUtils.isEmpty(value) && TextUtils.isEmpty(getStringSafe(prefs, to, ""))) {
             prefs.edit().putString(to, value).apply();
         }
     }
@@ -111,23 +128,26 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
         if (getContext() == null) {
             return;
         }
+        // Context 和文案在主线程先快照：测试中途退出设置页，后台线程再碰
+        // getContext()/getString() 会因 detach 崩溃 (M-3)
+        final android.content.Context appContext = getContext().getApplicationContext();
+        final String okFormat = getString(R.string.translation_test_ok);
+        final String failFormat = getString(R.string.translation_test_fail);
         Toast.makeText(getContext(), R.string.translation_testing, Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             String message;
             try {
-                Translator translator = TranslationManager.createTranslator(
-                        getContext().getApplicationContext());
-                String target = TranslationManager.getTargetLanguage(
-                        getContext().getApplicationContext());
+                Translator translator = TranslationManager.createTranslator(appContext);
+                String target = TranslationManager.getTargetLanguage(appContext);
                 String result = translator.translate("Hello, world!", "en", target);
-                message = getString(R.string.translation_test_ok, result);
+                message = String.format(okFormat, result);
             } catch (Exception e) {
                 String detail = e.getMessage() != null ? e.getMessage() : e.toString();
-                message = getString(R.string.translation_test_fail, detail);
+                message = String.format(failFormat, detail);
             }
             final String toastMsg = message;
             new Handler(Looper.getMainLooper()).post(() -> {
-                if (getContext() != null) {
+                if (isAdded() && getContext() != null) {
                     Toast.makeText(getContext(), toastMsg, Toast.LENGTH_LONG).show();
                 }
             });
@@ -174,7 +194,7 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
      */
     private void updateVisibility() {
         SharedPreferences prefs = getPreferenceManager().getSharedPreferences();
-        String provider = prefs.getString(TranslationManager.KEY_PROVIDER,
+        String provider = getStringSafe(prefs, TranslationManager.KEY_PROVIDER,
                 TranslationManager.PROVIDER_GOOGLE);
 
         boolean isGoogle = TranslationManager.PROVIDER_GOOGLE.equals(provider);
@@ -186,7 +206,7 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
             // rebind to this provider's isolated storage
             String key = TranslationManager.apiKeyPrefKey(provider);
             mKeyPref.setKey(key);
-            mKeyPref.setText(prefs.getString(key, ""));
+            mKeyPref.setText(getStringSafe(prefs, key, ""));
             mKeyPref.setVisible(!isGoogle);
             int titleRes;
             int summaryRes;
@@ -210,7 +230,7 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
         if (mSecretPref != null) {
             String key = TranslationManager.apiSecretPrefKey(provider);
             mSecretPref.setKey(key);
-            mSecretPref.setText(prefs.getString(key, ""));
+            mSecretPref.setText(getStringSafe(prefs, key, ""));
             mSecretPref.setVisible(isYoudao || isBaidu);
             int titleRes;
             int summaryRes;

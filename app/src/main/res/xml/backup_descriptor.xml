@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <include domain="sharedpref" path="Gh4a-pref.xml" />
+    <!-- Gh4a-pref.xml 含全部账号的 GitHub OAuth token 和翻译 API key，
+         禁止随系统备份上传云端 (H-2)。设置迁移请用应用内的手动备份/恢复。 -->
     <include domain="database" path="gh4adb.db" />
     <include domain="database" path="suggestions.db" />
 </full-backup-content>

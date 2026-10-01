@@ -769,6 +769,7 @@
     <string name="mirror_speed_test">Test mirror speed</string>
     <string name="mirror_speed_test_summary">Measure latency of all preset mirrors and your custom URL, fastest first; tap to use</string>
     <string name="mirror_speed_custom_name">Custom URL</string>
+    <string name="mirror_custom_url_invalid">Custom mirror URL must start with https://</string>
     <string name="mirror_speed_testing">Testing mirror speeds…</string>
     <string name="mirror_speed_title">Mirror speed — tap to use</string>
     <string name="mirror_speed_item">%1$s — %2$d ms</string>
