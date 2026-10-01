@@ -1,0 +1,29 @@
+# OctoDroid Debug 构建记录
+
+- 构建时间：2026-10-01 21:48 (CST)
+- 源码：~/workspace/7Z1H/codes/OctoDroid（commit 7ae8251，master）
+- 版本：0.0.26 / versionCode 26
+- 包名：com.gh4a.debug（debug variant）
+- 产物：~/workspace/7Z1H/apps/OctoDroid-debug-0.0.26.apk（12 MB）
+- SHA-256：3fb67cac4b9bba03b30690ad70457a82a742b80d780e45da15436eb542f2403b
+- compileSdk 36 / targetSdk 33
+
+## 构建环境
+- JDK：Temurin 21.0.12.1（~/workspace/7Z1H/tools/jdk-21）
+- Android SDK：platform-36、build-tools 36.0.0（~/workspace/7Z1H/tools/android-sdk）
+- Gradle：8.13 独立安装（~/workspace/7Z1H/tools/gradle-8.13），AGP 8.13.1
+- Gradle 缓存：~/workspace/7Z1H/dependencies/gradle
+- 构建脚本：~/workspace/7Z1H/scripts/build-octodroid.sh（重打包直接运行）
+
+## 签名
+- 使用固定 debug keystore：~/workspace/7Z1H/codes/keystores/octodroid-debug.keystore
+- 签名者证书 SHA-256：6e2bd125c7c19467ab51502679672d9d655c121e225da9fe439f362ee676c69a
+- 已用 apksigner verify --print-certs 确认 APK 签名与该 keystore 一致
+
+## 服务器环境特殊处理（重打包时保留）
+1. 出口代理需要认证，配置在 $GRADLE_USER_HOME/gradle.properties（systemProp.*）。
+2. 出口有 TLS 拦截，CA（Hatch Sandbox Egress CA）已导入 JDK cacerts（alias hatch-egress-ca）。
+3. 沙箱 IPv6 映射路由异常，所有 JVM 经 _JAVA_OPTIONS=-Djava.net.preferIPv4Stack=true 强制 IPv4；
+   注意 Gradle 会过滤 org.gradle.jvmargs 里的自定义 -D，只保留 -Xmx/-Dfile.encoding，
+   所以 IPv4 开关必须走 _JAVA_OPTIONS，不能只写 gradle.properties。
+4. GitHub OAuth 凭据在 app/client.properties（权限 600），编译进 APK。
