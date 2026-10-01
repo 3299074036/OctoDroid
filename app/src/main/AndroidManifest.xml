@@ -147,21 +147,27 @@
         <activity android:name=".activities.home.HomeActivity" android:exported="false" />
         <activity android:name=".activities.ReviewActivity" android:exported="false" />
 
+        <!-- 下面 4 个 Activity 的 title 故意引用可翻译字符串（debug 验证运行时正常），
+             忽略 ManifestResource 检查以通过 release 构建 -->
         <activity
             android:name=".activities.SettingsActivity"
-            android:title="@string/settings" />
+            android:title="@string/settings"
+            tools:ignore="ManifestResource" />
 
         <activity
             android:name=".activities.TranslationSettingsActivity"
-            android:title="@string/translation_settings" />
+            android:title="@string/translation_settings"
+            tools:ignore="ManifestResource" />
 
         <activity
             android:name=".activities.DrawerEditActivity"
-            android:title="@string/customize_drawer" />
+            android:title="@string/customize_drawer"
+            tools:ignore="ManifestResource" />
 
         <activity
             android:name=".activities.AccountManageActivity"
-            android:title="@string/account_manage" />
+            android:title="@string/account_manage"
+            tools:ignore="ManifestResource" />
 
         <activity android:name=".resolver.BrowseFilter"
             android:excludeFromRecents="true"

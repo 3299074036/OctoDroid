@@ -628,7 +628,7 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
         mLeftDrawerMenu.setGroupVisible(R.id.my_items, !accountMode);
         mLeftDrawerMenu.setGroupVisible(R.id.navigation, !accountMode);
         mLeftDrawerMenu.setGroupVisible(R.id.explore, !accountMode);
-        mLeftDrawerMenu.setGroupVisible(R.id.settings, !accountMode);
+        mLeftDrawerMenu.setGroupVisible(R.id.settings_group, !accountMode);
         mLeftDrawerMenu.setGroupVisible(R.id.account, accountMode);
         mLeftDrawerMenu.setGroupVisible(R.id.other_accounts, accountMode);
 

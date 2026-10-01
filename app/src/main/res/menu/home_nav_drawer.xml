@@ -83,7 +83,7 @@
             android:icon="@drawable/icon_search"/>
     </group>
     <!-- 设置和深色模式开关（菜单形式） -->
-    <group android:id="@+id/settings">
+    <group android:id="@+id/settings_group">
         <item
             android:id="@+id/settings"
             android:title="@string/settings"
