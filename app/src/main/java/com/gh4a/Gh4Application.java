@@ -276,17 +276,30 @@ public class Gh4Application extends Application implements
         SharedPreferences prefs = getPrefs();
         updateNotificationWorker(prefs);
         if (prefs.getBoolean(SettingsFragment.KEY_RELEASE_RADAR_NOTIFICATIONS, false)) {
-            int intervalMinutes;
-            try {
-                intervalMinutes = Integer.parseInt(
-                        prefs.getString(SettingsFragment.KEY_RELEASE_RADAR_INTERVAL, "360"));
-            } catch (NumberFormatException e) {
-                intervalMinutes = 360;
-            }
-            ReleaseRadarWorker.schedule(this, intervalMinutes);
+            ReleaseRadarWorker.schedule(this, getReleaseRadarIntervalMinutes(prefs));
         } else {
             ReleaseRadarWorker.cancel(this);
         }
+    }
+
+    /**
+     * Reads the release radar interval defensively. The setting is an
+     * IntegerListPreference which persists an int, but a String value is
+     * tolerated as well so a type mismatch can never crash the app again.
+     */
+    private static int getReleaseRadarIntervalMinutes(SharedPreferences prefs) {
+        Object raw = prefs.getAll().get(SettingsFragment.KEY_RELEASE_RADAR_INTERVAL);
+        if (raw instanceof Number) {
+            return ((Number) raw).intValue();
+        }
+        if (raw instanceof String) {
+            try {
+                return Integer.parseInt((String) raw);
+            } catch (NumberFormatException ignored) {
+                // fall through to default
+            }
+        }
+        return 360;
     }
 
     private SharedPreferences getPrefs() {
