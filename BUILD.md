@@ -2,7 +2,7 @@
 
 本文档描述如何在 Muse 服务器上从零开始完整构建出 OctoDroid debug APK。
 按顺序执行每一步，即可准确复现产物。如只做日常重打包，直接运行
-`~/workspace/7Z1H/scripts/build-octodroid.sh` 即可（跳到第 11 节）。
+`~/workspace/7Z1H/scripts/OctoDroid/build-octodroid.sh` 即可（跳到第 11 节）。
 
 ## 0. 目录约定
 
@@ -11,8 +11,8 @@
 | 源码 | `~/workspace/7Z1H/codes` |
 | 工具（JDK / SDK / Gradle） | `~/workspace/7Z1H/tools` |
 | 依赖（Gradle 缓存） | `~/workspace/7Z1H/dependencies` |
-| 产物（APK） | `~/workspace/7Z1H/apps` |
-| 脚本 | `~/workspace/7Z1H/scripts` |
+| 产物（APK） | `~/workspace/7Z1H/apps/OctoDroid` |
+| 脚本 | `~/workspace/7Z1H/scripts/OctoDroid` |
 
 > 约定：安装目录如需变更，须先通知用户并获得审批。
 
@@ -196,7 +196,7 @@ keytool -list -alias hatch-egress-ca \
 
 ## 10. 构建脚本
 
-脚本位于 `~/workspace/7Z1H/scripts/build-octodroid.sh`，内容要点：
+脚本位于 `~/workspace/7Z1H/scripts/OctoDroid/build-octodroid.sh`，内容要点：
 
 - 设置 `JAVA_HOME`、`ANDROID_HOME`、`ANDROID_SDK_ROOT`、`GRADLE_USER_HOME`、
   `PATH`（JDK 21 + Gradle 8.13）。
@@ -208,12 +208,12 @@ keytool -list -alias hatch-egress-ca \
   （只保留 `-Xmx` / `-Dfile.encoding`），写 gradle.properties 无效。
 - `gradle assembleDebug --no-daemon`，版本号从 `app/build.gradle` 的
   `versionName` 自动读取，产物复制到
-  `~/workspace/7Z1H/apps/OctoDroid-debug-<版本>.apk`。
+  `~/workspace/7Z1H/apps/OctoDroid/OctoDroid-debug-<版本>.apk`。
 
 ## 11. 执行构建
 
 ```bash
-bash ~/workspace/7Z1H/scripts/build-octodroid.sh
+bash ~/workspace/7Z1H/scripts/OctoDroid/build-octodroid.sh
 ```
 
 首次构建约 10 分钟（含下载 AGP / AndroidX 等全部依赖，约数百 MB）；
@@ -222,7 +222,7 @@ bash ~/workspace/7Z1H/scripts/build-octodroid.sh
 ## 12. 验证产物
 
 ```bash
-APK=~/workspace/7Z1H/apps/OctoDroid-debug-0.0.26.apk
+APK=~/workspace/7Z1H/apps/OctoDroid/OctoDroid-debug-0.0.26.apk
 export PATH=~/workspace/7Z1H/tools/jdk-21/bin:$PATH
 BT=~/workspace/7Z1H/tools/android-sdk/build-tools/36.0.0
 
