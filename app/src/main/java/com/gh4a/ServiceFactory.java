@@ -215,16 +215,7 @@ public class ServiceFactory {
                 .build();
         sImageHttpClient = sApiHttpClient.newBuilder()
                 .cache(new Cache(new File(context.getCacheDir(), "image-http"), twentyMB))
-                .addInterceptor(chain -> {
-                    // 国内加速：头像、markdown 图片、图片查看器的资源走镜像
-                    Request request = chain.request();
-                    String original = request.url().toString();
-                    String rewritten = MirrorHelper.rewriteUrl(context, original);
-                    if (!rewritten.equals(original)) {
-                        request = request.newBuilder().url(rewritten).build();
-                    }
-                    return chain.proceed(request);
-                })
+                .addInterceptor(MirrorHelper.mirrorInterceptor(context))
                 .build();
     }
 }

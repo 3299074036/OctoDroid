@@ -5,14 +5,22 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 
+import com.gh4a.R;
 import com.gh4a.fragment.SettingsFragment;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -33,6 +41,8 @@ public class MirrorHelper {
     public static final String PREF_MIRROR_CUSTOM_URL = "mirror_custom_url";
     public static final String PRESET_CUSTOM = "custom";
     public static final String DEFAULT_PRESET = "https://gh-proxy.com";
+    /** 已下线镜像（2026-10-01 实测不可用），老用户存量选择自动迁移到默认。 */
+    private static final String DEAD_PRESET = "https://mirror.ghproxy.com";
 
     /** 国内直连慢、且无鉴权可安全走代理的 host。 */
     private static final Set<String> MIRRORABLE_HOSTS = new HashSet<>(Arrays.asList(
@@ -55,6 +65,10 @@ public class MirrorHelper {
     public static String getMirrorBase(Context context) {
         SharedPreferences p = prefs(context);
         String preset = p.getString(PREF_MIRROR_PRESET, DEFAULT_PRESET);
+        if (DEAD_PRESET.equals(preset)) {
+            preset = DEFAULT_PRESET;
+            p.edit().putString(PREF_MIRROR_PRESET, preset).apply();
+        }
         String base = PRESET_CUSTOM.equals(preset)
                 ? p.getString(PREF_MIRROR_CUSTOM_URL, "")
                 : preset;
@@ -66,6 +80,23 @@ public class MirrorHelper {
             base = base.substring(0, base.length() - 1);
         }
         return base;
+    }
+
+    /**
+     * OkHttp 拦截器：镜像加速开关打开时，把可走镜像的 URL 改写为镜像地址；
+     * 否则原样放行。供图片、趋势等 OkHttp/Retrofit 客户端复用。
+     */
+    public static okhttp3.Interceptor mirrorInterceptor(Context context) {
+        final Context appContext = context.getApplicationContext();
+        return chain -> {
+            okhttp3.Request request = chain.request();
+            String original = request.url().toString();
+            String rewritten = rewriteUrl(appContext, original);
+            if (!rewritten.equals(original)) {
+                request = request.newBuilder().url(rewritten).build();
+            }
+            return chain.proceed(request);
+        };
     }
 
     /**
@@ -90,39 +121,123 @@ public class MirrorHelper {
         return base + "/" + url;
     }
 
-    public interface TestCallback {
-        void onResult(boolean ok, String message);
+    /** 单个镜像的测速结果；latencyMs &lt; 0 表示不可用。 */
+    public static class MirrorSpeedResult {
+        public final String name;
+        /** 探测用的镜像基地址。 */
+        public final String url;
+        /** 选中时写入 mirror_preset 的值（预设即 url 本身，自定义地址为 "custom"）。 */
+        public final String presetValue;
+        public final long latencyMs;
+
+        public MirrorSpeedResult(String name, String url, long latencyMs) {
+            this(name, url, url, latencyMs);
+        }
+
+        public MirrorSpeedResult(String name, String url, String presetValue, long latencyMs) {
+            this.name = name;
+            this.url = url;
+            this.presetValue = presetValue;
+            this.latencyMs = latencyMs;
+        }
+
+        public boolean isOk() {
+            return latencyMs >= 0;
+        }
     }
 
-    /** 连通性测试：经镜像拉一个小文件，10 秒超时。 */
-    public static void testMirror(Context context, TestCallback callback) {
-        String base = getMirrorBase(context);
-        Handler handler = new Handler(Looper.getMainLooper());
-        if (base.isEmpty()) {
-            handler.post(() -> callback.onResult(false, null));
+    public interface SpeedTestCallback {
+        void onResult(List<MirrorSpeedResult> results);
+    }
+
+    /**
+     * 镜像测速：并行测试全部预设镜像及已填写的自定义地址的延迟，
+     * 按从快到慢排序（不可用的排最后）。结果回调在主线程。
+     */
+    public static void testAllMirrorsSpeed(Context context, SpeedTestCallback callback) {
+        final Handler handler = new Handler(Looper.getMainLooper());
+        String[] names;
+        String[] values;
+        try {
+            names = context.getResources().getStringArray(R.array.mirror_preset_items);
+            values = context.getResources().getStringArray(R.array.mirror_preset_values);
+        } catch (android.content.res.Resources.NotFoundException e) {
+            Log.d(TAG, "Mirror preset arrays not found", e);
+            handler.post(() -> callback.onResult(new ArrayList<>()));
             return;
         }
-        String probe = base
-                + "/https://raw.githubusercontent.com/github/gitignore/main/README.md";
-        OkHttpClient client = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
+        final List<MirrorSpeedResult> targets = new ArrayList<>();
+        int n = Math.min(names.length, values.length);
+        for (int i = 0; i < n; i++) {
+            if (PRESET_CUSTOM.equals(values[i])) {
+                continue;
+            }
+            targets.add(new MirrorSpeedResult(names[i], values[i], -1));
+        }
+        // 已填写的自定义地址也一起测，选中时切回“自定义”
+        String custom = prefs(context).getString(PREF_MIRROR_CUSTOM_URL, "");
+        if (custom != null) {
+            custom = custom.trim();
+            while (custom.endsWith("/")) {
+                custom = custom.substring(0, custom.length() - 1);
+            }
+            if (!custom.isEmpty()) {
+                targets.add(new MirrorSpeedResult(
+                        context.getString(R.string.mirror_speed_custom_name),
+                        custom, PRESET_CUSTOM, -1));
+            }
+        }
+        if (targets.isEmpty()) {
+            handler.post(() -> callback.onResult(new ArrayList<>()));
+            return;
+        }
+        final OkHttpClient client = new OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
                 .build();
         new Thread(() -> {
-            boolean ok;
-            String msg;
-            try (Response r = client.newCall(
-                    new Request.Builder().url(probe).build()).execute()) {
-                ok = r.isSuccessful();
-                msg = ok ? null : "HTTP " + r.code();
-            } catch (IOException e) {
-                Log.d(TAG, "Mirror test failed", e);
-                ok = false;
-                msg = e.getClass().getSimpleName();
+            ExecutorService pool =
+                    Executors.newFixedThreadPool(Math.min(targets.size(), 5));
+            List<Future<MirrorSpeedResult>> futures = new ArrayList<>();
+            for (MirrorSpeedResult t : targets) {
+                futures.add(pool.submit(() -> probeMirror(client, t)));
             }
-            final boolean fOk = ok;
-            final String fMsg = msg;
-            handler.post(() -> callback.onResult(fOk, fMsg));
+            List<MirrorSpeedResult> results = new ArrayList<>();
+            for (Future<MirrorSpeedResult> f : futures) {
+                try {
+                    results.add(f.get(30, TimeUnit.SECONDS));
+                } catch (Exception e) {
+                    Log.d(TAG, "Speed probe future failed", e);
+                }
+            }
+            pool.shutdownNow();
+            Collections.sort(results, (a, b) -> {
+                if (a.isOk() != b.isOk()) {
+                    return a.isOk() ? -1 : 1;
+                }
+                return Long.compare(a.latencyMs, b.latencyMs);
+            });
+            handler.post(() -> callback.onResult(results));
         }).start();
+    }
+
+    /** 测单个镜像：Range 取小文件前 1KB，返回耗时；失败返回 latencyMs = -1。 */
+    private static MirrorSpeedResult probeMirror(OkHttpClient client, MirrorSpeedResult target) {
+        String probe = target.url
+                + "/https://raw.githubusercontent.com/github/gitignore/main/README.md";
+        long start = SystemClock.elapsedRealtime();
+        try (Response r = client.newCall(new Request.Builder()
+                .url(probe)
+                .header("Range", "bytes=0-1023")
+                .build()).execute()) {
+            if (r.isSuccessful() && r.body() != null) {
+                r.body().bytes(); // 读完 1KB，耗时才真实
+                return new MirrorSpeedResult(target.name, target.url, target.presetValue,
+                        SystemClock.elapsedRealtime() - start);
+            }
+        } catch (IOException e) {
+            Log.d(TAG, "Speed probe failed: " + target.url, e);
+        }
+        return new MirrorSpeedResult(target.name, target.url, target.presetValue, -1);
     }
 }

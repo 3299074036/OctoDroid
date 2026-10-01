@@ -68,37 +68,48 @@ public class SettingsBackupManager {
             if (excludeAccounts && isExcluded(key)) {
                 continue;
             }
-            Object value = entry.getValue();
             JSONObject holder = new JSONObject();
-            if (value instanceof String) {
-                holder.put("t", "s");
-                holder.put("v", value);
-            } else if (value instanceof Integer) {
-                holder.put("t", "i");
-                holder.put("v", value);
-            } else if (value instanceof Long) {
-                holder.put("t", "l");
-                holder.put("v", value);
-            } else if (value instanceof Float) {
-                holder.put("t", "f");
-                holder.put("v", (double) (Float) value);
-            } else if (value instanceof Boolean) {
-                holder.put("t", "b");
-                holder.put("v", value);
-            } else if (value instanceof Set) {
-                holder.put("t", "set");
-                JSONArray array = new JSONArray();
-                // noinspection unchecked
-                for (String s : (Set<String>) value) {
-                    array.put(s);
-                }
-                holder.put("v", array);
-            } else {
+            if (!putTypedValue(holder, entry.getValue())) {
                 continue;
             }
             json.put(key, holder);
         }
         return json;
+    }
+
+    /**
+     * 把一个偏好值按真实类型写入 holder；不支持的类型返回 false。
+     * 注意 translation_* 的备份也要走这里，不能一律按 String 存，
+     * 否则恢复后 boolean/int 键会被读出类型抛 ClassCastException。
+     */
+    private static boolean putTypedValue(JSONObject holder, Object value) throws JSONException {
+        if (value instanceof String) {
+            holder.put("t", "s");
+            holder.put("v", value);
+        } else if (value instanceof Integer) {
+            holder.put("t", "i");
+            holder.put("v", value);
+        } else if (value instanceof Long) {
+            holder.put("t", "l");
+            holder.put("v", value);
+        } else if (value instanceof Float) {
+            holder.put("t", "f");
+            holder.put("v", (double) (Float) value);
+        } else if (value instanceof Boolean) {
+            holder.put("t", "b");
+            holder.put("v", value);
+        } else if (value instanceof Set) {
+            holder.put("t", "set");
+            JSONArray array = new JSONArray();
+            // noinspection unchecked
+            for (String s : (Set<String>) value) {
+                array.put(s);
+            }
+            holder.put("v", array);
+        } else {
+            return false;
+        }
+        return true;
     }
 
     private static void jsonToPrefs(JSONObject json, SharedPreferences prefs) throws JSONException {
@@ -156,9 +167,9 @@ public class SettingsBackupManager {
         for (Map.Entry<String, ?> entry : def.getAll().entrySet()) {
             if (entry.getKey().startsWith("translation_")) {
                 JSONObject single = new JSONObject();
-                single.put("t", "s");
-                single.put("v", String.valueOf(entry.getValue()));
-                translation.put(entry.getKey(), single);
+                if (putTypedValue(single, entry.getValue())) {
+                    translation.put(entry.getKey(), single);
+                }
             }
         }
         prefs.put("default", translation);

@@ -212,10 +212,15 @@ public class SingleFactory {
                     .client(client)
                     .build()
                     .create(GitHubFeedService.class);
+            // 趋势 JSON 走 raw.githubusercontent.com，国内直连慢/不通时走镜像
+            OkHttpClient trendClient = ServiceFactory.getHttpClientBuilder()
+                    .addInterceptor(MirrorHelper.mirrorInterceptor(Gh4Application.get()))
+                    .build();
             sTrendService = new Retrofit.Builder()
                     .addCallAdapterFactory(RxJava2CallAdapterFactory.create())
                     .addConverterFactory(MoshiConverterFactory.create(ServiceGenerator.moshi))
                     .baseUrl("https://raw.githubusercontent.com/Unpublished/GithubTrending/")
+                    .client(trendClient)
                     .build()
                     .create(TrendService.class);
         }

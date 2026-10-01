@@ -29,12 +29,28 @@
 
     <string-array name="mirror_preset_items">
         <item>gh-proxy.com</item>
-        <item>mirror.ghproxy.com</item>
+        <item>ghproxy.net</item>
+        <item>ghfast.top</item>
+        <item>v4.gh-proxy.org</item>
+        <item>v6.gh-proxy.org</item>
+        <item>gh.zwy.one</item>
+        <item>gh.llkk.cc</item>
+        <item>gh.monlor.com</item>
+        <item>gh.noki.icu</item>
+        <item>cors.isteed.cc</item>
         <item>自定义</item>
     </string-array>
     <string-array name="mirror_preset_values">
         <item>https://gh-proxy.com</item>
-        <item>https://mirror.ghproxy.com</item>
+        <item>https://ghproxy.net</item>
+        <item>https://ghfast.top</item>
+        <item>https://v4.gh-proxy.org</item>
+        <item>https://v6.gh-proxy.org</item>
+        <item>https://gh.zwy.one</item>
+        <item>https://gh.llkk.cc</item>
+        <item>https://gh.monlor.com</item>
+        <item>https://gh.noki.icu</item>
+        <item>https://cors.isteed.cc</item>
         <item>custom</item>
     </string-array>
 

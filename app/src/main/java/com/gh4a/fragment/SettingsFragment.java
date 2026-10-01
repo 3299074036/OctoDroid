@@ -59,7 +59,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     public static final String KEY_MIRROR_ENABLED = "mirror_enabled";
     public static final String KEY_MIRROR_PRESET = "mirror_preset";
     public static final String KEY_MIRROR_CUSTOM_URL = "mirror_custom_url";
-    private static final String KEY_MIRROR_TEST = "mirror_test";
+    private static final String KEY_MIRROR_SPEED_TEST = "mirror_speed_test";
     public static final String KEY_RELEASE_RADAR_NOTIFICATIONS = "release_radar_notifications";
     public static final String KEY_RELEASE_RADAR_INTERVAL = "release_radar_interval";
     private static final String KEY_ABOUT = "about";
@@ -154,9 +154,9 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         mNotificationIntervalPref = findPreference(KEY_NOTIFICATION_INTERVAL);
         mNotificationIntervalPref.setOnPreferenceChangeListener(this);
 
-        Preference mirrorTestPref = findPreference(KEY_MIRROR_TEST);
-        if (mirrorTestPref != null) {
-            mirrorTestPref.setOnPreferenceClickListener(this);
+        Preference mirrorSpeedTestPref = findPreference(KEY_MIRROR_SPEED_TEST);
+        if (mirrorSpeedTestPref != null) {
+            mirrorSpeedTestPref.setOnPreferenceClickListener(this);
         }
 
         mReleaseRadarPref = findPreference(KEY_RELEASE_RADAR_NOTIFICATIONS);
@@ -285,6 +285,55 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         }
     }
 
+    private void showMirrorSpeedTest() {
+        final AlertDialog progress = new AlertDialog.Builder(getActivity())
+                .setMessage(R.string.mirror_speed_testing)
+                .setCancelable(false)
+                .create();
+        progress.show();
+        MirrorHelper.testAllMirrorsSpeed(getActivity(), results -> {
+            progress.dismiss();
+            if (!isAdded()) {
+                return;
+            }
+            if (results.isEmpty()) {
+                android.widget.Toast.makeText(getActivity(),
+                        R.string.mirror_speed_no_mirrors,
+                        android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            CharSequence[] items = new CharSequence[results.size()];
+            for (int i = 0; i < results.size(); i++) {
+                MirrorHelper.MirrorSpeedResult r = results.get(i);
+                items[i] = r.isOk()
+                        ? getString(R.string.mirror_speed_item, r.name, r.latencyMs)
+                        : getString(R.string.mirror_speed_item_failed, r.name);
+            }
+            new AlertDialog.Builder(getActivity())
+                    .setTitle(R.string.mirror_speed_title)
+                    .setItems(items, (dialog, which) -> {
+                        MirrorHelper.MirrorSpeedResult r = results.get(which);
+                        if (!r.isOk()) {
+                            android.widget.Toast.makeText(getActivity(),
+                                    R.string.mirror_speed_unavailable,
+                                    android.widget.Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        getActivity().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                                .edit().putString(KEY_MIRROR_PRESET, r.presetValue).apply();
+                        ListPreference presetPref = findPreference(KEY_MIRROR_PRESET);
+                        if (presetPref != null) {
+                            presetPref.setValue(r.presetValue);
+                        }
+                        android.widget.Toast.makeText(getActivity(),
+                                getString(R.string.mirror_speed_selected, r.name),
+                                android.widget.Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        });
+    }
+
     private void showBackupRestoreDialog() {
         new AlertDialog.Builder(getActivity())
                 .setTitle(R.string.backup_restore)
@@ -375,17 +424,8 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         } else if (KEY_TRANSLATION_SETTINGS.equals(pref.getKey())) {
             TranslationSettingsActivity.start(getActivity());
             return true;
-        } else if (KEY_MIRROR_TEST.equals(pref.getKey())) {
-            MirrorHelper.testMirror(getActivity(), (ok, message) -> {
-                if (!isAdded()) {
-                    return;
-                }
-                String toast = ok ? getString(R.string.mirror_test_ok)
-                        : message == null ? getString(R.string.mirror_test_no_url)
-                        : getString(R.string.mirror_test_failed, message);
-                android.widget.Toast.makeText(getActivity(), toast,
-                        android.widget.Toast.LENGTH_LONG).show();
-            });
+        } else if (KEY_MIRROR_SPEED_TEST.equals(pref.getKey())) {
+            showMirrorSpeedTest();
             return true;
         } else if (KEY_BACKUP_RESTORE.equals(pref.getKey())) {
             showBackupRestoreDialog();

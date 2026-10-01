@@ -69,7 +69,7 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
      */
     private void migrateCredentials() {
         SharedPreferences prefs = getPreferenceManager().getSharedPreferences();
-        if (prefs.getBoolean("translation_cred_migrated_v1", false)) {
+        if (isMigrationDone(prefs)) {
             return;
         }
         String provider = prefs.getString(TranslationManager.KEY_PROVIDER,
@@ -79,6 +79,21 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
         copyIfPresent(prefs, TranslationManager.KEY_API_SECRET,
                 TranslationManager.apiSecretPrefKey(provider));
         prefs.edit().putBoolean("translation_cred_migrated_v1", true).apply();
+    }
+
+    /**
+     * 备份恢复可能把 boolean 存成 String，这里兼容读取并顺手修复类型；
+     * 直接 getBoolean 会抛 ClassCastException 导致打开翻译设置时闪退。
+     */
+    private static boolean isMigrationDone(SharedPreferences prefs) {
+        try {
+            return prefs.getBoolean("translation_cred_migrated_v1", false);
+        } catch (ClassCastException e) {
+            boolean done = Boolean.parseBoolean(
+                    prefs.getString("translation_cred_migrated_v1", ""));
+            prefs.edit().putBoolean("translation_cred_migrated_v1", done).apply();
+            return done;
+        }
     }
 
     private static void copyIfPresent(SharedPreferences prefs, String from, String to) {

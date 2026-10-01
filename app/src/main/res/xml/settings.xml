@@ -164,9 +164,9 @@
         <Preference
             app:iconSpaceReserved="false"
             android:dependency="mirror_enabled"
-            android:key="mirror_test"
-            android:title="@string/mirror_test"
-            android:summary="@string/mirror_test_summary" />
+            android:key="mirror_speed_test"
+            android:title="@string/mirror_speed_test"
+            android:summary="@string/mirror_speed_test_summary" />
 
     </PreferenceCategory>
 
