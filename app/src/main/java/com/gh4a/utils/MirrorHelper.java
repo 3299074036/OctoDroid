@@ -115,6 +115,10 @@ public class MirrorHelper {
     /**
      * 开关打开且 host 在名单内时，把 url 改写为走镜像的地址；
      * 否则原样返回。
+     * <p>
+     * 另外处理 GitHub release 附件下载地址（{@code github.com/.../releases/download/...}）：
+     * 应用内更新从 release assets 拿到的 browser_download_url 就是这种形式，
+     * 只改写该路径，其他 github.com 地址（API、网页）一律不动。
      */
     public static String rewriteUrl(Context context, String url) {
         if (url == null || !isEnabled(context)) {
@@ -124,12 +128,23 @@ public class MirrorHelper {
         if (base.isEmpty()) {
             return url;
         }
-        String host = Uri.parse(url).getHost();
-        if (host == null || !MIRRORABLE_HOSTS.contains(host.toLowerCase(Locale.ROOT))) {
-            return url;
-        }
         if (url.regionMatches(true, 0, base, 0, base.length())) {
             return url; // 已经是镜像地址（大小写不敏感比较）(L-7)
+        }
+        String host = Uri.parse(url).getHost();
+        if (host == null) {
+            return url;
+        }
+        host = host.toLowerCase(Locale.ROOT);
+        if ("github.com".equals(host)) {
+            String path = Uri.parse(url).getPath();
+            if (path != null && path.contains("/releases/download/")) {
+                return base + "/" + url;
+            }
+            return url;
+        }
+        if (!MIRRORABLE_HOSTS.contains(host)) {
+            return url;
         }
         return base + "/" + url;
     }

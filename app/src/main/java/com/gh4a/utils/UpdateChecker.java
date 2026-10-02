@@ -25,9 +25,13 @@ import okhttp3.Response;
 /**
  * Checks the OctoDroid GitHub releases for a newer version.
  *
- * APKs are published under releases/OctoDroid_&lt;version&gt;.apk on master,
- * so the download URL is derived from the release tag and verified with a
- * HEAD request before being handed out.
+ * The APK download URL is taken from the release's assets list, picking the
+ * asset that matches the current build variant (debug build -> debug APK,
+ * release build -> release APK) so the download can install as an update
+ * over the installed app (signatures must match). If no matching asset is
+ * found, falls back to the historical convention of
+ * releases/OctoDroid_&lt;version&gt;.apk on master, verified with a HEAD
+ * request before being handed out.
  */
 public class UpdateChecker {
     private static final String OWNER = "3299074036";
@@ -96,8 +100,46 @@ public class UpdateChecker {
         }
         String latestVersion = tag.startsWith("v") ? tag.substring(1) : tag;
         boolean hasUpdate = isNewer(latestVersion, BuildConfig.VERSION_NAME);
-        String apkUrl = hasUpdate ? resolveApkUrl(context, latestVersion, body) : null;
+        String apkUrl = null;
+        if (hasUpdate) {
+            // 优先从 release assets 里拿与当前变体匹配的包：
+            // debug 版拿 debug 签名包，release 版拿 release 签名包，
+            // 签名一致才能覆盖安装，否则会“应用未安装”
+            apkUrl = resolveApkUrlFromAssets(json.optJSONArray("assets"));
+            if (apkUrl == null) {
+                apkUrl = resolveApkUrl(context, latestVersion, body);
+            }
+        }
         return new UpdateInfo(hasUpdate, latestVersion, body, apkUrl);
+    }
+
+    /**
+     * 从 releases/latest 的 assets 列表里挑与当前构建变体匹配的 APK，
+     * 返回它的 browser_download_url；找不到返回 null。
+     */
+    private static String resolveApkUrlFromAssets(org.json.JSONArray assets) {
+        if (assets == null) {
+            return null;
+        }
+        boolean isDebug = BuildConfig.DEBUG;
+        for (int i = 0; i < assets.length(); i++) {
+            org.json.JSONObject asset = assets.optJSONObject(i);
+            if (asset == null) {
+                continue;
+            }
+            String name = asset.optString("name", "").toLowerCase(Locale.ROOT);
+            String url = asset.optString("browser_download_url", "");
+            if (url.isEmpty() || !name.endsWith(".apk")) {
+                continue;
+            }
+            boolean match = isDebug
+                    ? name.contains("debug")
+                    : name.contains("release") && !name.contains("debug");
+            if (match) {
+                return url;
+            }
+        }
+        return null;
     }
 
     /**
