@@ -113,7 +113,11 @@ public class FollowersFollowingListFragment extends PagedDataBaseFragment<User> 
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         if (item.getItemId() == Menu.FIRST) {
-            toggleFollowingState();
+            // 关注状态加载中（mIsFollowing == null）时忽略点击，
+            // 避免 null 拆箱后错误走 follow 分支
+            if (mIsFollowing != null) {
+                toggleFollowingState();
+            }
             return true;
         }
         return super.onOptionsItemSelected(item);

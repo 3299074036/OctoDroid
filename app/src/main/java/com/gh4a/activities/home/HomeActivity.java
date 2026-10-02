@@ -29,6 +29,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.gh4a.BaseFragmentPagerActivity;
 import com.gh4a.Gh4Application;
@@ -100,6 +101,12 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
     private static final int ID_LOADER_NOTIFICATIONS_INDICATOR = 1;
 
     private static final int OTHER_ACCOUNTS_GROUP_BASE_ID = 1000;
+
+    // 账号切换模式下需要隐藏的抽屉入口：原属 navigation/explore 组，
+    // 经 applyDrawerCustomization 后已并入 my_items，按实际 item 显隐
+    private static final int[] ACCOUNT_MODE_HIDDEN_ITEMS = {
+            R.id.search, R.id.blog, R.id.trend, R.id.pub_timeline, R.id.topic_discovery
+    };
 
     private static final SparseArray<String> START_PAGE_MAPPING = new SparseArray<>();
     static {
@@ -487,7 +494,8 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
 
     @Override
     public void onLoginFailed(Throwable error) {
-        // TODO
+        // 抽屉添加账号 token 失败时给出提示，避免静默无反应
+        Toast.makeText(this, R.string.login_failed, Toast.LENGTH_LONG).show();
     }
 
     @Override
@@ -626,8 +634,14 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
 
     private void updateDrawerMode(boolean accountMode) {
         mLeftDrawerMenu.setGroupVisible(R.id.my_items, !accountMode);
-        mLeftDrawerMenu.setGroupVisible(R.id.navigation, !accountMode);
-        mLeftDrawerMenu.setGroupVisible(R.id.explore, !accountMode);
+        // navigation/explore 组在抽屉自定义后已被清空（item 并入 my_items），
+        // 这里按实际 item 显隐 search/blog/趋势/时间线/话题，不再依赖已不存在的组
+        for (int itemId : ACCOUNT_MODE_HIDDEN_ITEMS) {
+            MenuItem item = mLeftDrawerMenu.findItem(itemId);
+            if (item != null) {
+                item.setVisible(!accountMode);
+            }
+        }
         mLeftDrawerMenu.setGroupVisible(R.id.settings_group, !accountMode);
         mLeftDrawerMenu.setGroupVisible(R.id.account, accountMode);
         mLeftDrawerMenu.setGroupVisible(R.id.other_accounts, accountMode);

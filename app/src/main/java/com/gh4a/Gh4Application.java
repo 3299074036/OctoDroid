@@ -21,6 +21,7 @@ import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.content.res.Configuration;
 import android.os.Build;
+import android.util.Log;
 import android.util.LongSparseArray;
 
 import com.gh4a.fragment.SettingsFragment;
@@ -34,9 +35,18 @@ import org.ocpsoft.prettytime.PrettyTime;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatDelegate;
+import androidx.security.crypto.EncryptedSharedPreferences;
+import androidx.security.crypto.MasterKey;
+import okhttp3.Credentials;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 /**
  * The Class Gh4Application.
@@ -94,7 +104,10 @@ public class Gh4Application extends Application implements
                         .remove("USER_LOGIN")
                         .remove("Token");
                 if (login != null && token != null) {
-                    editor.putString(KEY_PREFIX_TOKEN + login, token);
+                    // 老格式 token 直接进加密存储，不落明文
+                    getSecurePrefs().edit()
+                            .putString(KEY_PREFIX_TOKEN + login, token)
+                            .apply();
                 }
             }
             if (prefsVersion < 3 && prefs.contains(KEY_ALL_LOGINS)) {
@@ -134,11 +147,29 @@ public class Gh4Application extends Application implements
 
     private void updateNotificationWorker(SharedPreferences prefs) {
         if (isAuthorized() && prefs.getBoolean(SettingsFragment.KEY_NOTIFICATIONS, false)) {
-            int intervalMinutes = prefs.getInt(SettingsFragment.KEY_NOTIFICATION_INTERVAL, 15);
-            NotificationsWorker.schedule(this, intervalMinutes);
+            NotificationsWorker.schedule(this, getNotificationIntervalMinutes(prefs));
         } else {
             NotificationsWorker.cancel(this);
         }
+    }
+
+    /**
+     * 防御式读取通知间隔：备份混入 String 值时 getInt 会抛 ClassCastException，
+     * 这里容忍 String/Number，异常值回退默认 15 分钟。
+     */
+    private static int getNotificationIntervalMinutes(SharedPreferences prefs) {
+        Object raw = prefs.getAll().get(SettingsFragment.KEY_NOTIFICATION_INTERVAL);
+        if (raw instanceof Number) {
+            return ((Number) raw).intValue();
+        }
+        if (raw instanceof String) {
+            try {
+                return Integer.parseInt((String) raw);
+            } catch (NumberFormatException ignored) {
+                // fall through to default
+            }
+        }
+        return 15;
     }
 
     private void updateTheme(SharedPreferences prefs) {
@@ -196,7 +227,7 @@ public class Gh4Application extends Application implements
 
     public String getAuthToken() {
         String login = getAuthLogin();
-        return login != null ? getPrefs().getString(KEY_PREFIX_TOKEN + login, null) : null;
+        return login != null ? getSecurePrefs().getString(KEY_PREFIX_TOKEN + login, null) : null;
     }
 
     public void addAccount(User user, String token) {
@@ -208,8 +239,11 @@ public class Gh4Application extends Application implements
         prefs.edit()
                 .putString(KEY_ACTIVE_LOGIN, login)
                 .putStringSet(KEY_ALL_LOGINS, logins)
-                .putString(KEY_PREFIX_TOKEN + login, token)
                 .putLong(KEY_PREFIX_USER_ID + login, user.id())
+                .apply();
+        // token 单独走加密存储，不进明文 prefs
+        getSecurePrefs().edit()
+                .putString(KEY_PREFIX_TOKEN + login, token)
                 .apply();
 
         rescheduleWorkers();
@@ -260,12 +294,76 @@ public class Gh4Application extends Application implements
         prefs.edit()
                 .putString(KEY_ACTIVE_LOGIN, newActiveLogin)
                 .putStringSet(KEY_ALL_LOGINS, logins)
-                .remove(KEY_PREFIX_TOKEN + login)
                 .remove(KEY_PREFIX_USER_ID + login)
                 .apply();
+        // 先取出 token 再删：删后去服务端撤销（M-7）
+        String token = getSecurePrefs().getString(KEY_PREFIX_TOKEN + login, null);
+        getSecurePrefs().edit()
+                .remove(KEY_PREFIX_TOKEN + login)
+                .apply();
+        if (token != null) {
+            revokeTokenAsync(token);
+        }
+        clearWebViewData();
 
         rescheduleWorkers();
         return newActiveLogin;
+    }
+
+    /**
+     * M-7: 删号/登出时撤销服务端的 OAuth token，best-effort 后台执行，
+     * 失败（无网络等）不影响本地登出流程。
+     */
+    private void revokeTokenAsync(String token) {
+        if (BuildConfig.CLIENT_ID.isEmpty() || BuildConfig.CLIENT_SECRET.isEmpty()) {
+            return;
+        }
+        new Thread(() -> {
+            try {
+                String url = "https://api.github.com/applications/"
+                        + BuildConfig.CLIENT_ID + "/token";
+                RequestBody body = RequestBody.create(
+                        MediaType.parse("application/json; charset=utf-8"),
+                        "{\"access_token\":\"" + token + "\"}");
+                Request request = new Request.Builder()
+                        .url(url)
+                        .delete(body)
+                        .header("Authorization",
+                                Credentials.basic(BuildConfig.CLIENT_ID, BuildConfig.CLIENT_SECRET))
+                        .header("Accept", "application/vnd.github+json")
+                        .build();
+                OkHttpClient client = new OkHttpClient.Builder()
+                        .connectTimeout(10, TimeUnit.SECONDS)
+                        .readTimeout(10, TimeUnit.SECONDS)
+                        .build();
+                try (Response response = client.newCall(request).execute()) {
+                    if (!response.isSuccessful()) {
+                        Log.w(LOG_TAG, "Token revocation returned " + response.code());
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(LOG_TAG, "Token revocation failed", e);
+            }
+        }, "token-revoke").start();
+    }
+
+    /**
+     * M-7: 删号/登出时清掉 WebView 的 cookie 与本地存储，避免残留登录态。
+     * 从未创建过 WebView 时 getInstance 可能抛异常，直接忽略。
+     */
+    private void clearWebViewData() {
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            cm.removeAllCookies(null);
+            cm.flush();
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "Clear cookies failed", e);
+        }
+        try {
+            android.webkit.WebStorage.getInstance().deleteAllData();
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "Clear web storage failed", e);
+        }
     }
 
     /**
@@ -304,6 +402,74 @@ public class Gh4Application extends Application implements
 
     private SharedPreferences getPrefs() {
         return getSharedPreferences(SettingsFragment.PREF_NAME, MODE_PRIVATE);
+    }
+
+    private SharedPreferences mSecurePrefs;
+
+    /**
+     * Encrypted storage for GitHub OAuth tokens (H-1). Keys are AES-256-GCM
+     * encrypted with a key kept in the AndroidKeyStore; the file on disk
+     * never contains a plaintext token.
+     * Falls back to plain prefs only if the keystore is unusable, so login
+     * never hard-fails on exotic devices.
+     */
+    private synchronized SharedPreferences getSecurePrefs() {
+        if (mSecurePrefs == null) {
+            SharedPreferences fallback = getSharedPreferences("Gh4a-secure", MODE_PRIVATE);
+            try {
+                MasterKey masterKey = new MasterKey.Builder(this)
+                        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                        .build();
+                mSecurePrefs = EncryptedSharedPreferences.create(
+                        this, "Gh4a-secure", masterKey,
+                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM);
+            } catch (Exception e) {
+                android.util.Log.w(LOG_TAG, "Encrypted prefs unavailable, using plain fallback", e);
+                mSecurePrefs = fallback;
+            }
+            migratePlaintextTokens(fallback);
+        }
+        return mSecurePrefs;
+    }
+
+    /**
+     * One-time migration: move any plaintext token_<login> left in the old
+     * prefs file into the encrypted store, then delete the plaintext copy.
+     */
+    private void migratePlaintextTokens(SharedPreferences oldPlainPrefs) {
+        SharedPreferences plain = getPrefs();
+        Set<String> logins = plain.getStringSet(KEY_ALL_LOGINS, null);
+        if (logins == null || logins.isEmpty()) {
+            return;
+        }
+        SharedPreferences.Editor plainEditor = null;
+        SharedPreferences.Editor secureEditor = null;
+        for (String login : logins) {
+            String key = KEY_PREFIX_TOKEN + login;
+            String token = plain.getString(key, null);
+            if (token != null) {
+                if (secureEditor == null) {
+                    secureEditor = mSecurePrefs.edit();
+                    plainEditor = plain.edit();
+                }
+                secureEditor.putString(key, token);
+                plainEditor.remove(key);
+            }
+            // Also sweep the pre-migration plain fallback file, if we fell back
+            if (oldPlainPrefs != mSecurePrefs && oldPlainPrefs.contains(key)) {
+                if (secureEditor == null) {
+                    secureEditor = mSecurePrefs.edit();
+                    plainEditor = plain.edit();
+                }
+                secureEditor.putString(key, oldPlainPrefs.getString(key, null));
+                oldPlainPrefs.edit().remove(key).apply();
+            }
+        }
+        if (secureEditor != null) {
+            secureEditor.apply();
+            plainEditor.apply();
+        }
     }
 
     public static Gh4Application get() {

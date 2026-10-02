@@ -81,8 +81,11 @@ public class DownloadUtils {
             String description, String mimeType, String mediaType,
             boolean wifiOnly, boolean addAuthHeader) {
         final DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        // 文件名来自网络（release asset 名、gist 文件名等）：先 sanitize，
+        // 防止 "../../" 之类的路径穿越写到 Downloads 之外 (L-2)
+        final String safeName = sanitizeFileName(fileName);
         DownloadManager.Request request = new DownloadManager.Request(uri)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
                 .setDescription(description)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setAllowedOverRoaming(false);
@@ -102,8 +105,27 @@ public class DownloadUtils {
         }
 
         long downloadId = dm.enqueue(request);
-        DownloadRecordManager.record(context, downloadId, fileName,
-                uri.toString(), description);
+        // 下载记录里的 URL 剥离 query：签名 URL 的 query 可能含 token，
+        // 不能让它进备份/下载记录 (L-17)
+        String recordUrl = uri.buildUpon().clearQuery().build().toString();
+        DownloadRecordManager.record(context, downloadId, safeName,
+                recordUrl, description);
+    }
+
+    /**
+     * 清洗下载文件名：只取 basename（去掉任何路径分隔符），
+     * 拒绝包含 ".." 的文件名，防止路径穿越 (L-2)。
+     */
+    private static String sanitizeFileName(String fileName) {
+        if (fileName == null) {
+            throw new IllegalArgumentException("fileName must not be null");
+        }
+        int cut = Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\'));
+        String base = cut >= 0 ? fileName.substring(cut + 1) : fileName;
+        if (base.isEmpty() || base.contains("..")) {
+            throw new IllegalArgumentException("Unsafe download file name: " + fileName);
+        }
+        return base;
     }
 
     // Shared client for redirect resolution: built once, reused for every

@@ -79,7 +79,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private static final String KEY_OPEN_SOURCE_COMPONENTS = "open_source_components";
 
     private OnStateChangeListener mListener;
-    private IntegerListPreference mThemePref;
     private ListPreference mFontScalePref;
     private Preference mAboutPref;
     private Preference mOpenSourcePref;
@@ -89,6 +88,10 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private IntegerListPreference mReleaseRadarIntervalPref;
     private Preference mDarkModeScheduleTimePref;
     private ListPreference mDarkModePref;
+    /** 进行中的镜像测速任务，销毁时取消 (M-10)。 */
+    private MirrorHelper.SpeedTestHandle mSpeedTestHandle;
+    /** 测速中的进度对话框，存为字段以便销毁时主动 dismiss，避免 leaked window。 */
+    private AlertDialog mSpeedTestDialog;
 
     private final androidx.activity.result.ActivityResultLauncher<String[]> mRestoreLauncher =
             registerForActivityResult(
@@ -109,14 +112,31 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     }
 
     @Override
+    public void onDestroy() {
+        // 测速中途退出：取消任务，避免回调强引用已销毁的 Fragment (M-10)
+        if (mSpeedTestHandle != null) {
+            mSpeedTestHandle.cancel();
+            mSpeedTestHandle = null;
+        }
+        // 进度对话框是局部变量时销毁后无法主动 dismiss，会 leaked window
+        if (mSpeedTestDialog != null) {
+            try {
+                mSpeedTestDialog.dismiss();
+            } catch (Exception ignored) {
+            }
+            mSpeedTestDialog = null;
+        }
+        super.onDestroy();
+    }
+
+    @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
         getPreferenceManager().setSharedPreferencesName(PREF_NAME);
         addPreferencesFromResource(R.xml.settings);
 
-        mThemePref = findPreference(KEY_THEME);
-        if (mThemePref != null) {
-            mThemePref.setOnPreferenceChangeListener(this);
-        }
+        // settings.xml 里已没有 "theme" 键（主题改由深色模式控制），
+        // findPreference 永远返回 null，mThemePref 相关代码已删除 (L-11)；
+        // KEY_THEME 常量保留：Gh4Application.updateTheme/迁移与 HomeActivity 仍读写该键
 
         Preference accentColorPref = findPreference(KEY_ACCENT_COLOR);
         accentColorPref.setOnPreferenceChangeListener(this);
@@ -205,10 +225,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
 
     @Override
     public boolean onPreferenceChange(Preference pref, Object newValue) {
-        if (pref == mThemePref) {
-            mListener.onThemeChanged();
-            return true;
-        }
         if (KEY_ACCENT_COLOR.equals(pref.getKey())) {
             // Accent color needs a full restart like theme change
             mListener.onThemeChanged();
@@ -269,9 +285,9 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             return true;
         }
         if (KEY_DARK_MODE.equals(pref.getKey())) {
-            // apply() runs on next onPreferenceChange after the value is persisted,
-            // but the ListPreference already wrote it; apply now and refresh summary
-            com.gh4a.utils.DarkModeScheduler.apply(getContext());
+            // onPreferenceChange 触发时新值尚未持久化，必须用 newValue 而不是读 prefs，
+            // 否则 apply() 会读到旧值导致切换不生效/闹钟状态反向
+            com.gh4a.utils.DarkModeScheduler.apply(getContext(), (String) newValue);
             refreshDarkModeScheduleSummary();
             // recreate to apply the new night mode immediately
             mListener.onThemeChanged();
@@ -306,7 +322,14 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 .setCancelable(false)
                 .create();
         progress.show();
-        MirrorHelper.testAllMirrorsSpeed(getActivity(), results -> {
+        // 存为字段：销毁时若任务还在跑，可主动 dismiss
+        mSpeedTestDialog = progress;
+        // 新测速开始前取消上一次未完成的，避免回调叠加
+        if (mSpeedTestHandle != null) {
+            mSpeedTestHandle.cancel();
+        }
+        mSpeedTestHandle = MirrorHelper.testAllMirrorsSpeed(getActivity(), results -> {
+            mSpeedTestHandle = null;
             // 先判存活再 dismiss：中途退出会导致 leaked window / IllegalArgumentException (M-5)
             if (isAdded() && !getActivity().isFinishing()) {
                 try {
@@ -314,6 +337,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 } catch (Exception ignored) {
                 }
             }
+            mSpeedTestDialog = null;
             if (!isAdded()) {
                 return;
             }
@@ -413,9 +437,15 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             }
             final boolean result = ok;
             if (isAdded()) {
-                getActivity().runOnUiThread(() -> android.widget.Toast.makeText(getActivity(),
-                        result ? R.string.restore_success : R.string.restore_failed,
-                        android.widget.Toast.LENGTH_LONG).show());
+                getActivity().runOnUiThread(() -> {
+                    android.widget.Toast.makeText(getActivity(),
+                            result ? R.string.restore_success : R.string.restore_failed,
+                            android.widget.Toast.LENGTH_LONG).show();
+                    // 恢复成功后刷新当前界面主题（深色模式切换时已有此先例）
+                    if (result && mListener != null) {
+                        mListener.onThemeChanged();
+                    }
+                });
             }
         }).start();
     }

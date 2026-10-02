@@ -52,6 +52,7 @@ import com.gh4a.utils.DownloadUtils;
 import com.gh4a.utils.IntentUtils;
 import com.gh4a.utils.RxUtils;
 import com.gh4a.widget.ContextMenuAwareRecyclerView;
+import com.meisolsson.githubsdk.model.Discussion;
 import com.meisolsson.githubsdk.model.Download;
 import com.meisolsson.githubsdk.model.GitHubEvent;
 import com.meisolsson.githubsdk.model.GitHubEventType;
@@ -64,11 +65,13 @@ import com.meisolsson.githubsdk.model.Release;
 import com.meisolsson.githubsdk.model.ReleaseAsset;
 import com.meisolsson.githubsdk.model.Repository;
 import com.meisolsson.githubsdk.model.ReviewComment;
+import com.meisolsson.githubsdk.model.Team;
 import com.meisolsson.githubsdk.model.User;
 import com.meisolsson.githubsdk.model.git.GitComment;
 import com.meisolsson.githubsdk.model.git.GitCommit;
 import com.meisolsson.githubsdk.model.payload.CommitCommentPayload;
 import com.meisolsson.githubsdk.model.payload.CreatePayload;
+import com.meisolsson.githubsdk.model.payload.DiscussionPayload;
 import com.meisolsson.githubsdk.model.payload.DownloadPayload;
 import com.meisolsson.githubsdk.model.payload.FollowPayload;
 import com.meisolsson.githubsdk.model.payload.ForkPayload;
@@ -76,11 +79,13 @@ import com.meisolsson.githubsdk.model.payload.GistPayload;
 import com.meisolsson.githubsdk.model.payload.GollumPayload;
 import com.meisolsson.githubsdk.model.payload.IssueCommentPayload;
 import com.meisolsson.githubsdk.model.payload.IssuesPayload;
+import com.meisolsson.githubsdk.model.payload.MembershipPayload;
 import com.meisolsson.githubsdk.model.payload.PullRequestPayload;
 import com.meisolsson.githubsdk.model.payload.PullRequestReviewCommentPayload;
 import com.meisolsson.githubsdk.model.payload.PullRequestReviewPayload;
 import com.meisolsson.githubsdk.model.payload.PushPayload;
 import com.meisolsson.githubsdk.model.payload.ReleasePayload;
+import com.meisolsson.githubsdk.model.payload.TeamAddPayload;
 import com.meisolsson.githubsdk.service.pull_request.PullRequestService;
 
 import java.util.Arrays;
@@ -159,7 +164,9 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
         Intent intent = null;
         Single<Optional<Intent>> intentSingle = null;
 
-        if (Arrays.binarySearch(REPO_EVENTS, event.type()) >= 0 && repoOwnerAndName == null) {
+        // REPO_EVENTS 未按枚举声明顺序排列，binarySearch 的前提（数组有序）不成立，
+        // 改用线性查找，否则部分仓库事件会错误地跳过下面的 repo 缺失提示
+        if (Arrays.asList(REPO_EVENTS).contains(event.type()) && repoOwnerAndName == null) {
             Toast.makeText(getActivity(), R.string.repo_not_found_toast, Toast.LENGTH_LONG).show();
             return;
         }
@@ -191,10 +198,27 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
                 intent = RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName);
                 break;
 
+            case DeploymentEvent:
+            case DeploymentStatusEvent:
+                // 部署事件没有可直达的详情页，退化为打开仓库页
+                intent = RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName);
+                break;
+
             case DownloadEvent: {
                 DownloadPayload payload = (DownloadPayload) event.payload();
                 Download download = payload.download();
                 DownloadUtils.enqueueDownloadWithPermissionCheck((BaseActivity) getActivity(), download);
+                break;
+            }
+
+            case DiscussionEvent: {
+                DiscussionPayload payload = (DiscussionPayload) event.payload();
+                Discussion discussion = payload.discussion();
+                if (discussion != null && discussion.htmlUrl() != null) {
+                    intent = new Intent(Intent.ACTION_VIEW, Uri.parse(discussion.htmlUrl()));
+                } else {
+                    intent = RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName);
+                }
                 break;
             }
 
@@ -260,6 +284,22 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
             }
 
             case MemberEvent:
+                intent = RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName);
+                break;
+
+            case MembershipEvent: {
+                MembershipPayload payload = (MembershipPayload) event.payload();
+                User member = payload.member();
+                if (member != null) {
+                    intent = UserActivity.makeIntent(getActivity(), member);
+                } else {
+                    intent = RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName);
+                }
+                break;
+            }
+
+            case PageBuildEvent:
+                // Pages 构建事件没有可直达的详情页，退化为打开仓库页
                 intent = RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName);
                 break;
 
@@ -330,6 +370,27 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
                 if (release != null) {
                     intent = ReleaseInfoActivity.makeIntent(getActivity(),
                             repoOwner, repoName, release.id());
+                }
+                break;
+            }
+
+            case RepositoryEvent:
+                // 仓库创建/改名/归档等事件，退化为打开仓库页
+                intent = RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName);
+                break;
+
+            case StatusEvent:
+                // commit 状态事件，退化为打开仓库页
+                intent = RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName);
+                break;
+
+            case TeamAddEvent: {
+                TeamAddPayload payload = (TeamAddPayload) event.payload();
+                Team team = payload.team();
+                if (team != null && team.organization() != null) {
+                    intent = UserActivity.makeIntent(getActivity(), team.organization());
+                } else {
+                    intent = RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName);
                 }
                 break;
             }

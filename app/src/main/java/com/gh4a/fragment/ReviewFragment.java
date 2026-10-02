@@ -435,7 +435,11 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
         }
 
         if (firstReplyItem != null) {
-            mSelectedReplyCommentId = firstReplyItem.timelineComment.comment().id();
+            // 只在尚未选中任何回复组时（首次加载）默认选中第一组；
+            // 旋转后 onCreate 已从 savedInstanceState 恢复了用户之前的选择，不要覆盖
+            if (mSelectedReplyCommentId <= 0) {
+                mSelectedReplyCommentId = firstReplyItem.timelineComment.comment().id();
+            }
             // When there is only one reply item we don't need to display it
             data.remove(firstReplyItem);
         }

@@ -216,7 +216,12 @@ public class UserFragment extends LoadingFragmentBase implements
     private void updateFollowingUi() {
         boolean following = mIsFollowing != null && mIsFollowing;
         @PluralsRes int resId = following ? R.plurals.follower_and_self : R.plurals.follower;
-        int count = following ? mUser.followers() - 1 : mUser.followers();
+        // followers() 可能为 null，判空后显示 0，避免 Integer 自动拆箱 NPE
+        int count = orZero(mUser.followers());
+        if (following) {
+            // 关注后粉丝数包含自己，显示时减一，最少为 0
+            count = Math.max(0, count - 1);
+        }
         mFollowersRow.setText(getResources().getQuantityString(resId, count, count));
         mFollowersRow.setToggleState(following);
     }
@@ -341,7 +346,8 @@ public class UserFragment extends LoadingFragmentBase implements
                     if (mUser != null && mIsFollowing != null) {
                         mIsFollowing = !mIsFollowing;
                         mUser = mUser.toBuilder()
-                                .followers(mUser.followers() + (mIsFollowing ? 1 : -1))
+                                // followers() 可能为 null，先判空再加减
+                                .followers(orZero(mUser.followers()) + (mIsFollowing ? 1 : -1))
                                 .build();
                         updateFollowingUi();
                     }

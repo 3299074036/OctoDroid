@@ -63,7 +63,9 @@ public class CreateReviewActivity extends AppCompatActivity implements
         mRepoOwner = extras.getString(EXTRA_OWNER);
         mRepoName = extras.getString(EXTRA_REPO);
         mPullRequestNumber = extras.getInt(EXTRA_PR_NUMBER);
-        mPendingReview = (Review) extras.getSerializable(EXTRA_PENDING_REVIEW);
+        // Review 实现的是 Parcelable（非 Serializable），必须用 getParcelable 读取，
+        // 否则 mPendingReview 恒为 null，pending review 永远提交不出去
+        mPendingReview = extras.getParcelable(EXTRA_PENDING_REVIEW);
 
         mRootLayout = findViewById(R.id.coordinator_layout);
         mEditorSheet = findViewById(R.id.bottom_sheet);

@@ -167,21 +167,37 @@ public class SingleFactory {
     }
 
     private static class RetrofitHelper {
-        private static GitHubFeedService sFeedService;
-        private static TrendService sTrendService;
+        private static volatile GitHubFeedService sFeedService;
+        private static volatile TrendService sTrendService;
+        private static final Object LOCK = new Object();
 
         static GitHubFeedService feedService() {
-            if (sFeedService == null) {
-                initialize();
+            GitHubFeedService service = sFeedService;
+            if (service == null) {
+                // 双重检查锁：避免多线程重复初始化 (L-5)
+                synchronized (LOCK) {
+                    service = sFeedService;
+                    if (service == null) {
+                        initialize();
+                        service = sFeedService;
+                    }
+                }
             }
-            return sFeedService;
+            return service;
         }
 
         static TrendService trendService() {
-            if (sTrendService == null) {
-                initialize();
+            TrendService service = sTrendService;
+            if (service == null) {
+                synchronized (LOCK) {
+                    service = sTrendService;
+                    if (service == null) {
+                        initialize();
+                        service = sTrendService;
+                    }
+                }
             }
-            return sTrendService;
+            return service;
         }
 
         private static void initialize() {

@@ -23,6 +23,7 @@
     <string name="credentials_error_empty">此字段不能为空。</string>
     <string name="credentials_error_invalid_token">输入的内容看起来不是有效的访问令牌。</string>
     <string name="credentials_token">访问令牌</string>
+    <string name="pat_min_scope_hint">建议使用细粒度 personal access token，仅授予最小必要权限。</string>
     <string name="try_again">重试</string>
     <string name="report_issue">报告问题</string>
     <string name="ok">确定</string>
@@ -75,6 +76,7 @@
     <string name="update_check_failed">检查更新失败：%1$s</string>
     <string name="downloading_update">正在下载更新…</string>
     <string name="allow_install_unknown_apps">请先允许安装未知应用，然后重试</string>
+    <string name="apk_signature_mismatch">更新包签名与已安装应用不一致，已阻止安装</string>
     <string name="reply">回复</string>
     <string name="reply_selected">回复（已选中）</string>
     <string name="add_comment">添加评论</string>
@@ -176,6 +178,10 @@
     <string name="clear_suggestions">清除建议</string>
     <string name="quote">引用</string>
     <string name="fork">复刻</string>
+    <string name="repo_fork_confirm_title">复刻仓库</string>
+    <string name="repo_fork_confirm_message">将 %1$s 复刻到你的账号？</string>
+    <string name="repo_fork_success">已复刻到 %1$s</string>
+    <string name="repo_fork_failed">复刻失败</string>
     <string name="notifications">通知</string>
     <string name="mark_all_as_read">全部标为已读</string>
     <string name="mark_as_read">标为已读</string>

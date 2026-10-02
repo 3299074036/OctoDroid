@@ -64,6 +64,13 @@
 
         </com.google.android.material.textfield.TextInputLayout>
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/pat_min_scope_hint"
+            android:textSize="12sp" />
+
     </LinearLayout>
 
     <FrameLayout

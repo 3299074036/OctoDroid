@@ -6,6 +6,7 @@ import android.preference.PreferenceManager;
 import android.text.TextUtils;
 
 import com.gh4a.R;
+import com.gh4a.fragment.SettingsFragment;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -148,9 +149,13 @@ public class TranslationManager {
     /**
      * Target language for translation, derived from the app language setting:
      * Chinese -> zh-CN, otherwise en.
+     * NOTE: the in-app language lives in SettingsFragment.PREF_NAME ("Gh4a-pref"),
+     * not in the default shared prefs used for translation provider settings.
      */
     public static String getTargetLanguage(Context context) {
-        String appLang = prefs(context).getString("language", "");
+        SharedPreferences appPrefs =
+                context.getSharedPreferences(SettingsFragment.PREF_NAME, Context.MODE_PRIVATE);
+        String appLang = appPrefs.getString(SettingsFragment.KEY_LANGUAGE, "");
         if (TextUtils.isEmpty(appLang)) {
             appLang = Locale.getDefault().getLanguage();
         }

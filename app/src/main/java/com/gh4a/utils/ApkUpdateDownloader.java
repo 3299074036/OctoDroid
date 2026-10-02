@@ -47,8 +47,10 @@ public class ApkUpdateDownloader {
     private static void enqueue(BaseActivity activity, String url, String fileName) {
         DownloadManager dm =
                 (DownloadManager) activity.getSystemService(Context.DOWNLOAD_SERVICE);
+        // 文件名来自更新检查的网络响应：sanitize 防止路径穿越 (L-2)
+        final String safeName = sanitizeFileName(fileName);
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
                 .setTitle(activity.getString(R.string.downloading_update))
                 .setNotificationVisibility(
                         DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
@@ -68,8 +70,14 @@ public class ApkUpdateDownloader {
                 onDownloadComplete(context, dm, downloadId);
             }
         };
-        activity.registerReceiver(receiver,
-                new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+        // 用 application context 注册，避免 Activity 销毁后 receiver 泄漏；
+        // onReceive 里用传入的 context 反注册，两边一致
+        final Context appContext = activity.getApplicationContext();
+        // targetSdk 34+ 必须显式声明 receiver 是否 exported，否则抛 SecurityException；
+        // 用 ContextCompat 兼容低版本（内部做版本判断），lint 也能识别
+        androidx.core.content.ContextCompat.registerReceiver(appContext, receiver,
+                new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     private static void onDownloadComplete(Context context, DownloadManager dm, long downloadId) {
@@ -86,8 +94,85 @@ public class ApkUpdateDownloader {
             }
             String localUri = cursor.getString(
                     cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI));
-            installApk(context, new File(Uri.parse(localUri).getPath()));
+            File apkFile = new File(Uri.parse(localUri).getPath());
+            // 自更新安全门：APK 签名必须与当前已安装应用一致，
+            // 否则可能是镜像站被投毒，拒绝安装并删除文件 (L-3)
+            if (!isSignatureMatch(context, apkFile)) {
+                Toast.makeText(context, R.string.apk_signature_mismatch, Toast.LENGTH_LONG).show();
+                apkFile.delete();
+                return;
+            }
+            installApk(context, apkFile);
         }
+    }
+
+    /**
+     * 清洗下载文件名：只取 basename，拒绝包含 ".." 的文件名 (L-2)。
+     */
+    private static String sanitizeFileName(String fileName) {
+        if (fileName == null) {
+            throw new IllegalArgumentException("fileName must not be null");
+        }
+        int cut = Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\'));
+        String base = cut >= 0 ? fileName.substring(cut + 1) : fileName;
+        if (base.isEmpty() || base.contains("..")) {
+            throw new IllegalArgumentException("Unsafe download file name: " + fileName);
+        }
+        return base;
+    }
+
+    /**
+     * 校验下载到的 APK 签名证书与当前已安装应用一致。
+     * API 28+ 用 signingInfo，低版本用 signatures，兼容 targetSdk 33 (L-3)。
+     */
+    private static boolean isSignatureMatch(Context context, File apkFile) {
+        try {
+            PackageManager pm = context.getPackageManager();
+            int flags = PackageManager.GET_SIGNATURES;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                flags |= PackageManager.GET_SIGNING_CERTIFICATES;
+            }
+            android.content.pm.PackageInfo archiveInfo = pm.getPackageArchiveInfo(
+                    apkFile.getAbsolutePath(), flags);
+            android.content.pm.PackageInfo installedInfo =
+                    pm.getPackageInfo(context.getPackageName(), flags);
+            if (archiveInfo == null || installedInfo == null) {
+                return false;
+            }
+            android.content.pm.Signature[] archiveSigs = getSignatures(archiveInfo);
+            android.content.pm.Signature[] installedSigs = getSignatures(installedInfo);
+            if (archiveSigs == null || archiveSigs.length == 0
+                    || installedSigs == null || installedSigs.length == 0) {
+                return false;
+            }
+            // 已安装应用的每个签名都必须在下载包中找到
+            for (android.content.pm.Signature installed : installedSigs) {
+                boolean found = false;
+                for (android.content.pm.Signature archive : archiveSigs) {
+                    if (installed.equals(archive)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static android.content.pm.Signature[] getSignatures(
+            android.content.pm.PackageInfo info) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && info.signingInfo != null) {
+            if (info.signingInfo.hasMultipleSigners()) {
+                return info.signingInfo.getApkContentsSigners();
+            }
+            return info.signingInfo.getSigningCertificateHistory();
+        }
+        return info.signatures;
     }
 
     private static void installApk(Context context, File apkFile) {

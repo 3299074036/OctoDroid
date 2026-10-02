@@ -61,8 +61,12 @@ public class Github4AndroidActivity extends BaseActivity implements
     private static final String PARAM_SCOPE = "scope";
     private static final String PARAM_CALLBACK_URI = "redirect_uri";
     private static final String PARAM_STATE = "state";
+    private static final String PARAM_CODE_CHALLENGE = "code_challenge";
+    private static final String PARAM_CODE_CHALLENGE_METHOD = "code_challenge_method";
     /** 未完成的 OAuth 流程的随机 state，存 prefs 防进程被杀丢失。 */
     private static final String PREF_OAUTH_STATE = "oauth_state_pending";
+    /** 同一流程的 PKCE code_verifier，换 token 时提交。 */
+    private static final String PREF_OAUTH_VERIFIER = "oauth_verifier_pending";
 
     private static final Uri CALLBACK_URI = Uri.parse("gh4a://oauth");
 
@@ -130,7 +134,8 @@ public class Github4AndroidActivity extends BaseActivity implements
             SharedPreferences prefs = androidx.preference.PreferenceManager
                     .getDefaultSharedPreferences(this);
             String expectedState = prefs.getString(PREF_OAUTH_STATE, null);
-            prefs.edit().remove(PREF_OAUTH_STATE).apply();
+            String verifier = prefs.getString(PREF_OAUTH_VERIFIER, null);
+            prefs.edit().remove(PREF_OAUTH_STATE).remove(PREF_OAUTH_VERIFIER).apply();
             String actualState = data.getQueryParameter(PARAM_STATE);
             if (expectedState == null || !expectedState.equals(actualState)) {
                 android.util.Log.w("Github4AndroidActivity",
@@ -140,11 +145,14 @@ public class Github4AndroidActivity extends BaseActivity implements
             }
 
             OAuthService service = ServiceGenerator.createAuthService();
-            RequestToken request = RequestToken.builder()
+            RequestToken.Builder tokenBuilder = RequestToken.builder()
                     .clientId(BuildConfig.CLIENT_ID)
                     .clientSecret(BuildConfig.CLIENT_SECRET)
-                    .code(code)
-                    .build();
+                    .code(code);
+            if (verifier != null) {
+                tokenBuilder.codeVerifier(verifier);
+            }
+            RequestToken request = tokenBuilder.build();
 
             service.getToken(request)
                     .map(ApiHelpers::throwOnFailure)
@@ -256,15 +264,51 @@ public class Github4AndroidActivity extends BaseActivity implements
     public static void launchOauthLogin(Activity activity) {
         // 随机 state 防登录 CSRF：回调时必须原样返回，否则拒绝 (CR-2)
         String state = java.util.UUID.randomUUID().toString();
+        // PKCE (RFC 7636)：GitHub 2025-07 起支持 S256。verifier 只存本地，
+        // 换 token 时提交；即使授权码被其他应用截获也无法换 token (CR-1 纵深)
+        String verifier = generateCodeVerifier();
+        String challenge = codeChallengeS256(verifier);
         androidx.preference.PreferenceManager.getDefaultSharedPreferences(activity)
-                .edit().putString(PREF_OAUTH_STATE, state).apply();
+                .edit()
+                .putString(PREF_OAUTH_STATE, state)
+                .putString(PREF_OAUTH_VERIFIER, verifier)
+                .apply();
         Uri uri = Uri.parse(OAUTH_URL)
                 .buildUpon()
                 .appendQueryParameter(PARAM_CLIENT_ID, BuildConfig.CLIENT_ID)
                 .appendQueryParameter(PARAM_SCOPE, LoginModeChooserFragment.SCOPES)
                 .appendQueryParameter(PARAM_CALLBACK_URI, CALLBACK_URI.toString())
                 .appendQueryParameter(PARAM_STATE, state)
+                .appendQueryParameter(PARAM_CODE_CHALLENGE, challenge)
+                .appendQueryParameter(PARAM_CODE_CHALLENGE_METHOD, "S256")
                 .build();
         IntentUtils.openInCustomTabOrBrowser(activity, uri);
+    }
+
+    /** 生成 64 字符的 code_verifier（RFC 7636 unreserved 字符集）。 */
+    private static String generateCodeVerifier() {
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder(64);
+        final String alphabet =
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+        for (int i = 0; i < 64; i++) {
+            sb.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        return sb.toString();
+    }
+
+    /** code_challenge = BASE64URL-ENCODE(SHA256(verifier))，无 padding。 */
+    private static String codeChallengeS256(String verifier) {
+        try {
+            java.security.MessageDigest md =
+                    java.security.MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(
+                    verifier.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            return android.util.Base64.encodeToString(digest,
+                    android.util.Base64.URL_SAFE | android.util.Base64.NO_PADDING
+                            | android.util.Base64.NO_WRAP);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

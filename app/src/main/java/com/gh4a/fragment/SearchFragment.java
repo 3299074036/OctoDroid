@@ -238,6 +238,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     private Single<Response<Page<Object>>> makeDefaultRepoSingle(int page, boolean bypassCache) {
         RepositoryService service = ServiceFactory.get(RepositoryService.class, bypassCache);
         String login = Gh4Application.get().getAuthLogin();
+        if (login == null) {
+            // 未登录时没有默认用户，直接返回空页（null 传给 Retrofit @Path 会崩溃）
+            return Single.just(Response.success(new ApiHelpers.DummyPage<>()));
+        }
         // Page<Repository> is safely readable as Page<Object>
         return (Single<Response<Page<Object>>>) (Single<?>)
                 service.getUserRepositories(login, null, page);

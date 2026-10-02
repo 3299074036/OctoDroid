@@ -103,6 +103,10 @@ public class IssueMilestoneEditActivity extends BasePagerActivity implements
     private EditText mDescriptionView;
     private TextView mDueView;
 
+    // 旋转恢复用：未点保存的 due date 与 open/close 变更
+    private static final String STATE_KEY_DUE_ON = "due_on";
+    private static final String STATE_KEY_OPEN = "is_open";
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -147,6 +151,18 @@ public class IssueMilestoneEditActivity extends BasePagerActivity implements
             mMilestone = Milestone.builder().state(IssueState.Open).build();
         }
 
+        if (savedInstanceState != null) {
+            // 恢复旋转前未点保存的 due date 和 open/close 变更：
+            // intent 里带的 milestone 还是旧值，直接用会丢修改
+            long dueOnMillis = savedInstanceState.getLong(STATE_KEY_DUE_ON, -1);
+            boolean isOpen = savedInstanceState.getBoolean(STATE_KEY_OPEN,
+                    mMilestone.state() == IssueState.Open);
+            mMilestone = mMilestone.toBuilder()
+                    .state(isOpen ? IssueState.Open : IssueState.Closed)
+                    .dueOn(dueOnMillis >= 0 ? new Date(dueOnMillis) : null)
+                    .build();
+        }
+
         mTitleView.addTextChangedListener(new UiUtils.EmptinessWatchingTextWatcher(mTitleView) {
             @Override
             public void onIsEmpty(boolean isEmpty) {
@@ -173,6 +189,20 @@ public class IssueMilestoneEditActivity extends BasePagerActivity implements
         return getString(isInEditMode()
                 ? R.string.issue_milestone_edit
                 : R.string.issue_milestone_new);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        // 存下未点保存的 due date（毫秒值，无值则不存）和 open/close 状态，
+        // 旋转后在 onCreate 里恢复（标题/描述是 EditText，会自己恢复）
+        if (mMilestone != null) {
+            Date dueOn = mMilestone.dueOn();
+            if (dueOn != null) {
+                outState.putLong(STATE_KEY_DUE_ON, dueOn.getTime());
+            }
+            outState.putBoolean(STATE_KEY_OPEN, mMilestone.state() == IssueState.Open);
+        }
     }
 
     @Nullable

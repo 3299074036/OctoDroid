@@ -23,6 +23,7 @@
     <string name="credentials_error_empty">This field must not be empty.</string>
     <string name="credentials_error_invalid_token">The entered text does not look like a valid access token.</string>
     <string name="credentials_token">Access token</string>
+    <string name="pat_min_scope_hint">Tip: use a fine-grained personal access token with only the minimum required scopes.</string>
     <string name="try_again">Try again</string>
     <string name="report_issue">Report issue</string>
     <string name="ok">OK</string>
@@ -75,6 +76,7 @@
     <string name="update_check_failed">Update check failed: %1$s</string>
     <string name="downloading_update">Downloading update…</string>
     <string name="allow_install_unknown_apps">Please allow installing unknown apps, then retry</string>
+    <string name="apk_signature_mismatch">Update package signature does not match the installed app, installation blocked</string>
     <string name="reply">Reply</string>
     <string name="reply_selected">Reply (Selected)</string>
     <string name="add_comment">Add comment</string>
@@ -176,6 +178,10 @@
     <string name="clear_suggestions">Clear suggestions</string>
     <string name="quote">Quote</string>
     <string name="fork">Fork</string>
+    <string name="repo_fork_confirm_title">Fork repository</string>
+    <string name="repo_fork_confirm_message">Fork %1$s to your account?</string>
+    <string name="repo_fork_success">Forked to %1$s</string>
+    <string name="repo_fork_failed">Fork failed</string>
     <string name="notifications">Notifications</string>
     <string name="mark_all_as_read">Mark all as read</string>
     <string name="mark_as_read">Mark as read</string>

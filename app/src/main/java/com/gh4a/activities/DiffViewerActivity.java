@@ -547,6 +547,10 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
 
             Menu menu = getMenu();
             CommentWrapper comment = mWrappedComments.get(mId);
+            // 评论可能已被删除或尚未加载，判空后直接返回
+            if (comment == null || comment.comment == null) {
+                return;
+            }
             String ownLogin = Gh4Application.get().getAuthLogin();
 
             getMenuInflater().inflate(R.menu.commit_comment_actions, menu);

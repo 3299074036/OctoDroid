@@ -46,7 +46,7 @@ public class IssueLabelAdapter extends
             editedColor = in.readString();
             newlyAdded = in.readInt() != 0;
             isEditing = in.readInt() != 0;
-            mLabel = in.readParcelable(ClassLoader.getSystemClassLoader());
+            mLabel = in.readParcelable(Label.class.getClassLoader());
         }
 
         @Nullable

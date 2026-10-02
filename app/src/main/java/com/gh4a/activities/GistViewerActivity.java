@@ -134,7 +134,12 @@ public class GistViewerActivity extends WebViewerActivity {
                 .compose(makeLoaderSingle(ID_LOADER_GIST, force))
                 .subscribe(result -> {
                     mGistOwner = ApiHelpers.getUserLogin(GistViewerActivity.this, result.owner());
-                    mGistFile = result.files().get(mFileName);
+                    mGistFile = result.files() != null ? result.files().get(mFileName) : null;
+                    if (mGistFile == null) {
+                        // 文件在 gist 里被删除/改名：按加载失败处理，避免 generateHtml 空指针
+                        handleLoadFailure(new java.io.FileNotFoundException(mFileName));
+                        return;
+                    }
                     onDataReady();
                 }, this::handleLoadFailure);
 

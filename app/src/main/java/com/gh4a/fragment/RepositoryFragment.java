@@ -113,6 +113,9 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     private Button mTranslateButton;
     private Boolean mIsWatching = null;
     private Boolean mIsStarring = null;
+    // star/watch 请求在途标志：快速连击时两次请求会基于同一旧状态，
+    // 回调翻转后 UI 与服务端不一致，在途时直接屏蔽新的点击
+    private boolean mStarWatchInFlight = false;
     private boolean mIsReadmeLoaded = false;
     private boolean mIsReadmeExpanded = false;
     // README translation state
@@ -703,6 +706,14 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     }
 
     private void toggleStarringState() {
+        if (mStarWatchInFlight || mIsStarring == null) {
+            return;
+        }
+        mStarWatchInFlight = true;
+        // 点击落在行内图标上，摘掉监听器才能真正屏蔽连击（图标会变灰）；
+        // 行本身也置 disabled，保持视觉一致
+        mStarsRow.setEnabled(false);
+        mStarsRow.setIconClickListener(null);
         StarringService service = ServiceFactory.get(StarringService.class, false);
         Single<Response<Void>> responseSingle = mIsStarring
                 ? service.unstarRepository(mRepository.owner().login(), mRepository.name())
@@ -710,6 +721,9 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         responseSingle.map(ApiHelpers::mapToBooleanOrThrowOnFailure)
                 .compose(RxUtils::doInBackground)
                 .subscribe(result -> {
+                    mStarWatchInFlight = false;
+                    mStarsRow.setEnabled(true);
+                    mStarsRow.setIconClickListener(this);
                     if (mIsStarring != null) {
                         mIsStarring = !mIsStarring;
                         mRepository = mRepository.toBuilder()
@@ -718,6 +732,9 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                         updateStargazerUi();
                     }
                 }, error -> {
+                    mStarWatchInFlight = false;
+                    mStarsRow.setEnabled(true);
+                    mStarsRow.setIconClickListener(this);
                     handleActionFailure("Updating repo starring state failed", error);
                     updateStargazerUi();
                 });
@@ -725,6 +742,13 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     }
 
     private void toggleWatchingState() {
+        if (mStarWatchInFlight || mIsWatching == null) {
+            return;
+        }
+        mStarWatchInFlight = true;
+        // 同 toggleStarringState：在途时屏蔽图标点击，避免连击竞态
+        mWatcherRow.setEnabled(false);
+        mWatcherRow.setIconClickListener(null);
         WatchingService service = ServiceFactory.get(WatchingService.class, false);
         final String repoOwner = mRepository.owner().login(), repoName = mRepository.name();
         final Single<Boolean> responseSingle;
@@ -744,6 +768,9 @@ public class RepositoryFragment extends LoadingFragmentBase implements
 
         responseSingle.compose(RxUtils::doInBackground)
                 .subscribe(result -> {
+                    mStarWatchInFlight = false;
+                    mWatcherRow.setEnabled(true);
+                    mWatcherRow.setIconClickListener(this);
                     if (mIsWatching != null) {
                         mIsWatching = result;
                         mRepository = mRepository.toBuilder()
@@ -752,6 +779,9 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                         updateWatcherUi();
                     }
                 }, error -> {
+                    mStarWatchInFlight = false;
+                    mWatcherRow.setEnabled(true);
+                    mWatcherRow.setIconClickListener(this);
                     handleActionFailure("Updating repo watching state failed", error);
                     updateWatcherUi();
                 });

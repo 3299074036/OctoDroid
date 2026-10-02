@@ -58,6 +58,8 @@ public class WatcherListFragment extends PagedDataBaseFragment<User> {
     private String mRepoOwner;
     private String mRepoName;
     private Boolean mIsWatching;
+    // watch 请求在途标志：连击时两次请求基于同一旧状态，回调翻转致 UI 与服务端不一致
+    private boolean mWatchingInFlight = false;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -107,6 +109,8 @@ public class WatcherListFragment extends PagedDataBaseFragment<User> {
             } else {
                 starItem.setTitle(R.string.repo_watch_action);
             }
+            // 请求在途时禁用菜单项，避免快速连击造成状态竞态
+            starItem.setEnabled(!mWatchingInFlight);
         }
     }
 
@@ -137,6 +141,11 @@ public class WatcherListFragment extends PagedDataBaseFragment<User> {
     }
 
     private void toggleWatchingState() {
+        if (mWatchingInFlight || mIsWatching == null) {
+            return;
+        }
+        mWatchingInFlight = true;
+        getActivity().invalidateOptionsMenu();
         WatchingService service = ServiceFactory.get(WatchingService.class, false);
         final Single<Boolean> responseSingle;
 
@@ -155,11 +164,14 @@ public class WatcherListFragment extends PagedDataBaseFragment<User> {
 
         responseSingle.compose(RxUtils::doInBackground)
                 .subscribe(result -> {
+                    mWatchingInFlight = false;
                     if (mIsWatching != null) {
                         mIsWatching = result;
                     }
                     getActivity().invalidateOptionsMenu();
                 }, error -> {
+                    mWatchingInFlight = false;
+                    getActivity().invalidateOptionsMenu();
                     handleActionFailure("Updating repo watching state failed", error);
                 });
     }

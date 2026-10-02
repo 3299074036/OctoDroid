@@ -54,6 +54,8 @@ public class StargazerListFragment extends PagedDataBaseFragment<User> {
     private String mRepoOwner;
     private String mRepoName;
     private Boolean mIsStarring;
+    // star 请求在途标志：连击时两次请求基于同一旧状态，回调翻转致 UI 与服务端不一致
+    private boolean mStarringInFlight = false;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -103,6 +105,8 @@ public class StargazerListFragment extends PagedDataBaseFragment<User> {
             } else {
                 starItem.setTitle(R.string.repo_star_action);
             }
+            // 请求在途时禁用菜单项，避免快速连击造成状态竞态
+            starItem.setEnabled(!mStarringInFlight);
         }
     }
 
@@ -136,6 +140,11 @@ public class StargazerListFragment extends PagedDataBaseFragment<User> {
     }
 
     private void toggleStarringState() {
+        if (mStarringInFlight || mIsStarring == null) {
+            return;
+        }
+        mStarringInFlight = true;
+        getActivity().invalidateOptionsMenu();
         StarringService service = ServiceFactory.get(StarringService.class, false);
         Single<Response<Void>> responseSingle = mIsStarring
                 ? service.unstarRepository(mRepoOwner, mRepoName)
@@ -143,11 +152,14 @@ public class StargazerListFragment extends PagedDataBaseFragment<User> {
         responseSingle.map(ApiHelpers::mapToBooleanOrThrowOnFailure)
                 .compose(RxUtils::doInBackground)
                 .subscribe(result -> {
+                    mStarringInFlight = false;
                     if (mIsStarring != null) {
                         mIsStarring = !mIsStarring;
                         getActivity().invalidateOptionsMenu();
                     }
                 }, error -> {
+                    mStarringInFlight = false;
+                    getActivity().invalidateOptionsMenu();
                     handleActionFailure("Updating repo starring state failed", error);
                 });
     }

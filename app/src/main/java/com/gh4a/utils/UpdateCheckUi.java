@@ -27,10 +27,11 @@ public class UpdateCheckUi {
             @Override
             public void onResult(boolean hasUpdate, String latestVersion,
                     String releaseNotes, String apkUrl) {
+                // 先 dismiss：Activity 若已销毁，直接 return 会泄漏窗口
+                progress.dismiss();
                 if (activity.isFinishing() || activity.isDestroyed()) {
                     return;
                 }
-                progress.dismiss();
                 if (hasUpdate) {
                     showUpdateDialog(activity, latestVersion, releaseNotes, apkUrl);
                 } else {
@@ -41,10 +42,10 @@ public class UpdateCheckUi {
 
             @Override
             public void onError(String message) {
+                progress.dismiss();
                 if (activity.isFinishing() || activity.isDestroyed()) {
                     return;
                 }
-                progress.dismiss();
                 Toast.makeText(activity,
                         activity.getString(R.string.update_check_failed, message),
                         Toast.LENGTH_LONG).show();

@@ -265,10 +265,16 @@ public class IssueLabelListActivity extends BaseActivity implements
         if (mPendingEditingLabel.newlyAdded) {
             label = addOrGetNewLabelItem();
         } else {
+            // 按 base name 匹配：编辑态 name() 返回用户改名后的 editedName，
+            // 而重载后 adapter 里该项的 editedName 为 null、name() 返回 base name，
+            // 直接比较 name() 会在改名后旋转时永远对不上，导致编辑态丢失
+            Label base = mPendingEditingLabel.base();
+            String baseName = base != null ? base.name() : null;
             int count = mAdapter.getCount();
             for (int i = 0; i < count; i++) {
                 IssueLabelAdapter.EditableLabel item = mAdapter.getItem(i);
-                if (item.name().equals(mPendingEditingLabel.name())) {
+                Label itemBase = item.base();
+                if (!item.newlyAdded && itemBase != null && itemBase.name().equals(baseName)) {
                     label = item;
                     break;
                 }

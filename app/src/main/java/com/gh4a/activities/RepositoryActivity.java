@@ -21,6 +21,7 @@ import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.gh4a.BaseFragmentPagerActivity;
 import com.gh4a.R;
@@ -40,6 +41,7 @@ import com.meisolsson.githubsdk.model.Branch;
 import com.meisolsson.githubsdk.model.Commit;
 import com.meisolsson.githubsdk.model.Repository;
 import com.meisolsson.githubsdk.service.repositories.RepositoryBranchService;
+import com.meisolsson.githubsdk.service.repositories.RepositoryForkService;
 import com.meisolsson.githubsdk.service.repositories.RepositoryService;
 
 import java.util.ArrayList;
@@ -274,6 +276,7 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
         if (mRepository == null) {
             menu.removeItem(R.id.ref);
             menu.removeItem(R.id.bookmark);
+            menu.removeItem(R.id.fork);
             menu.removeItem(R.id.zip_download);
             menu.removeItem(R.id.copy_clone_url);
         } else {
@@ -325,6 +328,9 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
                             BookmarksProvider.Columns.TYPE_REPO, bookmarkUrl, getCurrentRef(), true);
                 }
                 return true;
+            case R.id.fork:
+                confirmForkRepository();
+                return true;
             case R.id.zip_download: {
                 final String zipUrl = Uri.parse(mRepository.url())
                         .buildUpon()
@@ -344,6 +350,30 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
             }
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    // 复刻仓库：确认对话框 -> 调 API -> Toast 提示结果
+    private void confirmForkRepository() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.repo_fork_confirm_title)
+                .setMessage(getString(R.string.repo_fork_confirm_message,
+                        mRepoOwner + "/" + mRepoName))
+                .setPositiveButton(R.string.fork, (dialog, which) -> forkRepository())
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void forkRepository() {
+        RepositoryForkService service = ServiceFactory.get(RepositoryForkService.class, false);
+        service.createFork(mRepoOwner, mRepoName)
+                .map(ApiHelpers::throwOnFailure)
+                .compose(RxUtils::doInBackground)
+                .subscribe(
+                        repo -> Toast.makeText(this,
+                                getString(R.string.repo_fork_success, repo.name()),
+                                Toast.LENGTH_LONG).show(),
+                        error -> Toast.makeText(this,
+                                R.string.repo_fork_failed, Toast.LENGTH_LONG).show());
     }
 
     private void showRefSelectionDialog() {

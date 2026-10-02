@@ -17,12 +17,15 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -122,11 +125,11 @@ public class MirrorHelper {
             return url;
         }
         String host = Uri.parse(url).getHost();
-        if (host == null || !MIRRORABLE_HOSTS.contains(host.toLowerCase())) {
+        if (host == null || !MIRRORABLE_HOSTS.contains(host.toLowerCase(Locale.ROOT))) {
             return url;
         }
-        if (url.startsWith(base)) {
-            return url; // 已经是镜像地址
+        if (url.regionMatches(true, 0, base, 0, base.length())) {
+            return url; // 已经是镜像地址（大小写不敏感比较）(L-7)
         }
         return base + "/" + url;
     }
@@ -161,10 +164,74 @@ public class MirrorHelper {
     }
 
     /**
+     * 测速任务句柄 (M-10)：调用方（如 Fragment）在销毁时调 {@link #cancel()}，
+     * 中止未完成的探测并阻止回调，避免回调强引用已销毁的调用方。
+     * <p>
+     * 任务执行期间句柄强持有 callback（匿名 lambda 若只被弱引用，
+     * 方法返回后可能被 GC 导致正常测速也收不到结果）；cancel() 或结果投递后清空。
+     */
+    public static class SpeedTestHandle {
+        private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        private final List<Call> calls = Collections.synchronizedList(new ArrayList<>());
+        private volatile SpeedTestCallback callback;
+
+        SpeedTestHandle(SpeedTestCallback callback) {
+            this.callback = callback;
+        }
+
+        /** 取消测速：中止进行中的请求，之后不再投递回调。 */
+        public void cancel() {
+            cancelled.set(true);
+            callback = null;
+            synchronized (calls) {
+                for (Call call : calls) {
+                    call.cancel();
+                }
+            }
+        }
+
+        public boolean isCancelled() {
+            return cancelled.get();
+        }
+
+        SpeedTestCallback getCallback() {
+            return callback;
+        }
+
+        void clearCallback() {
+            callback = null;
+        }
+
+        void track(Call call) {
+            calls.add(call);
+        }
+    }
+
+    /** 测速专用静态 client (L-6)：复用连接池，反复测速不再堆积线程/连接。 */
+    private static volatile OkHttpClient sSpeedTestClient;
+
+    private static OkHttpClient getSpeedTestClient() {
+        if (sSpeedTestClient == null) {
+            synchronized (MirrorHelper.class) {
+                if (sSpeedTestClient == null) {
+                    sSpeedTestClient = new OkHttpClient.Builder()
+                            .connectTimeout(8, TimeUnit.SECONDS)
+                            .readTimeout(8, TimeUnit.SECONDS)
+                            .build();
+                }
+            }
+        }
+        return sSpeedTestClient;
+    }
+
+    /**
      * 镜像测速：并行测试全部预设镜像及已填写的自定义地址的延迟，
      * 按从快到慢排序（不可用的排最后）。结果回调在主线程。
+     *
+     * @return 任务句柄，调用方销毁时应调 {@link SpeedTestHandle#cancel()}
      */
-    public static void testAllMirrorsSpeed(Context context, SpeedTestCallback callback) {
+    public static SpeedTestHandle testAllMirrorsSpeed(Context context, SpeedTestCallback callback) {
+        final SpeedTestHandle handle = new SpeedTestHandle(callback);
         final Handler handler = new Handler(Looper.getMainLooper());
         String[] names;
         String[] values;
@@ -173,8 +240,8 @@ public class MirrorHelper {
             values = context.getResources().getStringArray(R.array.mirror_preset_values);
         } catch (android.content.res.Resources.NotFoundException e) {
             Log.d(TAG, "Mirror preset arrays not found", e);
-            handler.post(() -> callback.onResult(new ArrayList<>()));
-            return;
+            postResult(handler, handle, new ArrayList<>());
+            return handle;
         }
         final List<MirrorSpeedResult> targets = new ArrayList<>();
         int n = Math.min(names.length, values.length);
@@ -198,19 +265,16 @@ public class MirrorHelper {
             }
         }
         if (targets.isEmpty()) {
-            handler.post(() -> callback.onResult(new ArrayList<>()));
-            return;
+            postResult(handler, handle, new ArrayList<>());
+            return handle;
         }
-        final OkHttpClient client = new OkHttpClient.Builder()
-                .connectTimeout(8, TimeUnit.SECONDS)
-                .readTimeout(8, TimeUnit.SECONDS)
-                .build();
+        final OkHttpClient client = getSpeedTestClient();
         new Thread(() -> {
             ExecutorService pool =
                     Executors.newFixedThreadPool(Math.min(targets.size(), 5));
             List<Future<MirrorSpeedResult>> futures = new ArrayList<>();
             for (MirrorSpeedResult t : targets) {
-                futures.add(pool.submit(() -> probeMirror(client, t)));
+                futures.add(pool.submit(() -> probeMirror(client, t, handle)));
             }
             List<MirrorSpeedResult> results = new ArrayList<>();
             for (Future<MirrorSpeedResult> f : futures) {
@@ -227,23 +291,45 @@ public class MirrorHelper {
                 }
                 return Long.compare(a.latencyMs, b.latencyMs);
             });
-            handler.post(() -> callback.onResult(results));
+            postResult(handler, handle, results);
         }).start();
+        return handle;
+    }
+
+    private static void postResult(Handler handler, SpeedTestHandle handle,
+            List<MirrorSpeedResult> results) {
+        if (handle.isCancelled()) {
+            return;
+        }
+        handler.post(() -> {
+            SpeedTestCallback callback = handle.getCallback();
+            // 投递后清空强引用，避免句柄长期持有调用方
+            handle.clearCallback();
+            if (callback != null && !handle.isCancelled()) {
+                callback.onResult(results);
+            }
+        });
     }
 
     /** 测单个镜像：Range 取小文件前 1KB，返回耗时；失败返回 latencyMs = -1。 */
-    private static MirrorSpeedResult probeMirror(OkHttpClient client, MirrorSpeedResult target) {
+    private static MirrorSpeedResult probeMirror(OkHttpClient client, MirrorSpeedResult target,
+            SpeedTestHandle handle) {
         String probe = target.url
                 + "/https://raw.githubusercontent.com/github/gitignore/main/README.md";
         long start = SystemClock.elapsedRealtime();
-        try (Response r = client.newCall(new Request.Builder()
-                .url(probe)
-                .header("Range", "bytes=0-1023")
-                .build()).execute()) {
-            if (r.isSuccessful() && r.body() != null) {
-                r.body().bytes(); // 读完 1KB，耗时才真实
-                return new MirrorSpeedResult(target.name, target.url, target.presetValue,
-                        SystemClock.elapsedRealtime() - start);
+        Call call = null;
+        try {
+            call = client.newCall(new Request.Builder()
+                    .url(probe)
+                    .header("Range", "bytes=0-1023")
+                    .build());
+            handle.track(call);
+            try (Response r = call.execute()) {
+                if (r.isSuccessful() && r.body() != null) {
+                    r.body().bytes(); // 读完 1KB，耗时才真实
+                    return new MirrorSpeedResult(target.name, target.url, target.presetValue,
+                            SystemClock.elapsedRealtime() - start);
+                }
             }
         } catch (IOException e) {
             Log.d(TAG, "Speed probe failed: " + target.url, e);

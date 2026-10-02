@@ -17,17 +17,22 @@ package com.gh4a.activities;
 
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
+import android.view.Menu;
+import android.view.MenuItem;
 import androidx.annotation.Nullable;
 
 import com.gh4a.R;
 import com.gh4a.model.Feed;
+import com.gh4a.utils.IntentUtils;
 
 public class BlogActivity extends WebViewerActivity {
     public static Intent makeIntent(Context context, Feed blog) {
         return new Intent(context, BlogActivity.class)
                 .putExtra("title", blog.getTitle())
-                .putExtra("content", blog.getContent());
+                .putExtra("content", blog.getContent())
+                .putExtra("link", blog.getLink());
     }
 
     @Override
@@ -69,5 +74,28 @@ public class BlogActivity extends WebViewerActivity {
     @Override
     protected Intent navigateUp() {
         return new Intent(this, BlogListActivity.class);
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        // 博客文章加分享入口，分享原文链接
+        if (getIntent().getStringExtra("link") != null) {
+            MenuItem shareItem = menu.add(Menu.NONE, R.id.share, Menu.NONE, R.string.share);
+            shareItem.setIcon(R.drawable.menu_share);
+            shareItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
+        }
+        return super.onCreateOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.share) {
+            String link = getIntent().getStringExtra("link");
+            if (link != null) {
+                IntentUtils.share(this, getDocumentTitle(), Uri.parse(link));
+            }
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
     }
 }

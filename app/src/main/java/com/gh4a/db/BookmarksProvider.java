@@ -68,14 +68,16 @@ public class BookmarksProvider extends ContentProvider {
     }
 
     private static int getNextOrderId(ContentResolver cr) {
+        // 用 MAX(order_id)+1 而不是 COUNT(*)，删除书签后新增不会与已有 order_id 重复
         Cursor query = cr.query(Columns.CONTENT_URI,
-                new String[] { "COUNT(*)" },
+                new String[] { "MAX(" + Columns.ORDER_ID + ")" },
                 null, null, null);
 
         int orderId = 0;
         if (query != null) {
-            if (query.moveToFirst()) {
-                orderId = query.getInt(0);
+            // 空表时 MAX 返回 null，保持原有语义返回 0
+            if (query.moveToFirst() && !query.isNull(0)) {
+                orderId = query.getInt(0) + 1;
             }
             query.close();
         }

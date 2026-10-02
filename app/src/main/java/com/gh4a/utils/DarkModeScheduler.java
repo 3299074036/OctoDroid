@@ -66,7 +66,14 @@ public class DarkModeScheduler {
 
     /** Applies the effective night mode; call on process start and on setting changes. */
     public static void apply(Context context) {
-        String mode = getMode(context);
+        apply(context, getMode(context));
+    }
+
+    /**
+     * Applies the given mode directly. Use from preference change listeners,
+     * where the new value is not yet persisted when the callback runs.
+     */
+    public static void apply(Context context, String mode) {
         switch (mode) {
             case MODE_SYSTEM:
                 cancelAlarms(context);

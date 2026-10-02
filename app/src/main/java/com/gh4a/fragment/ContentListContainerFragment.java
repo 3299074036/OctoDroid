@@ -218,12 +218,13 @@ public class ContentListContainerFragment extends Fragment implements
             String itemToLoad = mInitialPathToLoad.get(0);
             boolean found = false;
             for (Content content : contents) {
-                if (content.type() == ContentType.Directory) {
-                    if (content.path().equals(itemToLoad)) {
-                        onTreeSelected(content);
-                        found = true;
-                        break;
-                    }
+                // initial_path 指向文件时也直接打开（之前仅匹配目录）
+                if (content.path().equals(itemToLoad)
+                        && (content.type() == ContentType.Directory
+                                || content.type() == ContentType.File)) {
+                    onTreeSelected(content);
+                    found = true;
+                    break;
                 }
             }
             if (found) {

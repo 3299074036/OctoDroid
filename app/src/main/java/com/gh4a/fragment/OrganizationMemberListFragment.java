@@ -47,6 +47,10 @@ public class OrganizationMemberListFragment extends PagedDataBaseFragment<User> 
 
     @Override
     public void onItemClick(User item) {
+        // item 可能为 null，加保护避免崩溃
+        if (item == null) {
+            return;
+        }
         startActivity(UserActivity.makeIntent(getActivity(), item));
     }
 }

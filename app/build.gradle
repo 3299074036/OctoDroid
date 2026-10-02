@@ -31,9 +31,9 @@ android {
     buildToolsVersion "36.0.0"
     defaultConfig {
         minSdkVersion 23
-        targetSdkVersion 33
-        versionCode 33
-        versionName "0.0.33"
+        targetSdkVersion 35
+        versionCode 34
+        versionName "0.0.34"
         applicationId "com.gh4a"
         resourceConfigurations += ['en', 'zh-rCN']
 
@@ -98,6 +98,7 @@ dependencies {
     implementation 'androidx.print:print:1.1.0'
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     implementation 'androidx.work:work-runtime:2.11.0'
+    implementation 'androidx.security:security-crypto:1.1.0'
     implementation 'com.google.android.material:material:1.13.0'
     implementation 'io.reactivex.rxjava2:rxandroid:2.1.1'
     implementation "com.squareup.retrofit2:adapter-rxjava2:$retrofitVersion"
@@ -109,6 +110,11 @@ dependencies {
     }
     implementation "com.squareup.okhttp3:okhttp:$okHttpVersion"
     implementation "com.squareup.okhttp3:logging-interceptor:$okHttpVersion"
+    // 固定 commit：master-SNAPSHOT 不可复现；maniac103/RxLoader 已多年无更新，
+    // 该 commit 即当前 master HEAD (L-13)
+    // 注意：不要 pin 到 0.4.0 tag——其 RxLoader API 缺少 makeSingleTransformer(int, boolean)，
+    // 与项目代码不兼容；jitpack 又不提供该仓库的 commit SHA 构建（404），
+    // 故沿用 master-SNAPSHOT。该库已 7 年无更新，master 实质等同于冻结版本。
     implementation 'com.github.maniac103:rxloader:master-SNAPSHOT'
     implementation 'com.github.maniac103:githubsdk:0.7.0.23'
     implementation 'com.larswerkman:HoloColorPicker:1.5@aar'
@@ -142,6 +148,8 @@ if (props.containsKey('STORE_FILE')
     android.signingConfigs.release.keyAlias = props['KEY_ALIAS']
     android.signingConfigs.release.keyPassword = props['KEY_PASSWORD']
 } else {
-    println 'signing.properties not found or incomplete'
-    android.buildTypes.release.signingConfig = null
+    // signing.properties 缺失时直接中断构建：静默产出未签名 release 包
+    // 比构建失败更危险 (L-12)
+    throw new GradleException('signing.properties not found or incomplete, '
+            + 'refusing to build release without a signing config')
 }

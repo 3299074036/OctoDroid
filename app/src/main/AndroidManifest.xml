@@ -10,11 +10,14 @@
     <uses-permission
         android:name="android.permission.INTERNET" />
     <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 深色定时闹钟用 setExactAndAllowWhileIdle；用户拒绝时代码已降级为非精确闹钟 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <queries>
@@ -61,6 +64,7 @@
 
         <activity-alias
             android:name=".Github4AndroidActivity"
+            android:exported="false"
             android:label="@string/app_name"
             android:targetActivity=".activities.Github4AndroidActivity"/>
 
@@ -238,7 +242,7 @@
         <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
         <receiver
             android:name="com.gh4a.utils.DarkModeAlarmReceiver"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

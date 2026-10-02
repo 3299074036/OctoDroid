@@ -30,6 +30,7 @@ import java.net.HttpURLConnection;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -388,8 +389,12 @@ public class ApiHelpers {
                         return producer.getPage(page.get())
                                 .toObservable()
                                 .compose(PageIterator::evaluateError)
-                                .doOnNext(resultPage -> pageControl.onNext(Optional.ofNullable(resultPage.next())))
-                                .map(responsePage -> responsePage.items());
+                                // 204 响应被视为成功但 body 为 null，判空后返回空列表并结束分页
+                                .doOnNext(resultPage -> pageControl.onNext(Optional.ofNullable(
+                                        resultPage == null ? null : resultPage.next())))
+                                .map(responsePage -> responsePage == null
+                                        ? Collections.<T>emptyList()
+                                        : responsePage.items());
                     });
         }
 
@@ -405,6 +410,10 @@ public class ApiHelpers {
                                 .toObservable()
                                 .compose(PageIterator::evaluateError)
                                 .map(resultPage -> {
+                                    // 204 响应 body 为 null，视为空页（后续被 filter 掉）
+                                    if (resultPage == null) {
+                                        return Pair.create((T) null, (Integer) null);
+                                    }
                                     for (T item : resultPage.items()) {
                                         if (predicate.test(item)) {
                                             return Pair.create(item, (Integer) null);

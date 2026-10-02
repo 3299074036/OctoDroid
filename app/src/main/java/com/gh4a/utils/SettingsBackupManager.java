@@ -43,6 +43,8 @@ import java.util.Set;
  */
 public class SettingsBackupManager {
     private static final int BACKUP_VERSION = 1;
+    /** 备份文件读取上限 16MB：防止恶意超大文件撑爆内存 (L-9) */
+    private static final long MAX_BACKUP_SIZE = 16L * 1024 * 1024;
 
     private static final String[] EXACT_EXCLUDED_KEYS = {
             "active_login", "logins",
@@ -205,7 +207,9 @@ public class SettingsBackupManager {
     /** Writes the backup JSON into the public Downloads directory. Returns the file name. */
     public static String writeBackupFile(Context context, JSONObject backup) throws IOException {
         String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-        String fileName = "OctoDroid_backup_" + stamp + ".json";
+        // 追加 6 位随机串：同秒多次备份不再互相截断/覆盖 (L-10)
+        String rand = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 6);
+        String fileName = "OctoDroid_backup_" + stamp + "_" + rand + ".json";
         byte[] data = backup.toString().getBytes(StandardCharsets.UTF_8);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -249,6 +253,9 @@ public class SettingsBackupManager {
             int n;
             while ((n = in.read(chunk)) >= 0) {
                 buffer.write(chunk, 0, n);
+                if (buffer.size() > MAX_BACKUP_SIZE) {
+                    throw new IOException("Backup file too large (>" + MAX_BACKUP_SIZE + " bytes)");
+                }
             }
             return new JSONObject(buffer.toString(StandardCharsets.UTF_8.name()));
         }
