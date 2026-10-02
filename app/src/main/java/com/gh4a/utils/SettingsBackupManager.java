@@ -33,13 +33,12 @@ import java.util.Set;
  * Exports/imports app settings as a JSON file in the Downloads directory.
  *
  * Backed up: everything in "Gh4a-pref" except account credentials
- * (tokens, login list) and the drawer customization prefs, plus the
- * non-credential translation_* keys (provider selection etc.) from the
- * default shared preferences.
- * Never backed up: account logins/tokens, and translation API
- * keys/secrets/endpoints (keys starting with translation_api_key,
- * translation_api_secret or translation_url).
- * Those stay on the device and must be re-entered after a restore.
+ * (tokens, login list) and the drawer customization prefs, plus all
+ * translation_* keys (provider selection AND API keys/secrets/endpoints)
+ * from the default shared preferences.
+ * Never backed up: account logins/tokens. Those stay on the device and
+ * must be re-entered after a restore.
+ * 注意：备份文件是明文 JSON，含翻译 API 凭据，请妥善保管备份文件。
  */
 public class SettingsBackupManager {
     private static final int BACKUP_VERSION = 1;
@@ -49,16 +48,6 @@ public class SettingsBackupManager {
     private static final String[] EXACT_EXCLUDED_KEYS = {
             "active_login", "logins",
     };
-
-    /**
-     * 翻译凭据键（含各服务商的 API key/secret/endpoint），绝不写入备份文件，
-     * 也不接受从备份恢复（防止恶意备份注入凭据）。
-     */
-    static boolean isTranslationCredentialKey(String key) {
-        return key.startsWith("translation_api_key")
-                || key.startsWith("translation_api_secret")
-                || key.startsWith("translation_url");
-    }
 
     private static boolean isExcluded(String key) {
         String lower = key.toLowerCase(Locale.US);
@@ -185,13 +174,14 @@ public class SettingsBackupManager {
                 "drawer_config", Context.MODE_PRIVATE);
         prefs.put("drawer_config", prefsToJson(drawer, false));
 
-        // Translation provider + non-credential keys live in the default shared
-        // preferences. API keys/secrets/endpoints are never exported (H-3).
+        // Translation provider settings live in the default shared
+        // preferences; all translation_* keys are exported, including
+        // API keys/secrets/endpoints (用户要求手动备份携带翻译凭据)。
         SharedPreferences def = PreferenceManager.getDefaultSharedPreferences(context);
         JSONObject translation = new JSONObject();
         for (Map.Entry<String, ?> entry : def.getAll().entrySet()) {
             String key = entry.getKey();
-            if (key.startsWith("translation_") && !isTranslationCredentialKey(key)) {
+            if (key.startsWith("translation_")) {
                 JSONObject single = new JSONObject();
                 if (putTypedValue(single, entry.getValue())) {
                     translation.put(key, single);
@@ -282,11 +272,11 @@ public class SettingsBackupManager {
                         ACCEPT_ALL);
             }
             if (prefs.has("default")) {
-                // 翻译区只接受 translation_ 非凭据键：恶意备份无法注入 API key/secret (M-1/H-3)
+                // 翻译区接受全部 translation_ 键（含 API key/secret/endpoint，
+                // 用户要求手动备份携带翻译凭据）
                 jsonToPrefs(prefs.getJSONObject("default"),
                         PreferenceManager.getDefaultSharedPreferences(context),
-                        key -> key.startsWith("translation_")
-                                && !isTranslationCredentialKey(key));
+                        key -> key.startsWith("translation_"));
             }
             return true;
         } catch (JSONException e) {
