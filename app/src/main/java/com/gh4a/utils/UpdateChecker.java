@@ -7,9 +7,12 @@ import android.os.Looper;
 
 import com.gh4a.BuildConfig;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -85,28 +88,55 @@ public class UpdateChecker {
     }
 
     private static UpdateInfo doCheck(Context context) throws Exception {
-        Request request = new Request.Builder()
-                .url(LATEST_RELEASE_URL)
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "OctoDroid")
-                .build();
-        String tag;
-        String body;
-        try (Response response = getClient().newCall(request).execute()) {
-            if (!response.isSuccessful() || response.body() == null) {
-                throw new IOException("HTTP " + response.code());
-            }
-            JSONObject json = new JSONObject(response.body().string());
-            tag = json.optString("tag_name", "");
-            body = json.optString("body", "");
-        }
+        JSONObject json = fetchLatestRelease(context);
+        String tag = json.optString("tag_name", "");
+        String body = json.optString("body", "");
         if (tag.isEmpty()) {
             throw new IOException("empty release tag");
         }
         String latestVersion = tag.startsWith("v") ? tag.substring(1) : tag;
         boolean hasUpdate = isNewer(latestVersion, BuildConfig.VERSION_NAME);
-        String apkUrl = hasUpdate ? resolveApkUrl(latestVersion, body) : null;
+        String apkUrl = hasUpdate ? resolveApkUrl(context, latestVersion, body) : null;
         return new UpdateInfo(hasUpdate, latestVersion, body, apkUrl);
+    }
+
+    /**
+     * 拉取 latest release 信息：先直连 api.github.com，失败且开了镜像加速时
+     * 自动走镜像代理（gh-proxy 风格：{@code <mirror>/<原地址>}）。
+     * 公开仓库的 releases 接口无需鉴权，走镜像不需要 token。
+     * 这样开 VPN（直连被干扰）或不开 VPN（国内直连抽风）都能检测到更新。
+     */
+    private static JSONObject fetchLatestRelease(Context context) throws IOException {
+        List<String> candidates = new ArrayList<>();
+        candidates.add(LATEST_RELEASE_URL);
+        if (MirrorHelper.isEnabled(context)) {
+            String base = MirrorHelper.getMirrorBase(context);
+            if (!base.isEmpty()) {
+                candidates.add(base + "/" + LATEST_RELEASE_URL);
+            }
+        }
+        IOException lastError = null;
+        for (String url : candidates) {
+            Request request = new Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("User-Agent", "OctoDroid")
+                    .build();
+            try (Response response = getClient().newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    lastError = new IOException("HTTP " + response.code());
+                    continue;
+                }
+                try {
+                    return new JSONObject(response.body().string());
+                } catch (JSONException e) {
+                    lastError = new IOException("bad response");
+                }
+            } catch (IOException e) {
+                lastError = e;
+            }
+        }
+        throw lastError != null ? lastError : new IOException("update check failed");
     }
 
     /** True when the latest release version is newer than the installed one. */
@@ -132,33 +162,54 @@ public class UpdateChecker {
         }
     }
 
-    private static String resolveApkUrl(String version, String releaseBody) {
+    private static String resolveApkUrl(Context context, String version, String releaseBody) {
         // Preferred: the published naming convention.
         String conventional =
                 String.format(Locale.US,
                         "https://raw.githubusercontent.com/%s/%s/master/releases/OctoDroid_%s.apk",
                         OWNER, REPO, version);
-        if (urlExists(conventional)) {
-            return conventional;
+        String reachable = pickReachableUrl(context, conventional);
+        if (reachable != null) {
+            return reachable;
         }
-        // Fallback: first .apk link in the release notes (prefer raw links).
+        // Fallback: first reachable .apk link in the release notes (prefer raw links).
         String fallback = null;
         Matcher matcher = APK_URL_PATTERN.matcher(releaseBody != null ? releaseBody : "");
         while (matcher.find()) {
             String url = matcher.group(1);
             if (url.contains("raw.githubusercontent.com") || url.contains("/raw/")) {
-                return url;
+                String rawReachable = pickReachableUrl(context, url);
+                if (rawReachable != null) {
+                    return rawReachable;
+                }
             }
             if (fallback == null) {
                 fallback = toRawUrl(url);
             }
         }
-        if (fallback != null && urlExists(fallback)) {
-            return fallback;
+        if (fallback != null) {
+            String fallbackReachable = pickReachableUrl(context, fallback);
+            if (fallbackReachable != null) {
+                return fallbackReachable;
+            }
         }
         // Last resort: hand out the conventional URL anyway and let the
         // download fail loudly rather than silently doing nothing.
         return conventional;
+    }
+
+    /**
+     * 在直连地址和镜像地址中挑一个 HEAD 可达的。开了镜像加速时优先探镜像
+     * （下载本来就会被改写走镜像，探镜像更快且更准）；都没命中返回 null。
+     */
+    private static String pickReachableUrl(Context context, String url) {
+        String mirrored = MirrorHelper.rewriteUrl(context, url);
+        if (!mirrored.equals(url)) {
+            if (urlExists(mirrored)) {
+                return mirrored;
+            }
+        }
+        return urlExists(url) ? url : null;
     }
 
     private static String toRawUrl(String url) {

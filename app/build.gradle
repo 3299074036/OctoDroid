@@ -32,8 +32,8 @@ android {
     defaultConfig {
         minSdkVersion 23
         targetSdkVersion 35
-        versionCode 35
-        versionName "0.0.35"
+        versionCode 36
+        versionName "0.0.36"
         applicationId "com.gh4a"
         resourceConfigurations += ['en', 'zh-rCN']
 
