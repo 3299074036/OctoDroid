@@ -398,10 +398,33 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         final android.content.Context appContext = getActivity().getApplicationContext();
         final String savedFormat = getString(R.string.backup_saved);
         final String failedFormat = getString(R.string.backup_failed);
+        final org.json.JSONObject backup;
+        try {
+            // collectBackup 只是读 prefs，很快，主线程直接做，以便先检查是否含凭据
+            backup = com.gh4a.utils.SettingsBackupManager.collectBackup(appContext);
+        } catch (Exception e) {
+            showToast(String.format(failedFormat, e.getMessage()));
+            return;
+        }
+        // 备份含翻译 API 凭据（明文）时先弹窗告知，确认后才落盘 (#4)
+        if (com.gh4a.utils.SettingsBackupManager.backupContainsTranslationCredentials(backup)) {
+            new AlertDialog.Builder(getActivity())
+                    .setTitle(R.string.backup_contains_credentials_title)
+                    .setMessage(R.string.backup_contains_credentials_message)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.backup_continue, (dialog, which) ->
+                            writeBackupInBackground(appContext, backup, savedFormat, failedFormat))
+                    .show();
+        } else {
+            writeBackupInBackground(appContext, backup, savedFormat, failedFormat);
+        }
+    }
+
+    private void writeBackupInBackground(final android.content.Context appContext,
+            final org.json.JSONObject backup, final String savedFormat,
+            final String failedFormat) {
         new Thread(() -> {
             try {
-                org.json.JSONObject backup =
-                        com.gh4a.utils.SettingsBackupManager.collectBackup(appContext);
                 String fileName =
                         com.gh4a.utils.SettingsBackupManager.writeBackupFile(appContext, backup);
                 showToast(savedFormat + ": " + fileName);

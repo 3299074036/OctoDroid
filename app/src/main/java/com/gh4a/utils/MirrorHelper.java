@@ -98,6 +98,11 @@ public class MirrorHelper {
         final Context appContext = context.getApplicationContext();
         return chain -> {
             okhttp3.Request request = chain.request();
+            // 携带鉴权头的请求（私有仓库图片等）直接跳过镜像改写：
+            // 镜像站拿不到有效 token，改写后必 404；且 token 绝不外发 (N-1)
+            if (request.header("Authorization") != null) {
+                return chain.proceed(request);
+            }
             String original = request.url().toString();
             String rewritten = rewriteUrl(appContext, original);
             if (!rewritten.equals(original)) {

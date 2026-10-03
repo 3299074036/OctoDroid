@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.preference.PreferenceManager;
 import android.provider.MediaStore;
+import android.util.Log;
 
 import com.gh4a.fragment.SettingsFragment;
 
@@ -23,6 +24,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Locale;
@@ -41,6 +43,7 @@ import java.util.Set;
  * 注意：备份文件是明文 JSON，含翻译 API 凭据，请妥善保管备份文件。
  */
 public class SettingsBackupManager {
+    private static final String TAG = "SettingsBackupManager";
     private static final int BACKUP_VERSION = 1;
     /** 备份文件读取上限 16MB：防止恶意超大文件撑爆内存 (L-9) */
     private static final long MAX_BACKUP_SIZE = 16L * 1024 * 1024;
@@ -122,7 +125,60 @@ public class SettingsBackupManager {
         boolean accept(String key);
     }
 
-    private static final KeyFilter ACCEPT_ALL = key -> true;
+    /**
+     * Gh4a-pref 恢复白名单：只允许已知键写入，防止手写恶意备份注入
+     * 任意键（如 mirror_custom_url 劫持镜像流量）(M-1)。
+     * 注意：新增设置项（settings.xml 或程序写入）时必须同步到这里，
+     * 否则恢复时会静默丢弃该配置。
+     */
+    private static final Set<String> GH4A_PREF_KEYS = new HashSet<>(Arrays.asList(
+            // settings.xml 的全部 android:key
+            "about", "accent_color", "account_manage", "auto_check_update",
+            "backup_restore", "check_update", "customize_drawer", "dark_mode",
+            "dark_mode_schedule_time", "font_scale", "http_gif_load_mode",
+            "language", "mirror_custom_url", "mirror_enabled", "mirror_preset",
+            "mirror_speed_test", "notification_interval", "notifications",
+            "open_source_components", "release_radar_interval",
+            "release_radar_notifications", "start_page", "translation_settings",
+            "use_custom_tabs", "webview_initial_zoom",
+            // 程序写入的键
+            "theme", "version", "active_login", "logins",
+            "dark_mode_start", "dark_mode_end",
+            "search_type",
+            "last_notification_check", "last_notification_seen",
+            "last_notification_repo_ids"));
+
+    /** Gh4a-pref 允许的前缀键：token_<login>、user_id_<login>、search_sort_<type>_sort/order。 */
+    private static boolean isGh4aPrefKeyAllowed(String key) {
+        if (GH4A_PREF_KEYS.contains(key)) {
+            return true;
+        }
+        return key.startsWith("token_") || key.startsWith("user_id_")
+                || key.startsWith("search_sort_");
+    }
+
+    /** drawer_config 只有 DrawerManager 写入的两个键。 */
+    private static final Set<String> DRAWER_CONFIG_KEYS = new HashSet<>(Arrays.asList(
+            "order", "hidden"));
+
+    /**
+     * 翻译区恢复白名单：已知键精确匹配 + 凭据键前缀匹配。
+     * 0.0.35 起用户要求备份携带翻译凭据，但未知形状的 translation_*
+     * 键（如 translation_custom_endpoint）一律拒绝，防止恶意备份
+     * 注入翻译 endpoint 劫持翻译流量 (N-4)。
+     */
+    private static final Set<String> TRANSLATION_KEYS = new HashSet<>(Arrays.asList(
+            "translation_provider", "translation_cred_migrated_v1"));
+
+    private static boolean isTranslationKeyAllowed(String key) {
+        if (TRANSLATION_KEYS.contains(key)) {
+            return true;
+        }
+        return key.startsWith("translation_api_key")
+                || key.startsWith("translation_api_secret")
+                || key.startsWith("translation_url")
+                || key.startsWith("translation_region");
+    }
 
     private static void jsonToPrefs(JSONObject json, SharedPreferences prefs,
             KeyFilter keyFilter) throws JSONException {
@@ -133,7 +189,12 @@ public class SettingsBackupManager {
         }
         for (int i = 0; i < names.length(); i++) {
             String key = names.getString(i);
-            if (isExcluded(key) || !keyFilter.accept(key)) {
+            if (isExcluded(key)) {
+                continue;
+            }
+            if (!keyFilter.accept(key)) {
+                // 白名单之外的键直接丢弃，防止恶意备份注入 (M-1)
+                Log.w(TAG, "Backup restore: dropping unknown key " + key);
                 continue;
             }
             JSONObject holder = json.getJSONObject(key);
@@ -251,6 +312,35 @@ public class SettingsBackupManager {
         }
     }
 
+    /**
+     * 备份中是否包含翻译 API 凭据（明文）。备份前调用，有则弹窗告知用户
+     * 备份文件含敏感信息、请妥善保管 (#4)。
+     */
+    public static boolean backupContainsTranslationCredentials(JSONObject backup) {
+        JSONObject translation = backup.optJSONObject("prefs");
+        if (translation != null) {
+            translation = translation.optJSONObject("default");
+        }
+        if (translation == null) {
+            return false;
+        }
+        JSONArray names = translation.names();
+        if (names == null) {
+            return false;
+        }
+        for (int i = 0; i < names.length(); i++) {
+            String key = names.optString(i, "");
+            if (key.startsWith("translation_api_key")
+                    || key.startsWith("translation_api_secret")) {
+                JSONObject holder = translation.optJSONObject(key);
+                if (holder != null && !holder.optString("v", "").isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** Applies a backup created by {@link #collectBackup}. Returns false on bad format. */
     public static boolean applyBackup(Context context, JSONObject backup) {
         try {
@@ -264,19 +354,21 @@ public class SettingsBackupManager {
             JSONObject prefs = backup.getJSONObject("prefs");
             if (prefs.has("Gh4a-pref")) {
                 jsonToPrefs(prefs.getJSONObject("Gh4a-pref"), context.getSharedPreferences(
-                        SettingsFragment.PREF_NAME, Context.MODE_PRIVATE), ACCEPT_ALL);
+                        SettingsFragment.PREF_NAME, Context.MODE_PRIVATE),
+                        SettingsBackupManager::isGh4aPrefKeyAllowed);
             }
             if (prefs.has("drawer_config")) {
                 jsonToPrefs(prefs.getJSONObject("drawer_config"),
                         context.getSharedPreferences("drawer_config", Context.MODE_PRIVATE),
-                        ACCEPT_ALL);
+                        DRAWER_CONFIG_KEYS::contains);
             }
             if (prefs.has("default")) {
-                // 翻译区接受全部 translation_ 键（含 API key/secret/endpoint，
-                // 用户要求手动备份携带翻译凭据）
+                // 翻译区只接受白名单内的 translation_ 键（含 API key/secret/endpoint，
+                // 用户要求手动备份携带翻译凭据）；未知形状的键拒绝，防止恶意备份
+                // 注入翻译 endpoint 劫持翻译流量 (N-4)
                 jsonToPrefs(prefs.getJSONObject("default"),
                         PreferenceManager.getDefaultSharedPreferences(context),
-                        key -> key.startsWith("translation_"));
+                        SettingsBackupManager::isTranslationKeyAllowed);
             }
             return true;
         } catch (JSONException e) {

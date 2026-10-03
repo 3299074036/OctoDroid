@@ -6,8 +6,10 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.util.Log;
+import android.Manifest;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
@@ -50,6 +52,7 @@ public class ReleaseRadarWorker extends Worker {
 
     private static final String PREFS = "release_radar_notify";
     private static final String KEY_KNOWN_TAGS = "known_tags_"; // + login
+    private static final int NOTIFICATION_ID_AUTH_FAILED = 0x524144; // "RAD"
 
     public static void schedule(Context context, int intervalMinutes) {
         Constraints constraints = new Constraints.Builder()
@@ -103,6 +106,15 @@ public class ReleaseRadarWorker extends Worker {
         try {
             items = RadarGraphQL.fetch(login).blockingGet();
         } catch (Exception e) {
+            if (isUnauthorized(e)) {
+                // 登录失效（token 撤销/过期/密码改了）：停掉周期任务并通知
+                // 用户重登，不再无限重试 (N-2)。重登/切换账号会调
+                // rescheduleWorkers 重新排期。
+                Log.w(TAG, "Radar fetch unauthorized, stopping checks", e);
+                cancel(context);
+                notifyAuthFailed(context);
+                return Result.failure();
+            }
             Log.d(TAG, "Radar fetch failed", e);
             return Result.retry();
         }
@@ -142,6 +154,39 @@ public class ReleaseRadarWorker extends Worker {
 
     private static String itemKey(ReleaseRadarFragment.RadarItem item) {
         return item.owner + "/" + item.repo;
+    }
+
+    /** blockingGet 会把异常包进 RuntimeException，沿 cause 链找 401。 */
+    private static boolean isUnauthorized(Throwable t) {
+        while (t != null) {
+            if (t instanceof RadarGraphQL.UnauthorizedException) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
+    private void notifyAuthFailed(Context context) {
+        // 无通知权限时不打扰（同时避免 MissingPermission lint error）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && ContextCompat.checkSelfPermission(context,
+                        Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        PendingIntent contentIntent = PendingIntent.getActivity(context, 0,
+                HomeActivity.makeIntent(context, R.id.release_radar)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                | Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        android.app.Notification notification = makeBaseBuilder(context)
+                .setContentTitle(context.getString(R.string.release_radar_auth_failed_title))
+                .setContentText(context.getString(R.string.release_radar_auth_failed_text))
+                .setContentIntent(contentIntent)
+                .setAutoCancel(true)
+                .build();
+        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_AUTH_FAILED, notification);
     }
 
     private android.app.Notification buildRepoNotification(Context context,

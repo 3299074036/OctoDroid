@@ -34,6 +34,16 @@ public class RadarGraphQL {
             MediaType.get("application/json; charset=utf-8");
     private static final int MAX_REPOS = 30;
 
+    /**
+     * token 失效/被撤销时抛出的异常（HTTP 401），调用方应与普通网络异常
+     * 区分处理：401 重试永远不会成功，不应无限 retry (N-2)。
+     */
+    public static class UnauthorizedException extends RuntimeException {
+        public UnauthorizedException(String message) {
+            super(message);
+        }
+    }
+
     /** Reused client: an OkHttpClient per request leaks threads/connections. */
     private static volatile OkHttpClient sClient;
 
@@ -109,6 +119,9 @@ public class RadarGraphQL {
         try (Response response = client.newCall(reqBuilder.build()).execute()) {
             String json = response.body() != null ? response.body().string() : "";
             if (!response.isSuccessful()) {
+                if (response.code() == 401) {
+                    throw new UnauthorizedException("GraphQL HTTP 401");
+                }
                 throw new RuntimeException("GraphQL HTTP " + response.code());
             }
             return parse(json);

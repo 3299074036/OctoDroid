@@ -790,6 +790,8 @@
     <string name="release_radar_notify_title">%1$s 有新版本</string>
     <string name="release_radar_notify_text">新版本：%1$s</string>
     <string name="release_radar_notify_summary_title">版本更新</string>
+    <string name="release_radar_auth_failed_title">Release 雷达已暂停</string>
+    <string name="release_radar_auth_failed_text">GitHub 登录已失效或被撤销，点击重新登录以恢复检查。</string>
 
 
     <!-- 备份与恢复 -->
@@ -799,6 +801,9 @@
     <string name="backup_restore_action">恢复</string>
     <string name="backup_saved">备份已保存到下载目录</string>
     <string name="backup_failed">备份失败：%1$s</string>
+    <string name="backup_contains_credentials_title">备份包含敏感信息</string>
+    <string name="backup_contains_credentials_message">备份文件将包含翻译服务的 API 密钥（明文），请妥善保管，不要分享给他人。</string>
+    <string name="backup_continue">继续备份</string>
     <string name="restore_success">恢复成功，重启应用后生效</string>
     <string name="restore_failed">恢复失败：文件格式不正确</string>
     <string name="restore_confirm">恢复将覆盖当前所有设置，继续吗？</string>

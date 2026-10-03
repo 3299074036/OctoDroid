@@ -790,6 +790,8 @@
     <string name="release_radar_notify_title">%1$s has a new release</string>
     <string name="release_radar_notify_text">New version: %1$s</string>
     <string name="release_radar_notify_summary_title">New releases</string>
+    <string name="release_radar_auth_failed_title">Release radar paused</string>
+    <string name="release_radar_auth_failed_text">GitHub login expired or was revoked. Tap to re-login and resume checks.</string>
 
 
     <!-- Backup & restore -->
@@ -799,6 +801,9 @@
     <string name="backup_restore_action">Restore</string>
     <string name="backup_saved">Backup saved to Downloads</string>
     <string name="backup_failed">Backup failed: %1$s</string>
+    <string name="backup_contains_credentials_title">Backup contains sensitive data</string>
+    <string name="backup_contains_credentials_message">The backup file will include your translation service API keys in plain text. Keep the file safe and do not share it with others.</string>
+    <string name="backup_continue">Back up anyway</string>
     <string name="restore_success">Restore succeeded, restart the app to apply</string>
     <string name="restore_failed">Restore failed: invalid file</string>
     <string name="restore_confirm">Restoring will overwrite all current settings. Continue?</string>
