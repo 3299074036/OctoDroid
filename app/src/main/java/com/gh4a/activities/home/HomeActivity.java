@@ -65,6 +65,14 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
         return intent;
     }
 
+    /**
+     * 打开聚合页并定位到指定 Tab（如 pulls 链接 → 事项页的 PR Tab，
+     * Release 雷达通知 → Star 页的 Release 动态 Tab）。
+     */
+    public static Intent makeIntent(Context context, @IdRes int initialPageId, int initialTab) {
+        return makeIntent(context, initialPageId).putExtra("initial_tab", initialTab);
+    }
+
     public static Intent makeNotificationsIntent(Context context, String repoOwner,
             String repoName) {
         return makeIntent(context, R.id.notifications)
@@ -102,29 +110,41 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
 
     private static final int OTHER_ACCOUNTS_GROUP_BASE_ID = 1000;
 
-    // 账号切换模式下需要隐藏的抽屉入口：原属 navigation/explore 组，
-    // 经 applyDrawerCustomization 后已并入 my_items，按实际 item 显隐
+    // 账号切换模式下需要隐藏的抽屉入口：
+    // 搜索/发现聚合页含公开内容（公开时间线、趋势、博客），无需登录即可看，保留；
+    // 只隐藏需要登录的功能入口
     private static final int[] ACCOUNT_MODE_HIDDEN_ITEMS = {
-            R.id.search, R.id.blog, R.id.trend, R.id.pub_timeline, R.id.topic_discovery
+            R.id.notifications, R.id.my_repos, R.id.star_hub, R.id.issues_prs, R.id.my_gists
     };
 
     private static final SparseArray<String> START_PAGE_MAPPING = new SparseArray<>();
     static {
-        START_PAGE_MAPPING.put(R.id.news_feed, "newsfeed");
-        START_PAGE_MAPPING.put(R.id.notifications, "notifications");
-        START_PAGE_MAPPING.put(R.id.my_repos, "repos");
-        START_PAGE_MAPPING.put(R.id.my_issues, "issues");
-        START_PAGE_MAPPING.put(R.id.my_prs, "prs");
-        START_PAGE_MAPPING.put(R.id.my_gists, "gists");
-        START_PAGE_MAPPING.put(R.id.pub_timeline, "timeline");
-        START_PAGE_MAPPING.put(R.id.trend, "trends");
-        START_PAGE_MAPPING.put(R.id.topic_discovery, "topics");
-        START_PAGE_MAPPING.put(R.id.release_radar, "release_radar");
-        START_PAGE_MAPPING.put(R.id.recent_history, "recent_history");
-        START_PAGE_MAPPING.put(R.id.star_groups, "star_groups");
-        START_PAGE_MAPPING.put(R.id.blog, "blog");
-        START_PAGE_MAPPING.put(R.id.bookmarks, "bookmarks");
         START_PAGE_MAPPING.put(R.id.search, "search");
+        START_PAGE_MAPPING.put(R.id.feed_hub, "feed_hub");
+        START_PAGE_MAPPING.put(R.id.notifications, "notifications");
+        START_PAGE_MAPPING.put(R.id.discover_hub, "discover_hub");
+        START_PAGE_MAPPING.put(R.id.my_repos, "repos");
+        START_PAGE_MAPPING.put(R.id.star_hub, "star_hub");
+        START_PAGE_MAPPING.put(R.id.issues_prs, "my_items");
+        START_PAGE_MAPPING.put(R.id.my_gists, "gists");
+    }
+
+    /** 抽屉合并前的旧起始页 key → 新聚合页 id，老用户升级后自动落到聚合页。 */
+    private static final java.util.Map<String, Integer> LEGACY_START_PAGE_MAP;
+    static {
+        java.util.Map<String, Integer> m = new java.util.HashMap<>();
+        m.put("newsfeed", R.id.feed_hub);
+        m.put("timeline", R.id.feed_hub);
+        m.put("recent_history", R.id.search);
+        m.put("issues", R.id.issues_prs);
+        m.put("prs", R.id.issues_prs);
+        m.put("bookmarks", R.id.star_hub);
+        m.put("star_groups", R.id.star_hub);
+        m.put("release_radar", R.id.star_hub);
+        m.put("trends", R.id.discover_hub);
+        m.put("topics", R.id.discover_hub);
+        m.put("blog", R.id.discover_hub);
+        LEGACY_START_PAGE_MAP = java.util.Collections.unmodifiableMap(m);
     }
 
     @Override
@@ -141,6 +161,15 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
                 DrawableCompat.wrap(ContextCompat.getDrawable(this, R.drawable.circle).mutate());
 
         super.onCreate(savedInstanceState);
+
+        // 深链指定初始 Tab（如 pulls 链接 → 事项页的 PR Tab），只消费一次
+        if (getIntent().hasExtra("initial_tab")) {
+            int tab = getIntent().getIntExtra("initial_tab", 0);
+            getIntent().removeExtra("initial_tab");
+            if (getPager() != null) {
+                getPager().setCurrentItem(tab);
+            }
+        }
 
         ActionBar actionBar = getSupportActionBar();
         actionBar.setDisplayShowHomeEnabled(true);
@@ -420,38 +449,22 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
 
     private FragmentFactory getFactoryForItem(int id) {
         switch (id) {
-            case R.id.news_feed:
-                return new NewsFeedFactory(this, mUserLogin);
+            case R.id.feed_hub:
+                return new FeedHubFactory(this, mUserLogin);
+            case R.id.search:
+                return new SearchHubFactory(this);
+            case R.id.issues_prs:
+                return new IssuesPrsFactory(this, mUserLogin, getPrefs());
+            case R.id.star_hub:
+                return new StarHubFactory(this, mUserLogin, getPrefs());
+            case R.id.discover_hub:
+                return new DiscoverHubFactory(this);
             case R.id.notifications:
                 return new NotificationListFactory(this);
             case R.id.my_repos:
                 return new RepositoryFactory(this, mUserLogin, getPrefs());
-            case R.id.my_issues:
-                return new IssueListFactory(this, mUserLogin, false, getPrefs());
-            case R.id.my_prs:
-                return new IssueListFactory(this, mUserLogin, true, getPrefs());
             case R.id.my_gists:
                 return new GistFactory(this, mUserLogin);
-            case R.id.search:
-                return new SearchFactory(this);
-            case R.id.bookmarks:
-                return new BookmarkFactory(this, mUserLogin, getPrefs());
-            case R.id.pub_timeline:
-                return new TimelineFactory(this);
-            case R.id.blog:
-                return new BlogFactory(this);
-            case R.id.trend:
-                return new TrendingFactory(this);
-            case R.id.topic_discovery:
-                return new TopicDiscoveryFactory(this);
-            case R.id.release_radar:
-                return new ReleaseRadarFactory(this, mUserLogin);
-            case R.id.recent_history:
-                return new RecentHistoryFactory(this);
-            case R.id.download_manager:
-                return new DownloadListFactory(this);
-            case R.id.star_groups:
-                return new StarGroupFactory(this);
         }
         return null;
     }
@@ -479,6 +492,21 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
     @Override
     protected void onFragmentDestroyed(Fragment f) {
         mFactory.onFragmentDestroyed(f);
+    }
+
+    /** 当前选中的 Tab 位置，供聚合 Factory（如 FeedHubFactory）定位激活的子页面。 */
+    public int getCurrentTabPosition() {
+        return getPager() != null ? getPager().getCurrentItem() : 0;
+    }
+
+    @Override
+    public void onPageSelected(int position) {
+        super.onPageSelected(position);
+        // 聚合页切 Tab 时刷新菜单：子页面的菜单项（如动态页的组织切换器、
+        // 事项页的开/关切换、趋势页的时间范围）只在对应 Tab 显示
+        if (mFactory != null && mFactory.refreshMenuOnTabSwitch()) {
+            supportInvalidateOptionsMenu();
+        }
     }
 
     @Override
@@ -610,7 +638,12 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
                 return START_PAGE_MAPPING.keyAt(i);
             }
         }
-        return R.id.news_feed;
+        // 合并兼容：旧起始页 key 映射到聚合页
+        Integer legacy = LEGACY_START_PAGE_MAP.get(initialPage);
+        if (legacy != null) {
+            return legacy;
+        }
+        return R.id.feed_hub;
     }
 
     private void updateUserInfo() {

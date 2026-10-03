@@ -8,7 +8,6 @@ import androidx.fragment.app.FragmentActivity;
 import android.text.TextUtils;
 
 import com.gh4a.R;
-import com.gh4a.activities.BlogListActivity;
 import com.gh4a.activities.CommitActivity;
 import com.gh4a.activities.CompareActivity;
 import com.gh4a.activities.GistActivity;
@@ -26,6 +25,7 @@ import com.gh4a.activities.TrendingActivity;
 import com.gh4a.activities.UserActivity;
 import com.gh4a.activities.WikiListActivity;
 import com.gh4a.activities.home.HomeActivity;
+import com.gh4a.activities.home.IssuesPrsFactory;
 import com.gh4a.utils.IntentUtils;
 import com.gh4a.utils.StringUtils;
 
@@ -65,7 +65,8 @@ public class LinkParser {
             return parseGistLink(activity, parts);
         }
         if ("blog.github.com".equals(uri.getHost())) {
-            return parseNewBlogLink(activity, parts);
+            // 博客功能已剔除，走浏览器打开
+            return null;
         }
 
         if (!"github.com".equals(uri.getHost())) {
@@ -85,23 +86,26 @@ public class LinkParser {
             case "notifications":
                 return new ParseResult(HomeActivity.makeIntent(activity, R.id.notifications));
             case "stars":
-                return new ParseResult(HomeActivity.makeIntent(activity, R.id.bookmarks));
+                return new ParseResult(HomeActivity.makeIntent(activity, R.id.star_hub));
             case "issues":
-                return new ParseResult(HomeActivity.makeIntent(activity, R.id.my_issues));
+                return new ParseResult(HomeActivity.makeIntent(activity, R.id.issues_prs,
+                        IssuesPrsFactory.TAB_ISSUES));
             case "pulls":
-                return new ParseResult(HomeActivity.makeIntent(activity, R.id.my_prs));
+                return new ParseResult(HomeActivity.makeIntent(activity, R.id.issues_prs,
+                        IssuesPrsFactory.TAB_PRS));
             case "gists":
                 return new ParseResult(HomeActivity.makeIntent(activity, R.id.my_gists));
             case "dashboard":
             case "dashboard-feed":
-                return new ParseResult(HomeActivity.makeIntent(activity, R.id.news_feed));
+                return new ParseResult(HomeActivity.makeIntent(activity, R.id.feed_hub));
             case "repositories":
             case "trending":
                 return new ParseResult(new Intent(activity, TrendingActivity.class));
             case "timeline":
                 return new ParseResult(new Intent(activity, TimelineActivity.class));
             case "blog":
-                return parseBlogLink(activity, parts);
+                // 博客功能已剔除，走浏览器打开
+                return null;
             case "orgs":
                 return parseOrganizationLink(activity, uri, parts);
             case "search":
@@ -151,22 +155,6 @@ public class LinkParser {
         if (!parts.isEmpty()) {
             String gistId = parts.get(parts.size() - 1);
             return new ParseResult(GistActivity.makeIntent(activity, gistId));
-        }
-        return null;
-    }
-
-    @Nullable
-    private static ParseResult parseBlogLink(FragmentActivity activity, List<String> parts) {
-        if (parts.size() == 1) {
-            return new ParseResult(new Intent(activity, BlogListActivity.class));
-        }
-        return null;
-    }
-
-    @Nullable
-    private static ParseResult parseNewBlogLink(FragmentActivity activity, List<String> parts) {
-        if (parts.size() == 0) {
-            return new ParseResult(new Intent(activity, BlogListActivity.class));
         }
         return null;
     }

@@ -16,12 +16,18 @@ public class IssueListFactory extends FragmentFactory {
     private static final String QUERY = "is:%s is:%s %s:%s";
 
     private static final String STATE_KEY_SHOWING_CLOSED = "issue:showing_closed";
+    private static final String STATE_KEY_ACTION_FILTER = "issue:action_filter";
 
-    private static final int[] TAB_TITLES = new int[] {
+    /**
+     * 内层 4 Tab（创建/指派/提到/参与）在聚合为事项页后改为筛选器：
+     * 0=author, 1=assignee, 2=mentions, 3=involves，对应原 TAB_TITLES 顺序。
+     */
+    private static final int[] ACTION_TITLES = new int[] {
             R.string.created, R.string.assigned, R.string.mentioned, R.string.participating
     };
 
     private boolean mShowingClosed;
+    private int mActionFilter;
     private final String mLogin;
     private final boolean mIsPullRequest;
     private final IssueListFragment.SortDrawerHelper mDrawerHelper =
@@ -34,6 +40,7 @@ public class IssueListFactory extends FragmentFactory {
         super(activity);
         mLogin = userLogin;
         mShowingClosed = false;
+        mActionFilter = 0;
         mIsPullRequest = pr;
         mPrefs = prefs;
 
@@ -55,7 +62,9 @@ public class IssueListFactory extends FragmentFactory {
 
     @Override
     protected int[] getTabTitleResIds() {
-        return TAB_TITLES;
+        // 聚合为事项页后只剩单页（外层 Tab 由 IssuesPrsFactory 提供），
+        // 单 Tab 时 tab 条自动隐藏
+        return new int[] { mIsPullRequest ? R.string.prs_tab : R.string.issues_tab };
     }
 
     @Override
@@ -66,14 +75,19 @@ public class IssueListFactory extends FragmentFactory {
     @Override
     protected Fragment makeFragment(int position) {
         final String action;
-        if (position == 1) {
-            action = "assignee";
-        } else if (position == 2) {
-            action = "mentions";
-        } else if (position == 3) {
-            action = "involves";
-        } else {
-            action = "author";
+        switch (mActionFilter) {
+            case 1:
+                action = "assignee";
+                break;
+            case 2:
+                action = "mentions";
+                break;
+            case 3:
+                action = "involves";
+                break;
+            default:
+                action = "author";
+                break;
         }
 
         final String query = String.format(QUERY, mIsPullRequest ? "pr" : "issue",
@@ -98,6 +112,9 @@ public class IssueListFactory extends FragmentFactory {
                 .setIcon(R.drawable.menu_overflow_horizontal)
                 .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_ALWAYS);
 
+        menu.add(Menu.NONE, Menu.FIRST + 2, Menu.NONE, R.string.issues_filter)
+                .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_IF_ROOM);
+
         return super.onCreateOptionsMenu(menu);
     }
 
@@ -110,8 +127,30 @@ public class IssueListFactory extends FragmentFactory {
             case Menu.FIRST + 1:
                 mActivity.toggleToolDrawer();
                 return true;
+            case Menu.FIRST + 2:
+                showActionFilterDialog();
+                return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    /** 原内层 4 Tab（创建/指派/提到/参与）改为筛选对话框。 */
+    private void showActionFilterDialog() {
+        final String[] entries = new String[ACTION_TITLES.length];
+        for (int i = 0; i < entries.length; i++) {
+            entries[i] = mActivity.getString(ACTION_TITLES[i]);
+        }
+        new androidx.appcompat.app.AlertDialog.Builder(mActivity)
+                .setTitle(R.string.issues_filter)
+                .setSingleChoiceItems(entries, mActionFilter, (dialog, which) -> {
+                    dialog.dismiss();
+                    if (which != mActionFilter) {
+                        mActionFilter = which;
+                        reloadIssueList();
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
     }
 
     @Override
@@ -142,14 +181,17 @@ public class IssueListFactory extends FragmentFactory {
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         outState.putBoolean(STATE_KEY_SHOWING_CLOSED, mShowingClosed);
+        outState.putInt(STATE_KEY_ACTION_FILTER, mActionFilter);
     }
 
     @Override
     protected void onRestoreInstanceState(Bundle state) {
         super.onRestoreInstanceState(state);
         boolean showedClosed = state.getBoolean(STATE_KEY_SHOWING_CLOSED, false);
-        if (mShowingClosed != showedClosed) {
+        int filter = state.getInt(STATE_KEY_ACTION_FILTER, 0);
+        if (mShowingClosed != showedClosed || mActionFilter != filter) {
             mShowingClosed = showedClosed;
+            mActionFilter = filter;
             reloadIssueList();
             updateHeaderColor();
             mActivity.invalidateTitle();

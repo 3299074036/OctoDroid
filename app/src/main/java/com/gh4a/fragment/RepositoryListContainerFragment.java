@@ -442,7 +442,11 @@ public class RepositoryListContainerFragment extends Fragment implements
                 if (value[0].equals(order) && value[1].equals(direction)) {
                     selectedId = SORT_LOOKUP.keyAt(i);
                     if (updateSingleItem) {
-                        menu.findItem(selectedId).setChecked(true);
+                        // 菜单可能不包含全部排序项（如星标页只有4项），找不到时不崩
+                        MenuItem item = menu.findItem(selectedId);
+                        if (item != null) {
+                            item.setChecked(true);
+                        }
                         return;
                     }
                     break;

@@ -41,28 +41,23 @@
     <string-array name="start_page_items" translatable="false">
         <item>@string/start_page_last_selected</item>
         <item>@string/search</item>
-        <item>@string/user_news_feed</item>
+        <item>@string/feed_hub</item>
         <item>@string/notifications</item>
-        <item>@string/trend</item>
+        <item>@string/discover_hub</item>
         <item>@string/my_repositories</item>
-        <item>@string/bookmarks</item>
-        <item>@string/pub_timeline</item>
-        <item>@string/my_issues</item>
-        <item>@string/my_pull_requests</item>
+        <item>@string/star_hub</item>
+        <item>@string/my_items</item>
         <item>@string/my_gists</item>
-        <item>@string/blog</item>
     </string-array>
     <string-array name="start_page_values" translatable="false">
         <item>last</item>
         <item>search</item>
-        <item>newsfeed</item>
+        <item>feed_hub</item>
         <item>notifications</item>
-        <item>trends</item>
+        <item>discover_hub</item>
         <item>repos</item>
-        <item>bookmarks</item>
-        <item>timeline</item>
-        <item>issues</item>
-        <item>prs</item>
+        <item>star_hub</item>
+        <item>my_items</item>
         <item>gists</item>
         <item>blog</item>
     </string-array>

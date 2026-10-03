@@ -143,20 +143,21 @@ public class UpdateChecker {
     }
 
     /**
-     * 拉取 latest release 信息：先直连 api.github.com，失败且开了镜像加速时
-     * 自动走镜像代理（gh-proxy 风格：{@code <mirror>/<原地址>}）。
-     * 公开仓库的 releases 接口无需鉴权，走镜像不需要 token。
-     * 这样开 VPN（直连被干扰）或不开 VPN（国内直连抽风）都能检测到更新。
+     * 拉取 latest release 信息：开了镜像加速时优先走镜像代理
+     * （gh-proxy 风格：{@code <mirror>/<原地址>}），再回落直连；
+     * 未开镜像则只直连。公开仓库的 releases 接口无需鉴权，走镜像不需要 token。
+     * 这样 VPN 下直连、非 VPN 下镜像，两种网络都能检测到更新，
+     * 且不会在直连被黑洞时白白等 15s 超时。
      */
     private static JSONObject fetchLatestRelease(Context context) throws IOException {
         List<String> candidates = new ArrayList<>();
-        candidates.add(LATEST_RELEASE_URL);
         if (MirrorHelper.isEnabled(context)) {
             String base = MirrorHelper.getMirrorBase(context);
             if (!base.isEmpty()) {
                 candidates.add(base + "/" + LATEST_RELEASE_URL);
             }
         }
+        candidates.add(LATEST_RELEASE_URL);
         IOException lastError = null;
         for (String url : candidates) {
             Request request = new Request.Builder()

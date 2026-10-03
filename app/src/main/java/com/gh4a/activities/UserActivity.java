@@ -13,7 +13,6 @@ import android.view.MenuItem;
 import com.gh4a.BaseFragmentPagerActivity;
 import com.gh4a.R;
 import com.gh4a.ServiceFactory;
-import com.gh4a.db.BookmarksProvider;
 import com.gh4a.fragment.PublicEventListFragment;
 import com.gh4a.fragment.UserFragment;
 import com.gh4a.utils.ApiHelpers;
@@ -126,20 +125,6 @@ public class UserActivity extends BaseFragmentPagerActivity {
     }
 
     @Override
-    public boolean onPrepareOptionsMenu(Menu menu) {
-        MenuItem bookmarkAction = menu.findItem(R.id.bookmark);
-        if (bookmarkAction != null) {
-            String url = "https://github.com/" + mUserLogin;
-            bookmarkAction.setTitle(BookmarksProvider.hasBookmarked(this, url)
-                    ? R.string.remove_bookmark
-                    : R.string.bookmark);
-            bookmarkAction.setVisible(mUser != null);
-        }
-
-        return super.onPrepareOptionsMenu(menu);
-    }
-
-    @Override
     protected Intent navigateUp() {
         return getToplevelActivityIntent();
     }
@@ -158,17 +143,6 @@ public class UserActivity extends BaseFragmentPagerActivity {
             case R.id.browser:
                 IntentUtils.launchBrowser(this, url);
                 return true;
-            case R.id.bookmark: {
-                String urlString = url.toString();
-                if (BookmarksProvider.hasBookmarked(this, urlString)) {
-                    BookmarksProvider.removeBookmark(this, urlString);
-                } else {
-                    BookmarksProvider.saveBookmark(this, mUserLogin,
-                            BookmarksProvider.Columns.TYPE_USER,
-                            urlString, mUser.name(), true);
-                }
-                return true;
-            }
         }
         return super.onOptionsItemSelected(item);
     }

@@ -13,6 +13,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,40 +50,46 @@ public class DrawerManager {
     static {
         DEFAULT_ITEMS.add(new DrawerItemDef("search", R.id.search,
                 R.string.search, R.drawable.icon_search));
-        DEFAULT_ITEMS.add(new DrawerItemDef("news_feed", R.id.news_feed,
-                R.string.user_news_feed, R.drawable.icon_news_feed));
+        DEFAULT_ITEMS.add(new DrawerItemDef("feed_hub", R.id.feed_hub,
+                R.string.feed_hub, R.drawable.icon_news_feed));
         DEFAULT_ITEMS.add(new DrawerItemDef("notifications", R.id.notifications,
                 R.string.notifications, R.drawable.icon_notifications));
-        DEFAULT_ITEMS.add(new DrawerItemDef("trend", R.id.trend,
-                R.string.trend, R.drawable.icon_trending));
+        DEFAULT_ITEMS.add(new DrawerItemDef("discover_hub", R.id.discover_hub,
+                R.string.discover_hub, R.drawable.icon_trending));
         DEFAULT_ITEMS.add(new DrawerItemDef("my_repos", R.id.my_repos,
                 R.string.my_repositories, R.drawable.icon_repositories));
-        DEFAULT_ITEMS.add(new DrawerItemDef("bookmarks", R.id.bookmarks,
-                R.string.bookmarks_and_stars, R.drawable.icon_bookmark));
-        DEFAULT_ITEMS.add(new DrawerItemDef("release_radar", R.id.release_radar,
-                R.string.release_radar, R.drawable.icon_star));
-        DEFAULT_ITEMS.add(new DrawerItemDef("pub_timeline", R.id.pub_timeline,
-                R.string.pub_timeline, R.drawable.icon_timeline));
-        DEFAULT_ITEMS.add(new DrawerItemDef("topic_discovery", R.id.topic_discovery,
-                R.string.topic_discovery, R.drawable.tag));
-        DEFAULT_ITEMS.add(new DrawerItemDef("star_groups", R.id.star_groups,
-                R.string.star_groups, R.drawable.folder));
-        DEFAULT_ITEMS.add(new DrawerItemDef("my_issues", R.id.my_issues,
-                R.string.my_issues, R.drawable.icon_issues));
-        DEFAULT_ITEMS.add(new DrawerItemDef("my_prs", R.id.my_prs,
-                R.string.my_pull_requests, R.drawable.icon_pull_request));
+        DEFAULT_ITEMS.add(new DrawerItemDef("star_hub", R.id.star_hub,
+                R.string.star_hub, R.drawable.icon_star));
+        DEFAULT_ITEMS.add(new DrawerItemDef("my_items", R.id.issues_prs,
+                R.string.my_items, R.drawable.icon_issues));
         DEFAULT_ITEMS.add(new DrawerItemDef("my_gists", R.id.my_gists,
                 R.string.my_gists, R.drawable.icon_gists));
-        DEFAULT_ITEMS.add(new DrawerItemDef("blog", R.id.blog,
-                R.string.blog, R.drawable.icon_github));
-        DEFAULT_ITEMS.add(new DrawerItemDef("recent_history", R.id.recent_history,
-                R.string.recent_history, R.drawable.icon_history));
-        DEFAULT_ITEMS.add(new DrawerItemDef("download_manager", R.id.download_manager,
-                R.string.download_manager, R.drawable.download_small));
     }
 
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    }
+
+    /**
+     * 抽屉合并迁移：旧 key → 新 key。后续合并（事项页、Star 页、发现页…）往这里加。
+     * 排序时旧 key 映射到新 key 并保留首次出现的位置；隐藏状态按组折算
+     * （组内旧 key 全被隐藏 → 新 key 隐藏）。
+     */
+    private static final Map<String, String> MERGED_KEY_MAP;
+    static {
+        Map<String, String> m = new HashMap<>();
+        m.put("news_feed", "feed_hub");
+        m.put("pub_timeline", "feed_hub");
+        m.put("recent_history", "search");
+        m.put("my_issues", "my_items");
+        m.put("my_prs", "my_items");
+        m.put("bookmarks", "star_hub");
+        m.put("star_groups", "star_hub");
+        m.put("release_radar", "star_hub");
+        m.put("trend", "discover_hub");
+        m.put("topic_discovery", "discover_hub");
+        m.put("blog", "discover_hub");
+        MERGED_KEY_MAP = Collections.unmodifiableMap(m);
     }
 
     private static Map<String, DrawerItemDef> defMap() {
@@ -107,7 +115,12 @@ public class DrawerManager {
                 JSONArray array = new JSONArray(json);
                 for (int i = 0; i < array.length(); i++) {
                     String key = array.getString(i);
-                    if (map.containsKey(key)) {
+                    // 合并迁移：旧 key 映射到新 key，保留首次出现的位置并去重
+                    String mapped = MERGED_KEY_MAP.get(key);
+                    if (mapped != null) {
+                        key = mapped;
+                    }
+                    if (map.containsKey(key) && !keys.contains(key)) {
                         keys.add(key);
                     }
                 }
@@ -142,6 +155,30 @@ public class DrawerManager {
                 }
             } catch (JSONException ignored) {
             }
+        }
+        // 合并迁移：按新 key 分组旧 key，组内旧 key 全被隐藏 → 新 key 隐藏；
+        // 旧 key 从隐藏集合里清理掉
+        Map<String, List<String>> groups = new HashMap<>();
+        for (Map.Entry<String, String> e : MERGED_KEY_MAP.entrySet()) {
+            List<String> g = groups.get(e.getValue());
+            if (g == null) {
+                g = new ArrayList<>();
+                groups.put(e.getValue(), g);
+            }
+            g.add(e.getKey());
+        }
+        for (Map.Entry<String, List<String>> e : groups.entrySet()) {
+            boolean allHidden = true;
+            for (String oldKey : e.getValue()) {
+                if (!hidden.contains(oldKey)) {
+                    allHidden = false;
+                    break;
+                }
+            }
+            if (allHidden) {
+                hidden.add(e.getKey());
+            }
+            hidden.removeAll(e.getValue());
         }
         return hidden;
     }

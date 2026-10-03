@@ -26,7 +26,6 @@ import android.widget.Toast;
 import com.gh4a.BaseFragmentPagerActivity;
 import com.gh4a.R;
 import com.gh4a.ServiceFactory;
-import com.gh4a.db.BookmarksProvider;
 import com.gh4a.fragment.CommitListFragment;
 import com.gh4a.fragment.ContentListContainerFragment;
 import com.gh4a.fragment.RepositoryEventListFragment;
@@ -172,12 +171,6 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
         return mRepository.defaultBranch();
     }
 
-    private String getBookmarkUrl() {
-        String url = "https://github.com/" + mRepoOwner + "/" + mRepoName;
-        String ref = getCurrentRef();
-        return ref.equals(mRepository.defaultBranch()) ? url : url + "/tree/" + ref;
-    }
-
     @Override
     protected int[] getTabTitleResIds() {
         return mRepository != null ? TITLES : null;
@@ -275,17 +268,9 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
     public boolean onPrepareOptionsMenu(Menu menu) {
         if (mRepository == null) {
             menu.removeItem(R.id.ref);
-            menu.removeItem(R.id.bookmark);
             menu.removeItem(R.id.fork);
             menu.removeItem(R.id.zip_download);
             menu.removeItem(R.id.copy_clone_url);
-        } else {
-            MenuItem bookmarkAction = menu.findItem(R.id.bookmark);
-            if (bookmarkAction != null) {
-                bookmarkAction.setTitle(BookmarksProvider.hasBookmarked(this, getBookmarkUrl())
-                        ? R.string.remove_bookmark
-                        : R.string.bookmark);
-            }
         }
 
         return super.onPrepareOptionsMenu(menu);
@@ -318,15 +303,6 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
                 String initialSearch = "repo:" + mRepoOwner + "/" + mRepoName + " ";
                 startActivity(SearchActivity.makeIntent(this, initialSearch,
                         SearchActivity.SEARCH_TYPE_CODE, false));
-                return true;
-            case R.id.bookmark:
-                String bookmarkUrl = getBookmarkUrl();
-                if (BookmarksProvider.hasBookmarked(this, bookmarkUrl)) {
-                    BookmarksProvider.removeBookmark(this, bookmarkUrl);
-                } else {
-                    BookmarksProvider.saveBookmark(this, mActionBar.getTitle().toString(),
-                            BookmarksProvider.Columns.TYPE_REPO, bookmarkUrl, getCurrentRef(), true);
-                }
                 return true;
             case R.id.fork:
                 confirmForkRepository();

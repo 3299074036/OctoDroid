@@ -36,6 +36,8 @@ import com.gh4a.worker.ReleaseRadarWorker;
 import com.gh4a.utils.MirrorHelper;
 import com.gh4a.widget.IntegerListPreference;
 
+import java.util.List;
+
 public class SettingsFragment extends PreferenceFragmentCompat implements
         Preference.OnPreferenceClickListener, Preference.OnPreferenceChangeListener,
         DarkModeScheduleDialogFragment.SettingsRefreshListener {
@@ -71,6 +73,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private static final String KEY_DARK_MODE = "dark_mode";
     private static final String KEY_DARK_MODE_SCHEDULE_TIME = "dark_mode_schedule_time";
     private static final String KEY_BACKUP_RESTORE = "backup_restore";
+    private static final String KEY_DOWNLOAD_MANAGER = "download_manager";
 
     public static boolean isAutoCheckUpdateEnabled(android.content.Context context) {
         return context.getSharedPreferences(PREF_NAME, android.content.Context.MODE_PRIVATE)
@@ -214,6 +217,11 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         if (backupRestorePref != null) {
             backupRestorePref.setOnPreferenceClickListener(this);
         }
+
+        Preference downloadManagerPref = findPreference(KEY_DOWNLOAD_MANAGER);
+        if (downloadManagerPref != null) {
+            downloadManagerPref.setOnPreferenceClickListener(this);
+        }
     }
 
     public static void applyLanguage(String languageTag) {
@@ -317,66 +325,116 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     }
 
     private void showMirrorSpeedTest() {
-        final AlertDialog progress = new AlertDialog.Builder(getActivity())
-                .setMessage(R.string.mirror_speed_testing)
-                .setCancelable(false)
-                .create();
-        progress.show();
-        // 存为字段：销毁时若任务还在跑，可主动 dismiss
-        mSpeedTestDialog = progress;
         // 新测速开始前取消上一次未完成的，避免回调叠加
         if (mSpeedTestHandle != null) {
             mSpeedTestHandle.cancel();
-        }
-        mSpeedTestHandle = MirrorHelper.testAllMirrorsSpeed(getActivity(), results -> {
             mSpeedTestHandle = null;
-            // 先判存活再 dismiss：中途退出会导致 leaked window / IllegalArgumentException (M-5)
-            if (isAdded() && !getActivity().isFinishing()) {
-                try {
-                    progress.dismiss();
-                } catch (Exception ignored) {
-                }
+        }
+        final List<MirrorHelper.MirrorSpeedResult> items =
+                MirrorHelper.getSpeedTestTargets(getActivity());
+        if (items.isEmpty()) {
+            android.widget.Toast.makeText(getActivity(),
+                    R.string.mirror_speed_no_mirrors,
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // 占位行：先显示列表，每完成一个实时更新该行，不用等全部测完
+        final java.util.Set<String> doneUrls = new java.util.HashSet<>();
+        final android.widget.ArrayAdapter<CharSequence> adapter =
+                new android.widget.ArrayAdapter<>(getActivity(),
+                        android.R.layout.select_dialog_item);
+        final Runnable refreshList = () -> {
+            adapter.clear();
+            for (MirrorHelper.MirrorSpeedResult t : items) {
+                adapter.add(formatSpeedItem(t, !doneUrls.contains(t.url)));
             }
-            mSpeedTestDialog = null;
-            if (!isAdded()) {
-                return;
-            }
-            if (results.isEmpty()) {
-                android.widget.Toast.makeText(getActivity(),
-                        R.string.mirror_speed_no_mirrors,
-                        android.widget.Toast.LENGTH_SHORT).show();
-                return;
-            }
-            CharSequence[] items = new CharSequence[results.size()];
-            for (int i = 0; i < results.size(); i++) {
-                MirrorHelper.MirrorSpeedResult r = results.get(i);
-                items[i] = r.isOk()
-                        ? getString(R.string.mirror_speed_item, r.name, r.latencyMs)
-                        : getString(R.string.mirror_speed_item_failed, r.name);
-            }
-            new AlertDialog.Builder(getActivity())
-                    .setTitle(R.string.mirror_speed_title)
-                    .setItems(items, (dialog, which) -> {
-                        MirrorHelper.MirrorSpeedResult r = results.get(which);
-                        if (!r.isOk()) {
-                            android.widget.Toast.makeText(getActivity(),
-                                    R.string.mirror_speed_unavailable,
-                                    android.widget.Toast.LENGTH_SHORT).show();
+            adapter.notifyDataSetChanged();
+        };
+        refreshList.run();
+        final AlertDialog dialog = new AlertDialog.Builder(getActivity())
+                .setTitle(R.string.mirror_speed_title)
+                .setAdapter(adapter, (d, which) -> {
+                    MirrorHelper.MirrorSpeedResult r = items.get(which);
+                    if (!doneUrls.contains(r.url)) {
+                        android.widget.Toast.makeText(getActivity(),
+                                R.string.mirror_speed_still_testing,
+                                android.widget.Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (!r.isOk()) {
+                        android.widget.Toast.makeText(getActivity(),
+                                R.string.mirror_speed_unavailable,
+                                android.widget.Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    getActivity().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                            .edit().putString(KEY_MIRROR_PRESET, r.presetValue).apply();
+                    ListPreference presetPref = findPreference(KEY_MIRROR_PRESET);
+                    if (presetPref != null) {
+                        presetPref.setValue(r.presetValue);
+                    }
+                    android.widget.Toast.makeText(getActivity(),
+                            getString(R.string.mirror_speed_selected, r.name),
+                            android.widget.Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, (d, which) -> cancelSpeedTest())
+                .create();
+        // 点外部/返回键取消时也中止探测
+        dialog.setOnCancelListener(d -> cancelSpeedTest());
+        dialog.show();
+        // 存为字段：销毁时若任务还在跑，可主动 dismiss
+        mSpeedTestDialog = dialog;
+
+        mSpeedTestHandle = MirrorHelper.testAllMirrorsSpeed(getActivity(), items,
+                new MirrorHelper.SpeedTestCallback() {
+                    @Override
+                    public void onProbeComplete(MirrorHelper.MirrorSpeedResult result) {
+                        if (!isAdded()) {
                             return;
                         }
-                        getActivity().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-                                .edit().putString(KEY_MIRROR_PRESET, r.presetValue).apply();
-                        ListPreference presetPref = findPreference(KEY_MIRROR_PRESET);
-                        if (presetPref != null) {
-                            presetPref.setValue(r.presetValue);
+                        doneUrls.add(result.url);
+                        for (int i = 0; i < items.size(); i++) {
+                            if (items.get(i).url.equals(result.url)) {
+                                items.set(i, result);
+                                break;
+                            }
                         }
-                        android.widget.Toast.makeText(getActivity(),
-                                getString(R.string.mirror_speed_selected, r.name),
-                                android.widget.Toast.LENGTH_SHORT).show();
-                    })
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show();
-        });
+                        refreshList.run();
+                    }
+
+                    @Override
+                    public void onAllComplete() {
+                        mSpeedTestHandle = null;
+                        if (!isAdded()) {
+                            return;
+                        }
+                        // 最终按快慢排序：可用的按延迟，不可用的排最后
+                        java.util.Collections.sort(items, (a, b) -> {
+                            if (a.isOk() != b.isOk()) {
+                                return a.isOk() ? -1 : 1;
+                            }
+                            return Long.compare(a.latencyMs, b.latencyMs);
+                        });
+                        refreshList.run();
+                    }
+                });
+    }
+
+    private void cancelSpeedTest() {
+        if (mSpeedTestHandle != null) {
+            mSpeedTestHandle.cancel();
+            mSpeedTestHandle = null;
+        }
+    }
+
+    /** 测速列表行文案：pending 显示“测试中…”，否则按成功/失败显示。 */
+    private String formatSpeedItem(MirrorHelper.MirrorSpeedResult r, boolean pending) {
+        if (pending) {
+            return getString(R.string.mirror_speed_item_pending, r.name);
+        }
+        return r.isOk()
+                ? getString(R.string.mirror_speed_item, r.name, r.latencyMs)
+                : getString(R.string.mirror_speed_item_failed, r.name);
     }
 
     private void showBackupRestoreDialog() {
@@ -509,6 +567,10 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             return true;
         } else if (KEY_BACKUP_RESTORE.equals(pref.getKey())) {
             showBackupRestoreDialog();
+            return true;
+        } else if (KEY_DOWNLOAD_MANAGER.equals(pref.getKey())) {
+            startActivity(new android.content.Intent(getActivity(),
+                    com.gh4a.activities.DownloadListActivity.class));
             return true;
         } else if (KEY_DARK_MODE_SCHEDULE_TIME.equals(pref.getKey())) {
             DarkModeScheduleDialogFragment.newInstance()

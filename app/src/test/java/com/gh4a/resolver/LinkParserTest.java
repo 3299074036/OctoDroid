@@ -3,7 +3,6 @@ package com.gh4a.resolver;
 import android.net.Uri;
 import android.os.Bundle;
 
-import com.gh4a.activities.BlogListActivity;
 import com.gh4a.activities.CommitActivity;
 import com.gh4a.activities.CompareActivity;
 import com.gh4a.activities.GistActivity;
@@ -99,7 +98,7 @@ public class LinkParserTest {
         LinkParser.ParseResult result = parseLink("https://github.com/stars");
         assertRedirectsTo(result, HomeActivity.class);
         Bundle extras = result.intent.getExtras();
-        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("bookmarks"));
+        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("star_hub"));
     }
 
     @Test
@@ -123,7 +122,8 @@ public class LinkParserTest {
         LinkParser.ParseResult result = parseLink("https://github.com/issues");
         assertRedirectsTo(result, HomeActivity.class);
         Bundle extras = result.intent.getExtras();
-        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("issues"));
+        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("my_items"));
+        assertThat("Wrong initial tab", extras.getInt("initial_tab"), is(0));
     }
 
     @Test
@@ -131,7 +131,8 @@ public class LinkParserTest {
         LinkParser.ParseResult result = parseLink("https://github.com/pulls");
         assertRedirectsTo(result, HomeActivity.class);
         Bundle extras = result.intent.getExtras();
-        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("prs"));
+        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("my_items"));
+        assertThat("Wrong initial tab", extras.getInt("initial_tab"), is(1));
     }
 
     @Test
@@ -139,7 +140,7 @@ public class LinkParserTest {
         LinkParser.ParseResult result = parseLink("https://github.com/dashboard");
         assertRedirectsTo(result, HomeActivity.class);
         Bundle extras = result.intent.getExtras();
-        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("newsfeed"));
+        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("feed_hub"));
     }
 
     @Test
@@ -147,13 +148,14 @@ public class LinkParserTest {
         LinkParser.ParseResult result = parseLink("https://github.com/dashboard-feed");
         assertRedirectsTo(result, HomeActivity.class);
         Bundle extras = result.intent.getExtras();
-        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("newsfeed"));
+        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("feed_hub"));
     }
 
     @Test
-    public void blogLink__opensBlogListActivity() {
-        assertRedirectsTo(parseLink("https://github.com/blog"), BlogListActivity.class);
-        assertRedirectsTo(parseLink("https://blog.github.com"), BlogListActivity.class);
+    public void blogLink__opensBrowser() {
+        // 博客功能已剔除，博客链接走浏览器打开
+        assertRedirectsToBrowser(parseLink("https://github.com/blog"));
+        assertRedirectsToBrowser(parseLink("https://blog.github.com"));
     }
 
     @Test

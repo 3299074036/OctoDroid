@@ -102,6 +102,11 @@
             android:title="@string/backup_restore"
             android:summary="@string/backup_restore_summary" />
 
+        <Preference
+            app:iconSpaceReserved="false"
+            android:key="download_manager"
+            android:title="@string/download_manager" />
+
     </PreferenceCategory>
 
     <PreferenceCategory

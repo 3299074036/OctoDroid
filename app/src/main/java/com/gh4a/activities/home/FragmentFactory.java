@@ -20,6 +20,14 @@ public abstract class FragmentFactory {
     protected abstract int[] getTabTitleResIds();
     protected abstract Fragment makeFragment(int position);
 
+    /**
+     * 切 Tab 时是否刷新 options menu。聚合 Factory（如动态页的组织切换器、
+     * 事项页的开/关切换）需要按激活 Tab 重建菜单时返回 true。
+     */
+    protected boolean refreshMenuOnTabSwitch() {
+        return false;
+    }
+
     protected void onFragmentInstantiated(Fragment f, int position) {
     }
 

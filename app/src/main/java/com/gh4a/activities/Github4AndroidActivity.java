@@ -180,7 +180,6 @@ public class Github4AndroidActivity extends BaseActivity implements
     @IdRes
     protected int getInitialLeftDrawerSelection(Menu menu) {
         menu.setGroupCheckable(R.id.navigation, false, false);
-        menu.setGroupCheckable(R.id.explore, false, false);
         menu.setGroupVisible(R.id.my_items, false);
         return super.getInitialLeftDrawerSelection(menu);
     }
@@ -194,18 +193,6 @@ public class Github4AndroidActivity extends BaseActivity implements
                 return true;
             case R.id.search:
                 startActivity(SearchActivity.makeIntent(this));
-                return true;
-            case R.id.bookmarks:
-                startActivity(new Intent(this, BookmarkListActivity.class));
-                return true;
-            case R.id.pub_timeline:
-                startActivity(new Intent(this, TimelineActivity.class));
-                return true;
-            case R.id.blog:
-                startActivity(new Intent(this, BlogListActivity.class));
-                return true;
-            case R.id.trend:
-                startActivity(new Intent(this, TrendingActivity.class));
                 return true;
         }
         return false;

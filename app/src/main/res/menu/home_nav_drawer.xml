@@ -6,8 +6,8 @@
         android:id="@+id/my_items"
         android:checkableBehavior="single">
         <item
-            android:id="@+id/news_feed"
-            android:title="@string/user_news_feed"
+            android:id="@+id/feed_hub"
+            android:title="@string/feed_hub"
             android:icon="@drawable/icon_news_feed"
             android:checked="true" />
         <item
@@ -16,62 +16,25 @@
             android:title="@string/notifications"
             app:actionLayout="@layout/notifications_indicator" />
         <item
+            android:id="@+id/discover_hub"
+            android:title="@string/discover_hub"
+            android:icon="@drawable/icon_trending"/>
+        <item
             android:id="@+id/my_repos"
             android:title="@string/my_repositories"
             android:icon="@drawable/icon_repositories"/>
         <item
-            android:id="@+id/bookmarks"
-            android:title="@string/bookmarks_and_stars"
-            android:icon="@drawable/icon_bookmark" />
-        <item
-            android:id="@+id/release_radar"
-            android:title="@string/release_radar"
+            android:id="@+id/star_hub"
+            android:title="@string/star_hub"
             android:icon="@drawable/icon_star"/>
         <item
-            android:id="@+id/star_groups"
-            android:title="@string/star_groups"
-            android:icon="@drawable/folder"/>
-        <item
-            android:id="@+id/recent_history"
-            android:title="@string/recent_history"
-            android:icon="@drawable/icon_history"/>
-        <item
-            android:id="@+id/download_manager"
-            android:title="@string/download_manager"
-            android:icon="@drawable/download_small"/>
-        <item
-            android:id="@+id/my_issues"
-            android:title="@string/my_issues"
+            android:id="@+id/issues_prs"
+            android:title="@string/my_items"
             android:icon="@drawable/icon_issues"/>
-        <item
-            android:id="@+id/my_prs"
-            android:title="@string/my_pull_requests"
-            android:icon="@drawable/icon_pull_request"/>
         <item
             android:id="@+id/my_gists"
             android:title="@string/my_gists"
             android:icon="@drawable/icon_gists"/>
-    </group>
-    <!-- 一级：发现 -->
-    <group
-        android:id="@+id/explore"
-        android:checkableBehavior="single">
-        <item
-            android:id="@+id/pub_timeline"
-            android:title="@string/pub_timeline"
-            android:icon="@drawable/icon_timeline" />
-        <item
-            android:id="@+id/trend"
-            android:title="@string/trend"
-            android:icon="@drawable/icon_trending"/>
-        <item
-            android:id="@+id/topic_discovery"
-            android:title="@string/topic_discovery"
-            android:icon="@drawable/tag"/>
-        <item
-            android:id="@+id/blog"
-            android:title="@string/blog"
-            android:icon="@drawable/icon_github"/>
     </group>
     <!-- 一级：工具 -->
     <group

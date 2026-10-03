@@ -27,6 +27,7 @@ import com.gh4a.Gh4Application;
 import com.gh4a.R;
 import com.gh4a.activities.ReleaseInfoActivity;
 import com.gh4a.activities.home.HomeActivity;
+import com.gh4a.activities.home.StarHubFactory;
 import com.gh4a.fragment.RadarCache;
 import com.gh4a.fragment.RadarGraphQL;
 import com.gh4a.fragment.ReleaseRadarFragment;
@@ -176,7 +177,7 @@ public class ReleaseRadarWorker extends Worker {
             return;
         }
         PendingIntent contentIntent = PendingIntent.getActivity(context, 0,
-                HomeActivity.makeIntent(context, R.id.release_radar)
+                HomeActivity.makeIntent(context, R.id.star_hub, StarHubFactory.TAB_RADAR)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                                 | Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -219,7 +220,7 @@ public class ReleaseRadarWorker extends Worker {
                 newReleases.size(), newReleases.size());
 
         PendingIntent contentIntent = PendingIntent.getActivity(context, 0,
-                HomeActivity.makeIntent(context, R.id.release_radar)
+                HomeActivity.makeIntent(context, R.id.star_hub, StarHubFactory.TAB_RADAR)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                                 | Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);

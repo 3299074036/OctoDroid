@@ -28,36 +28,55 @@ import java.io.File;
  */
 public class ApkUpdateDownloader {
     public static void downloadAndInstall(BaseActivity activity, String apkUrl, String fileName) {
-        // Mirror the APK host when the user enabled network acceleration.
-        final String url = MirrorHelper.rewriteUrl(activity, apkUrl);
+        final Context appContext = activity.getApplicationContext();
+        // 主线路：开了镜像加速走镜像，否则直连
+        final String primaryUrl = MirrorHelper.rewriteUrl(activity, apkUrl);
+        // 备线路：主用镜像失败则回落直连（VPN 下直连可用）；主用直连失败则试默认镜像
+        // （无 VPN 时直连不可用）。两条都失败才报错，两种网络下都能下到包。
+        final String fallbackUrl = computeFallbackUrl(activity, apkUrl, primaryUrl);
+        Runnable startDownload = () -> enqueue(appContext, primaryUrl, fallbackUrl, fileName);
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             activity.requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE,
                     (requestCode, permissions, grantResults) -> {
                         if (grantResults.length > 0
                                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                            enqueue(activity, url, fileName);
+                            startDownload.run();
                         }
                     },
                     R.string.download_permission_rationale);
         } else {
-            enqueue(activity, url, fileName);
+            startDownload.run();
         }
     }
 
-    private static void enqueue(BaseActivity activity, String url, String fileName) {
+    /**
+     * 计算备选下载地址：与主线路不同才有意义，相同（如不可镜像的 host）返回 null。
+     */
+    private static String computeFallbackUrl(Context context, String originalUrl, String primaryUrl) {
+        String fallback;
+        if (!primaryUrl.equals(originalUrl)) {
+            fallback = originalUrl; // 主用镜像 → 备选直连
+        } else {
+            fallback = MirrorHelper.rewriteUrlWithBase(
+                    MirrorHelper.DEFAULT_PRESET, originalUrl); // 主用直连 → 备选默认镜像
+        }
+        return fallback != null && !fallback.equals(primaryUrl) ? fallback : null;
+    }
+
+    private static void enqueue(Context context, String url, String fallbackUrl, String fileName) {
         DownloadManager dm =
-                (DownloadManager) activity.getSystemService(Context.DOWNLOAD_SERVICE);
+                (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
         // 文件名来自更新检查的网络响应：sanitize 防止路径穿越 (L-2)
         final String safeName = sanitizeFileName(fileName);
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
-                .setTitle(activity.getString(R.string.downloading_update))
+                .setTitle(context.getString(R.string.downloading_update))
                 .setNotificationVisibility(
                         DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setAllowedOverRoaming(false)
                 .setMimeType("application/vnd.android.package-archive");
         final long downloadId = dm.enqueue(request);
-        Toast.makeText(activity, R.string.downloading_update, Toast.LENGTH_SHORT).show();
+        Toast.makeText(context, R.string.downloading_update, Toast.LENGTH_SHORT).show();
 
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override
@@ -67,20 +86,20 @@ public class ApkUpdateDownloader {
                     return;
                 }
                 context.unregisterReceiver(this);
-                onDownloadComplete(context, dm, downloadId);
+                onDownloadComplete(context, dm, downloadId, fallbackUrl, fileName);
             }
         };
         // 用 application context 注册，避免 Activity 销毁后 receiver 泄漏；
         // onReceive 里用传入的 context 反注册，两边一致
-        final Context appContext = activity.getApplicationContext();
         // targetSdk 34+ 必须显式声明 receiver 是否 exported，否则抛 SecurityException；
         // 用 ContextCompat 兼容低版本（内部做版本判断），lint 也能识别
-        androidx.core.content.ContextCompat.registerReceiver(appContext, receiver,
+        androidx.core.content.ContextCompat.registerReceiver(context, receiver,
                 new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
                 androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
-    private static void onDownloadComplete(Context context, DownloadManager dm, long downloadId) {
+    private static void onDownloadComplete(Context context, DownloadManager dm, long downloadId,
+            String fallbackUrl, String fileName) {
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
         try (Cursor cursor = dm.query(query)) {
             if (!cursor.moveToFirst()) {
@@ -89,7 +108,13 @@ public class ApkUpdateDownloader {
             int status = cursor.getInt(
                     cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
             if (status != DownloadManager.STATUS_SUCCESSFUL) {
-                Toast.makeText(context, R.string.download_failed, Toast.LENGTH_LONG).show();
+                if (fallbackUrl != null) {
+                    // 主线路失败，换备线路重试一次
+                    Toast.makeText(context, R.string.download_retry_alt, Toast.LENGTH_SHORT).show();
+                    enqueue(context, fallbackUrl, null, fileName);
+                } else {
+                    Toast.makeText(context, R.string.download_failed, Toast.LENGTH_LONG).show();
+                }
                 return;
             }
             String localUri = cursor.getString(

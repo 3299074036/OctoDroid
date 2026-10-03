@@ -43,8 +43,6 @@
     <string name="feedback_text">If you have any issues or suggestions, please contact me.  Any kind of feedback is greatly appreciated.</string>
     <string name="feedback_by_email">By Email</string>
     <string name="feedback_by_gh4a">By OctoDroid</string>
-    <string name="bookmarks">Bookmarks</string>
-    <string name="bookmarks_and_stars">Bookmarks and Stars</string>
     <string name="other_info">Other Information</string>
     <string name="view">View</string>
     <string name="readme">Readme</string>
@@ -102,6 +100,16 @@
     <string name="language_chinese">Chinese</string>
     <string name="language_english">English</string>
     <string name="pub_timeline">Public Timeline</string>
+    <string name="feed_hub">Feed</string>
+    <string name="feed_tab_following">Following</string>
+    <string name="feed_tab_public">Public</string>
+    <string name="my_items">Issues &amp; PRs</string>
+    <string name="issues_tab">Issues</string>
+    <string name="prs_tab">Pull requests</string>
+    <string name="issues_filter">Filter</string>
+    <string name="star_hub">Star</string>
+    <string name="discover_hub">Discover</string>
+    <string name="trend_range">Time range</string>
     <string name="load_failure_explanation">Loading the data from GitHub failed. Please verify you have a working network connection and try again.</string>
     <string name="load_failure_explanation_dmca">This repository was taken down for legal reasons.\nPlease see %1$s for details.</string>
     <string name="load_failure_explanation_parsing">There was an error while parsing GitHub\'s response. You can use the button below to report this issue to the app developers.</string>
@@ -152,6 +160,7 @@
     <string name="link_not_openable">Link could not be opened</string>
     <string name="download_created">Created %1$s</string>
     <string name="download_failed">Download failed, please check your network connection or access rights</string>
+    <string name="download_retry_alt">Download failed, retrying via alternate route…</string>
     <string name="download_mobile_warning_title">Mobile connection download</string>
     <string name="download_mobile_warning_message">Do you want to download this file using your mobile connection?\nYou can also schedule it for download when you\'re using your Wi-Fi connection next time.</string>
     <string name="download_now_button">Download now</string>
@@ -264,7 +273,6 @@
     <string name="no_releases_found">No releases were created for this repository yet.</string>
     <string name="no_gists_found">No gists were created so far.</string>
     <string name="no_starred_gists_found">No gists were starred so far.</string>
-    <string name="no_bookmarks">No bookmarks were created so far.</string>
     <string name="no_wiki_updates_found">No recent Wiki updates found.</string>
     <string name="no_notifications_found">No notifications found.</string>
     <string name="no_org_members_found">This organization does not have any members.</string>
@@ -600,14 +608,11 @@
     <string name="trend_stars_month">%1$d this month, %2$d total</string>
 
     <!-- GitHub Blog -->
-    <string name="blog">GitHub Blog</string>
 
     <!-- Recent Wiki Updates -->
     <string name="recent_wiki">Recent Wiki Updates</string>
 
     <!-- Bookmarks -->
-    <string name="bookmark">Bookmark</string>
-    <string name="remove_bookmark">Remove bookmark</string>
     <string name="bookmark_saved">Bookmark saved</string>
     <string name="bookmark_removed">Bookmark removed</string>
 
@@ -780,6 +785,8 @@
     <string name="mirror_speed_title">Mirror speed — tap to use</string>
     <string name="mirror_speed_item">%1$s — %2$d ms</string>
     <string name="mirror_speed_item_failed">%1$s — unavailable</string>
+    <string name="mirror_speed_item_pending">%1$s — testing…</string>
+    <string name="mirror_speed_still_testing">Still testing, please wait</string>
     <string name="mirror_speed_selected">Mirror set to %1$s</string>
     <string name="mirror_speed_unavailable">This mirror is unavailable, pick another one</string>
     <string name="mirror_speed_no_mirrors">No preset mirrors configured</string>
