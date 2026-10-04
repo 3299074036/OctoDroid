@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 
 import com.gh4a.BuildConfig;
 
@@ -14,10 +15,17 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -143,43 +151,99 @@ public class UpdateChecker {
     }
 
     /**
-     * 拉取 latest release 信息：开了镜像加速时优先走镜像代理
-     * （gh-proxy 风格：{@code <mirror>/<原地址>}），再回落直连；
-     * 未开镜像则只直连。公开仓库的 releases 接口无需鉴权，走镜像不需要 token。
-     * 这样 VPN 下直连、非 VPN 下镜像，两种网络都能检测到更新，
-     * 且不会在直连被黑洞时白白等 15s 超时。
+     * 拉取 latest release 信息：直连、已选镜像、默认镜像三条链路并行竞速，
+     * 谁先返回合法 JSON（tag_name 非空）谁赢，其余取消。
+     *
+     * VPN 下直连最快；只开镜像时镜像快；自选镜像挂了/不支持 API 代理时
+     * 默认镜像兜底（gh-proxy 在国内可直达，与下载器的备选默认镜像策略一致）。
+     * 任何一条通就能检出更新，不会被一条慢/死的链路拖住
+     * （旧的串行逻辑在这种情况下要白等 30s+ 才报错）。
      */
     private static JSONObject fetchLatestRelease(Context context) throws IOException {
         List<String> candidates = new ArrayList<>();
+        candidates.add(LATEST_RELEASE_URL);
         if (MirrorHelper.isEnabled(context)) {
             String base = MirrorHelper.getMirrorBase(context);
             if (!base.isEmpty()) {
-                candidates.add(base + "/" + LATEST_RELEASE_URL);
+                addDistinct(candidates, base + "/" + LATEST_RELEASE_URL);
             }
         }
-        candidates.add(LATEST_RELEASE_URL);
-        IOException lastError = null;
+        addDistinct(candidates, MirrorHelper.DEFAULT_PRESET + "/" + LATEST_RELEASE_URL);
+
+        List<Call> calls = new ArrayList<>();
         for (String url : candidates) {
             Request request = new Request.Builder()
                     .url(url)
                     .header("Accept", "application/vnd.github+json")
                     .header("User-Agent", "OctoDroid")
                     .build();
-            try (Response response = getClient().newCall(request).execute()) {
-                if (!response.isSuccessful() || response.body() == null) {
-                    lastError = new IOException("HTTP " + response.code());
-                    continue;
+            calls.add(getClient().newCall(request));
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(calls.size());
+        CompletionService<JSONObject> ecs = new ExecutorCompletionService<>(pool);
+        for (Call call : calls) {
+            ecs.submit(() -> fetchReleaseJson(call));
+        }
+        IOException lastError = new IOException("update check failed");
+        long deadline = SystemClock.elapsedRealtime() + TimeUnit.SECONDS.toMillis(30);
+        try {
+            for (int i = 0; i < calls.size(); i++) {
+                long waitMs = deadline - SystemClock.elapsedRealtime();
+                if (waitMs <= 0) {
+                    break;
+                }
+                Future<JSONObject> f = ecs.poll(waitMs, TimeUnit.MILLISECONDS);
+                if (f == null) {
+                    break;
                 }
                 try {
-                    return new JSONObject(response.body().string());
-                } catch (JSONException e) {
-                    lastError = new IOException("bad response");
+                    JSONObject json = f.get();
+                    for (Call c : calls) {
+                        c.cancel();
+                    }
+                    return json;
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    lastError = cause instanceof IOException
+                            ? (IOException) cause
+                            : new IOException(String.valueOf(cause));
                 }
-            } catch (IOException e) {
-                lastError = e;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            lastError = new IOException("interrupted", e);
+        } finally {
+            pool.shutdownNow();
+        }
+        throw lastError;
+    }
+
+    /** 单条链路拉取并校验 release JSON：HTTP 2xx 且 tag_name 非空才算成功。 */
+    private static JSONObject fetchReleaseJson(Call call) throws IOException {
+        try (Response response = call.execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                throw new IOException("HTTP " + response.code());
+            }
+            final JSONObject json;
+            try {
+                json = new JSONObject(response.body().string());
+            } catch (JSONException e) {
+                throw new IOException("bad response");
+            }
+            if (json.optString("tag_name", "").isEmpty()) {
+                throw new IOException("empty release tag");
+            }
+            return json;
+        }
+    }
+
+    private static void addDistinct(List<String> list, String url) {
+        for (String e : list) {
+            if (e.equalsIgnoreCase(url)) {
+                return;
             }
         }
-        throw lastError != null ? lastError : new IOException("update check failed");
+        list.add(url);
     }
 
     /** True when the latest release version is newer than the installed one. */

@@ -21,6 +21,8 @@ import com.gh4a.BaseActivity;
 import com.gh4a.R;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Downloads an APK via DownloadManager and launches the system installer
@@ -29,12 +31,12 @@ import java.io.File;
 public class ApkUpdateDownloader {
     public static void downloadAndInstall(BaseActivity activity, String apkUrl, String fileName) {
         final Context appContext = activity.getApplicationContext();
-        // 主线路：开了镜像加速走镜像，否则直连
-        final String primaryUrl = MirrorHelper.rewriteUrl(activity, apkUrl);
-        // 备线路：主用镜像失败则回落直连（VPN 下直连可用）；主用直连失败则试默认镜像
-        // （无 VPN 时直连不可用）。两条都失败才报错，两种网络下都能下到包。
-        final String fallbackUrl = computeFallbackUrl(activity, apkUrl, primaryUrl);
-        Runnable startDownload = () -> enqueue(appContext, primaryUrl, fallbackUrl, fileName);
+        // 下载链路（按顺序尝试，一条失败自动换下一条）：
+        // 自选镜像（开了镜像加速）→ 默认镜像 → 直连。
+        // VPN 下直连可用；无 VPN 时走镜像；自选镜像挂了还有默认镜像兜底。
+        // 任何一条通就能下到包，两种网络下都成立。
+        final List<String> chain = buildDownloadChain(activity, apkUrl);
+        Runnable startDownload = () -> enqueue(appContext, chain, fileName);
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             activity.requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE,
                     (requestCode, permissions, grantResults) -> {
@@ -50,20 +52,37 @@ public class ApkUpdateDownloader {
     }
 
     /**
-     * 计算备选下载地址：与主线路不同才有意义，相同（如不可镜像的 host）返回 null。
+     * 构造下载链路并去重：自选镜像 → 默认镜像 → 直连。
+     * 未开镜像加速时自选即直连，去重后为 [默认镜像，直连]。
      */
-    private static String computeFallbackUrl(Context context, String originalUrl, String primaryUrl) {
-        String fallback;
-        if (!primaryUrl.equals(originalUrl)) {
-            fallback = originalUrl; // 主用镜像 → 备选直连
-        } else {
-            fallback = MirrorHelper.rewriteUrlWithBase(
-                    MirrorHelper.DEFAULT_PRESET, originalUrl); // 主用直连 → 备选默认镜像
+    private static List<String> buildDownloadChain(Context context, String apkUrl) {
+        List<String> chain = new ArrayList<>();
+        String[] ordered = {
+                MirrorHelper.rewriteUrl(context, apkUrl),
+                MirrorHelper.rewriteUrlWithBase(MirrorHelper.DEFAULT_PRESET, apkUrl),
+                apkUrl,
+        };
+        for (String u : ordered) {
+            if (u == null || u.isEmpty()) {
+                continue;
+            }
+            boolean dup = false;
+            for (String e : chain) {
+                if (e.equalsIgnoreCase(u)) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) {
+                chain.add(u);
+            }
         }
-        return fallback != null && !fallback.equals(primaryUrl) ? fallback : null;
+        return chain;
     }
 
-    private static void enqueue(Context context, String url, String fallbackUrl, String fileName) {
+    private static void enqueue(Context context, List<String> urls, String fileName) {
+        String url = urls.get(0);
+        final List<String> rest = new ArrayList<>(urls.subList(1, urls.size()));
         DownloadManager dm =
                 (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
         // 文件名来自更新检查的网络响应：sanitize 防止路径穿越 (L-2)
@@ -86,7 +105,7 @@ public class ApkUpdateDownloader {
                     return;
                 }
                 context.unregisterReceiver(this);
-                onDownloadComplete(context, dm, downloadId, fallbackUrl, fileName);
+                onDownloadComplete(context, dm, downloadId, rest, fileName);
             }
         };
         // 用 application context 注册，避免 Activity 销毁后 receiver 泄漏；
@@ -99,7 +118,7 @@ public class ApkUpdateDownloader {
     }
 
     private static void onDownloadComplete(Context context, DownloadManager dm, long downloadId,
-            String fallbackUrl, String fileName) {
+            List<String> remainingUrls, String fileName) {
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
         try (Cursor cursor = dm.query(query)) {
             if (!cursor.moveToFirst()) {
@@ -108,10 +127,10 @@ public class ApkUpdateDownloader {
             int status = cursor.getInt(
                     cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
             if (status != DownloadManager.STATUS_SUCCESSFUL) {
-                if (fallbackUrl != null) {
-                    // 主线路失败，换备线路重试一次
+                if (!remainingUrls.isEmpty()) {
+                    // 本条线路失败，换下一条重试
                     Toast.makeText(context, R.string.download_retry_alt, Toast.LENGTH_SHORT).show();
-                    enqueue(context, fallbackUrl, null, fileName);
+                    enqueue(context, remainingUrls, fileName);
                 } else {
                     Toast.makeText(context, R.string.download_failed, Toast.LENGTH_LONG).show();
                 }
