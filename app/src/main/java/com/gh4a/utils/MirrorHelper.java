@@ -43,7 +43,10 @@ public class MirrorHelper {
 
     public static final String PREF_MIRROR_ENABLED = "mirror_enabled";
     public static final String PREF_MIRROR_PRESET = "mirror_preset";
-    public static final String PREF_MIRROR_CUSTOM_URL = "mirror_custom_url";
+    /** 旧版单条自定义地址（已迁移到镜像列表，仅迁移代码使用）。 */
+    static final String PREF_MIRROR_CUSTOM_URL = "mirror_custom_url";
+    /** 全部镜像地址：JSON 数组，首次从内置预设播种，用户可增删改。 */
+    public static final String PREF_MIRROR_LIST = "mirror_list";
     public static final String PRESET_CUSTOM = "custom";
     public static final String DEFAULT_PRESET = "https://gh-proxy.com";
     /** 已下线镜像（2026-10-01 实测不可用），老用户存量选择自动迁移到默认。 */
@@ -68,28 +71,200 @@ public class MirrorHelper {
 
     /** 镜像基地址（去掉末尾斜杠），如 https://gh-proxy.com；未配置返回空串。 */
     public static String getMirrorBase(Context context) {
+        migrateLegacyCustomUrl(context);
         SharedPreferences p = prefs(context);
         String preset = p.getString(PREF_MIRROR_PRESET, DEFAULT_PRESET);
-        if (DEAD_PRESET.equals(preset)) {
+        if (DEAD_PRESET.equals(preset) || PRESET_CUSTOM.equals(preset)) {
             preset = DEFAULT_PRESET;
             p.edit().putString(PREF_MIRROR_PRESET, preset).apply();
         }
-        String base = PRESET_CUSTOM.equals(preset)
-                ? p.getString(PREF_MIRROR_CUSTOM_URL, "")
-                : preset;
-        if (base == null) {
-            return "";
-        }
-        base = base.trim();
-        while (base.endsWith("/")) {
-            base = base.substring(0, base.length() - 1);
-        }
+        String base = normalizeUrl(preset);
         // 只接受 https 镜像：无 scheme 或 http 会在改写时产生畸形 URL (M-9)，
         // 且明文传输可被窃听篡改；不合法视为未配置，原样直连
         if (!base.regionMatches(true, 0, "https://", 0, 8)) {
             return "";
         }
         return base;
+    }
+
+    /** 去掉首尾空白和末尾斜杠；null 返回空串。 */
+    public static String normalizeUrl(String url) {
+        if (url == null) {
+            return "";
+        }
+        String s = url.trim();
+        while (s.endsWith("/")) {
+            s = s.substring(0, s.length() - 1);
+        }
+        return s;
+    }
+
+    /** 列表里显示的名字：取 URL 的 host，解析失败就显示原串。 */
+    public static String displayHost(String url) {
+        try {
+            String host = Uri.parse(url).getHost();
+            if (host != null && !host.isEmpty()) {
+                return host;
+            }
+        } catch (Exception ignored) {
+            // 解析失败就原样显示
+        }
+        return url == null ? "" : url;
+    }
+
+    /**
+     * 旧版单条自定义地址迁移到镜像列表（一次性），之后删除旧键。
+     * 注意：不能调 getMirrorUrls()（它会反过来调迁移），直接读原始 JSON。
+     */
+    private static void migrateLegacyCustomUrl(Context context) {
+        SharedPreferences p = prefs(context);
+        if (!p.contains(PREF_MIRROR_CUSTOM_URL)) {
+            return;
+        }
+        String norm = normalizeUrl(p.getString(PREF_MIRROR_CUSTOM_URL, ""));
+        SharedPreferences.Editor e = p.edit().remove(PREF_MIRROR_CUSTOM_URL);
+        if (!norm.isEmpty()) {
+            List<String> list = readMirrorList(p);
+            if (!containsIgnoreCase(list, norm)) {
+                list.add(norm);
+                e.putString(PREF_MIRROR_LIST, toJsonArray(list));
+            }
+            if (PRESET_CUSTOM.equals(p.getString(PREF_MIRROR_PRESET, ""))) {
+                e.putString(PREF_MIRROR_PRESET, norm);
+            }
+        } else if (PRESET_CUSTOM.equals(p.getString(PREF_MIRROR_PRESET, ""))) {
+            e.putString(PREF_MIRROR_PRESET, DEFAULT_PRESET);
+        }
+        e.apply();
+    }
+
+    private static boolean containsIgnoreCase(List<String> list, String url) {
+        for (String s : list) {
+            if (s.equalsIgnoreCase(url)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean removeIgnoreCase(List<String> list, String url) {
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i).equalsIgnoreCase(url)) {
+                list.remove(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String toJsonArray(List<String> list) {
+        org.json.JSONArray arr = new org.json.JSONArray();
+        for (String s : list) {
+            arr.put(s);
+        }
+        return arr.toString();
+    }
+
+    /** 从 prefs 读原始镜像列表 JSON，不做迁移不播种（供迁移逻辑内部使用）。 */
+    private static List<String> readMirrorList(SharedPreferences p) {
+        List<String> out = new ArrayList<>();
+        String json = p.getString(PREF_MIRROR_LIST, null);
+        if (json == null) {
+            return out;
+        }
+        try {
+            org.json.JSONArray arr = new org.json.JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                String u = normalizeUrl(arr.optString(i, ""));
+                if (!u.isEmpty() && !containsIgnoreCase(out, u)) {
+                    out.add(u);
+                }
+            }
+        } catch (org.json.JSONException ignored) {
+            // 坏数据就当空列表
+        }
+        return out;
+    }
+
+    /**
+     * 全部镜像地址（已去重、格式归一）。从未保存过则用内置预设播种一次；
+     * 之后就是用户自己的列表，可增删改。
+     */
+    public static List<String> getMirrorUrls(Context context) {
+        migrateLegacyCustomUrl(context);
+        SharedPreferences p = prefs(context);
+        if (p.getString(PREF_MIRROR_LIST, null) == null) {
+            List<String> seed = new ArrayList<>();
+            for (String v : presetValues(context)) {
+                if (PRESET_CUSTOM.equals(v)) {
+                    continue;
+                }
+                String norm = normalizeUrl(v);
+                if (!norm.isEmpty() && !containsIgnoreCase(seed, norm)) {
+                    seed.add(norm);
+                }
+            }
+            p.edit().putString(PREF_MIRROR_LIST, toJsonArray(seed)).apply();
+            return seed;
+        }
+        return readMirrorList(p);
+    }
+
+    private static void saveMirrorUrls(Context context, List<String> urls) {
+        prefs(context).edit().putString(PREF_MIRROR_LIST, toJsonArray(urls)).apply();
+    }
+
+    /** 新增镜像：去重（忽略大小写）。 */
+    public static void addMirrorUrl(Context context, String url) {
+        String norm = normalizeUrl(url);
+        if (norm.isEmpty()) {
+            return;
+        }
+        List<String> list = getMirrorUrls(context);
+        if (!containsIgnoreCase(list, norm)) {
+            list.add(norm);
+            saveMirrorUrls(context, list);
+        }
+    }
+
+    /** 修改镜像：原位替换旧地址；新地址若已存在则只删旧的，避免重复。 */
+    public static void updateMirrorUrl(Context context, String oldUrl, String newUrl) {
+        String normNew = normalizeUrl(newUrl);
+        if (normNew.isEmpty()) {
+            return;
+        }
+        List<String> list = getMirrorUrls(context);
+        removeIgnoreCase(list, normNew);
+        boolean replaced = false;
+        String normOld = normalizeUrl(oldUrl);
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i).equalsIgnoreCase(normOld)) {
+                list.set(i, normNew);
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) {
+            list.add(normNew);
+        }
+        saveMirrorUrls(context, list);
+    }
+
+    /** 删除镜像。 */
+    public static void removeMirrorUrl(Context context, String url) {
+        List<String> list = getMirrorUrls(context);
+        if (removeIgnoreCase(list, normalizeUrl(url))) {
+            saveMirrorUrls(context, list);
+        }
+    }
+
+    private static String[] presetValues(Context context) {
+        try {
+            return context.getResources().getStringArray(R.array.mirror_preset_values);
+        } catch (android.content.res.Resources.NotFoundException e) {
+            Log.d(TAG, "Mirror preset arrays not found", e);
+            return new String[0];
+        }
     }
 
     /**
@@ -172,7 +347,7 @@ public class MirrorHelper {
         public final String name;
         /** 探测用的镜像基地址。 */
         public final String url;
-        /** 选中时写入 mirror_preset 的值（预设即 url 本身，自定义地址为 "custom"）。 */
+        /** 选中时写入 mirror_preset 的值（即镜像基地址本身）。 */
         public final String presetValue;
         public final long latencyMs;
 
@@ -262,37 +437,12 @@ public class MirrorHelper {
 
     /**
      * 待测目标列表（latencyMs &lt; 0 表示未测），供 UI 先占位显示、逐个更新。
+     * 就是用户当前的全部镜像，没有预设和自建之分。
      */
     public static List<MirrorSpeedResult> getSpeedTestTargets(Context context) {
-        String[] names;
-        String[] values;
-        try {
-            names = context.getResources().getStringArray(R.array.mirror_preset_items);
-            values = context.getResources().getStringArray(R.array.mirror_preset_values);
-        } catch (android.content.res.Resources.NotFoundException e) {
-            Log.d(TAG, "Mirror preset arrays not found", e);
-            return new ArrayList<>();
-        }
         final List<MirrorSpeedResult> targets = new ArrayList<>();
-        int n = Math.min(names.length, values.length);
-        for (int i = 0; i < n; i++) {
-            if (PRESET_CUSTOM.equals(values[i])) {
-                continue;
-            }
-            targets.add(new MirrorSpeedResult(names[i], values[i], -1));
-        }
-        // 已填写的自定义地址也一起测，选中时切回“自定义”
-        String custom = prefs(context).getString(PREF_MIRROR_CUSTOM_URL, "");
-        if (custom != null) {
-            custom = custom.trim();
-            while (custom.endsWith("/")) {
-                custom = custom.substring(0, custom.length() - 1);
-            }
-            if (!custom.isEmpty()) {
-                targets.add(new MirrorSpeedResult(
-                        context.getString(R.string.mirror_speed_custom_name),
-                        custom, PRESET_CUSTOM, -1));
-            }
+        for (String u : getMirrorUrls(context)) {
+            targets.add(new MirrorSpeedResult(displayHost(u), u, -1));
         }
         return targets;
     }
@@ -391,5 +541,43 @@ public class MirrorHelper {
             Log.d(TAG, "Speed probe bad URL: " + target.url, e);
         }
         return new MirrorSpeedResult(target.name, target.url, target.presetValue, -1);
+    }
+
+    private static final String KEY_SPEED_CACHE = "mirror_speed_cache";
+
+    /**
+     * 保存测速结果缓存（url=latencyMs，-1 表示不可用），下次打开镜像源对话框直接显示，
+     * 不用干等。空 url 的占位行不存。
+     */
+    public static void saveSpeedTestResults(Context context, List<MirrorSpeedResult> results) {
+        java.util.Set<String> set = new java.util.HashSet<>();
+        for (MirrorSpeedResult r : results) {
+            if (!r.url.isEmpty()) {
+                set.add(r.url + "=" + r.latencyMs);
+            }
+        }
+        prefs(context).edit().putStringSet(KEY_SPEED_CACHE, set).apply();
+    }
+
+    /**
+     * 读取测速结果缓存：url -&gt; latencyMs（-1=不可用）。没有缓存返回空 map。
+     */
+    public static java.util.Map<String, Long> getCachedSpeedResults(Context context) {
+        java.util.Map<String, Long> map = new java.util.HashMap<>();
+        java.util.Set<String> set = prefs(context).getStringSet(KEY_SPEED_CACHE, null);
+        if (set == null) {
+            return map;
+        }
+        for (String s : set) {
+            int eq = s.lastIndexOf('=');
+            if (eq > 0) {
+                try {
+                    map.put(s.substring(0, eq), Long.parseLong(s.substring(eq + 1)));
+                } catch (NumberFormatException ignored) {
+                    // 坏条目跳过
+                }
+            }
+        }
+        return map;
     }
 }

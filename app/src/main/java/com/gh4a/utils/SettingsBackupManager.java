@@ -127,7 +127,7 @@ public class SettingsBackupManager {
 
     /**
      * Gh4a-pref 恢复白名单：只允许已知键写入，防止手写恶意备份注入
-     * 任意键（如 mirror_custom_url 劫持镜像流量）(M-1)。
+     * 任意键（如伪造 mirror_user_list 劫持镜像流量）(M-1)。
      * 注意：新增设置项（settings.xml 或程序写入）时必须同步到这里，
      * 否则恢复时会静默丢弃该配置。
      */
@@ -136,8 +136,8 @@ public class SettingsBackupManager {
             "about", "accent_color", "account_manage", "auto_check_update",
             "backup_restore", "check_update", "customize_drawer", "dark_mode",
             "dark_mode_schedule_time", "font_scale", "http_gif_load_mode",
-            "language", "mirror_custom_url", "mirror_enabled", "mirror_preset",
-            "mirror_speed_test", "notification_interval", "notifications",
+            "language", "mirror_enabled", "mirror_preset",
+            "notification_interval", "notifications",
             "open_source_components", "release_radar_interval",
             "release_radar_notifications", "start_page", "translation_settings",
             "use_custom_tabs", "webview_initial_zoom",
@@ -145,6 +145,7 @@ public class SettingsBackupManager {
             "theme", "version", "active_login", "logins",
             "dark_mode_start", "dark_mode_end",
             "search_type",
+            "mirror_list",
             "last_notification_check", "last_notification_seen",
             "last_notification_repo_ids"));
 

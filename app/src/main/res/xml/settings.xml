@@ -148,30 +148,14 @@
             android:title="@string/mirror_enabled"
             android:summary="@string/mirror_enabled_summary" />
 
-        <ListPreference
+        <com.gh4a.fragment.MirrorPresetPreference
             app:iconSpaceReserved="false"
             android:defaultValue="https://gh-proxy.com"
             android:dependency="mirror_enabled"
             android:entries="@array/mirror_preset_items"
             android:entryValues="@array/mirror_preset_values"
             android:key="mirror_preset"
-            android:summary="%s"
             android:title="@string/mirror_preset" />
-
-        <EditTextPreference
-            app:iconSpaceReserved="false"
-            android:dependency="mirror_enabled"
-            android:key="mirror_custom_url"
-            android:title="@string/mirror_custom_url"
-            android:summary="@string/mirror_custom_url_summary"
-            android:dialogTitle="@string/mirror_custom_url" />
-
-        <Preference
-            app:iconSpaceReserved="false"
-            android:dependency="mirror_enabled"
-            android:key="mirror_speed_test"
-            android:title="@string/mirror_speed_test"
-            android:summary="@string/mirror_speed_test_summary" />
 
     </PreferenceCategory>
 
@@ -187,7 +171,7 @@
 
         <SwitchPreference
             app:iconSpaceReserved="false"
-            android:defaultValue="false"
+            android:defaultValue="true"
             android:key="auto_check_update"
             android:title="@string/auto_check_update"
             android:summary="@string/auto_check_update_summary" />

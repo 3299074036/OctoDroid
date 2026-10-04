@@ -120,7 +120,6 @@
         <item>gh.monlor.com</item>
         <item>gh.noki.icu</item>
         <item>cors.isteed.cc</item>
-        <item>Custom</item>
     </string-array>
     <string-array name="mirror_preset_values">
         <item>https://gh-proxy.com</item>
@@ -133,7 +132,6 @@
         <item>https://gh.monlor.com</item>
         <item>https://gh.noki.icu</item>
         <item>https://cors.isteed.cc</item>
-        <item>custom</item>
     </string-array>
 
     <string-array name="release_radar_interval_items">
