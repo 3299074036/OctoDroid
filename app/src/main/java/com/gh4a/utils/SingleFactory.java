@@ -232,14 +232,23 @@ public class SingleFactory {
             OkHttpClient trendClient = ServiceFactory.getHttpClientBuilder()
                     .addInterceptor(MirrorHelper.mirrorInterceptor(Gh4Application.get()))
                     .build();
-            sTrendService = new Retrofit.Builder()
-                    .addCallAdapterFactory(RxJava2CallAdapterFactory.create())
-                    .addConverterFactory(MoshiConverterFactory.create(ServiceGenerator.moshi))
-                    .baseUrl("https://raw.githubusercontent.com/Unpublished/GithubTrending/")
-                    .client(trendClient)
-                    .build()
-                    .create(TrendService.class);
+            sTrendService = SingleFactory.trendService(trendClient);
         }
+    }
+
+    /**
+     * 趋势接口的 Retrofit 拼装（R-1 收敛）：baseUrl/转换器统一在此，
+     * 下拉刷新的 no-cache 实例（TrendingFragment）只在 client 上加拦截器后调这里，
+     * 不再手写第二份 Builder。
+     */
+    public static TrendService trendService(OkHttpClient client) {
+        return new Retrofit.Builder()
+                .addCallAdapterFactory(RxJava2CallAdapterFactory.create())
+                .addConverterFactory(MoshiConverterFactory.create(ServiceGenerator.moshi))
+                .baseUrl("https://raw.githubusercontent.com/Unpublished/GithubTrending/")
+                .client(client)
+                .build()
+                .create(TrendService.class);
     }
 
 

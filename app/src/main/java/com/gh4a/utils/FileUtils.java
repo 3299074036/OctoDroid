@@ -118,4 +118,22 @@ public class FileUtils {
         }
         return extensions.contains(extension.toLowerCase(Locale.US));
     }
+
+    /**
+     * 清洗下载文件名：只取 basename（去掉任何路径分隔符），
+     * 拒绝包含 ".." 的文件名，防止路径穿越写到目标目录之外 (L-2)。
+     * 文件名来自网络时（release asset 名、更新包名等）必须先过这里；
+     * 非法输入抛 IllegalArgumentException，调用方自行转用户提示。
+     */
+    public static String sanitizeFileName(String fileName) {
+        if (fileName == null) {
+            throw new IllegalArgumentException("fileName must not be null");
+        }
+        int cut = Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\'));
+        String base = cut >= 0 ? fileName.substring(cut + 1) : fileName;
+        if (base.isEmpty() || base.contains("..")) {
+            throw new IllegalArgumentException("Unsafe download file name: " + fileName);
+        }
+        return base;
+    }
 }

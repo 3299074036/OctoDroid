@@ -10,7 +10,6 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Environment;
 import android.provider.Settings;
 import android.widget.Toast;
 
@@ -31,12 +30,26 @@ import java.util.List;
 public class ApkUpdateDownloader {
     public static void downloadAndInstall(BaseActivity activity, String apkUrl, String fileName) {
         final Context appContext = activity.getApplicationContext();
+        // M-NEW-1：apkUrl/fileName 来自远端 release JSON（可能经不可信镜像），
+        // 先校验：非 http(s) 直接拒绝，避免 DownloadManager.Request 抛异常导致主线程崩溃
+        if (!isHttpUrl(apkUrl)) {
+            Toast.makeText(appContext, R.string.download_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        // 文件名二次清洗：恶意 tag 拼出的非法名在这里拦下，转失败 toast，不抛异常
+        final String safeName;
+        try {
+            safeName = FileUtils.sanitizeFileName(fileName);
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(appContext, R.string.download_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
         // 下载链路（按顺序尝试，一条失败自动换下一条）：
         // 自选镜像（开了镜像加速）→ 默认镜像 → 直连。
         // VPN 下直连可用；无 VPN 时走镜像；自选镜像挂了还有默认镜像兜底。
         // 任何一条通就能下到包，两种网络下都成立。
         final List<String> chain = buildDownloadChain(activity, apkUrl);
-        Runnable startDownload = () -> enqueue(appContext, chain, fileName);
+        Runnable startDownload = () -> enqueue(appContext, chain, safeName);
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             activity.requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE,
                     (requestCode, permissions, grantResults) -> {
@@ -52,49 +65,44 @@ public class ApkUpdateDownloader {
     }
 
     /**
+     * release 版本号拼下载文件名：白名单清洗，防止恶意 tag 注入路径穿越或特殊字符
+     * （M-NEW-1）。GitHub 真实 tag 不可能含这些字符，清洗不影响正常版本。
+     */
+    static String buildApkFileName(String latestVersion) {
+        String v = latestVersion == null ? "" : latestVersion.replaceAll("[^A-Za-z0-9._-]", "_");
+        while (v.contains("..")) {
+            v = v.replace("..", "_");
+        }
+        v = v.replaceAll("^\\.+", "");
+        if (v.isEmpty()) {
+            v = "update";
+        }
+        return "OctoDroid_" + v + ".apk";
+    }
+
+    private static boolean isHttpUrl(String url) {
+        return url != null
+                && (url.regionMatches(true, 0, "http://", 0, 7)
+                        || url.regionMatches(true, 0, "https://", 0, 8));
+    }
+
+    /**
      * 构造下载链路并去重：自选镜像 → 默认镜像 → 直连。
-     * 未开镜像加速时自选即直连，去重后为 [默认镜像，直连]。
+     * R-5：策略已收敛到 {@link MirrorHelper#buildFallbackChain}，
+     * 与更新检查共用同一份三级链路定义。
      */
     private static List<String> buildDownloadChain(Context context, String apkUrl) {
-        List<String> chain = new ArrayList<>();
-        String[] ordered = {
-                MirrorHelper.rewriteUrl(context, apkUrl),
-                MirrorHelper.rewriteUrlWithBase(MirrorHelper.DEFAULT_PRESET, apkUrl),
-                apkUrl,
-        };
-        for (String u : ordered) {
-            if (u == null || u.isEmpty()) {
-                continue;
-            }
-            boolean dup = false;
-            for (String e : chain) {
-                if (e.equalsIgnoreCase(u)) {
-                    dup = true;
-                    break;
-                }
-            }
-            if (!dup) {
-                chain.add(u);
-            }
-        }
-        return chain;
+        return MirrorHelper.buildFallbackChain(context, apkUrl, false);
     }
 
     private static void enqueue(Context context, List<String> urls, String fileName) {
         String url = urls.get(0);
         final List<String> rest = new ArrayList<>(urls.subList(1, urls.size()));
-        DownloadManager dm =
-                (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        // 文件名来自更新检查的网络响应：sanitize 防止路径穿越 (L-2)
-        final String safeName = sanitizeFileName(fileName);
-        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
-                .setTitle(context.getString(R.string.downloading_update))
-                .setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setAllowedOverRoaming(false)
-                .setMimeType("application/vnd.android.package-archive");
-        final long downloadId = dm.enqueue(request);
+        // R-3/R-4：拼装与入队走 DownloadUtils 共享方法（自动写下载记录），
+        // 换链重试逻辑保留在本类
+        final long downloadId = DownloadUtils.enqueuePublicDownload(context, url, fileName,
+                context.getString(R.string.downloading_update),
+                "application/vnd.android.package-archive");
         Toast.makeText(context, R.string.downloading_update, Toast.LENGTH_SHORT).show();
 
         BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -105,7 +113,7 @@ public class ApkUpdateDownloader {
                     return;
                 }
                 context.unregisterReceiver(this);
-                onDownloadComplete(context, dm, downloadId, rest, fileName);
+                onDownloadComplete(context, downloadId, rest, fileName);
             }
         };
         // 用 application context 注册，避免 Activity 销毁后 receiver 泄漏；
@@ -117,8 +125,10 @@ public class ApkUpdateDownloader {
                 androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
-    private static void onDownloadComplete(Context context, DownloadManager dm, long downloadId,
+    private static void onDownloadComplete(Context context, long downloadId,
             List<String> remainingUrls, String fileName) {
+        DownloadManager dm =
+                (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
         try (Cursor cursor = dm.query(query)) {
             if (!cursor.moveToFirst()) {
@@ -148,21 +158,6 @@ public class ApkUpdateDownloader {
             }
             installApk(context, apkFile);
         }
-    }
-
-    /**
-     * 清洗下载文件名：只取 basename，拒绝包含 ".." 的文件名 (L-2)。
-     */
-    private static String sanitizeFileName(String fileName) {
-        if (fileName == null) {
-            throw new IllegalArgumentException("fileName must not be null");
-        }
-        int cut = Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\'));
-        String base = cut >= 0 ? fileName.substring(cut + 1) : fileName;
-        if (base.isEmpty() || base.contains("..")) {
-            throw new IllegalArgumentException("Unsafe download file name: " + fileName);
-        }
-        return base;
     }
 
     /**

@@ -77,13 +77,43 @@ public class DownloadUtils {
                 R.string.download_permission_rationale);
     }
 
+    /**
+     * 往 DownloadManager 排一个公开目录下载（R-3 收敛：自更新与普通下载共用一套拼装）。
+     * 入队后写下载记录（R-4：自更新 APK 也进"下载管理"列表）。
+     *
+     * @return DownloadManager 的 downloadId，调用方负责后续逻辑
+     *         （如自更新的换链重试、安装）。
+     */
+    static long enqueuePublicDownload(Context context, String url, String fileName,
+            String title, String mimeType) {
+        final DownloadManager dm =
+                (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        // 文件名来自网络：先 sanitize，防止路径穿越写到 Downloads 之外 (L-2)
+        final String safeName = FileUtils.sanitizeFileName(fileName);
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
+                .setTitle(title)
+                .setNotificationVisibility(
+                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setAllowedOverRoaming(false);
+        if (mimeType != null) {
+            request.setMimeType(mimeType);
+        }
+        long downloadId = dm.enqueue(request);
+        // 下载记录里的 URL 剥离 query：签名 URL 的 query 可能含 token，
+        // 不能让它进备份/下载记录 (L-17)
+        String recordUrl = Uri.parse(url).buildUpon().clearQuery().build().toString();
+        DownloadRecordManager.record(context, downloadId, safeName, recordUrl, title);
+        return downloadId;
+    }
+
     private static void enqueueDownload(Context context, Uri uri, String fileName,
             String description, String mimeType, String mediaType,
             boolean wifiOnly, boolean addAuthHeader) {
         final DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
         // 文件名来自网络（release asset 名、gist 文件名等）：先 sanitize，
         // 防止 "../../" 之类的路径穿越写到 Downloads 之外 (L-2)
-        final String safeName = sanitizeFileName(fileName);
+        final String safeName = FileUtils.sanitizeFileName(fileName);
         DownloadManager.Request request = new DownloadManager.Request(uri)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
                 .setDescription(description)
@@ -110,22 +140,6 @@ public class DownloadUtils {
         String recordUrl = uri.buildUpon().clearQuery().build().toString();
         DownloadRecordManager.record(context, downloadId, safeName,
                 recordUrl, description);
-    }
-
-    /**
-     * 清洗下载文件名：只取 basename（去掉任何路径分隔符），
-     * 拒绝包含 ".." 的文件名，防止路径穿越 (L-2)。
-     */
-    private static String sanitizeFileName(String fileName) {
-        if (fileName == null) {
-            throw new IllegalArgumentException("fileName must not be null");
-        }
-        int cut = Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\'));
-        String base = cut >= 0 ? fileName.substring(cut + 1) : fileName;
-        if (base.isEmpty() || base.contains("..")) {
-            throw new IllegalArgumentException("Unsafe download file name: " + fileName);
-        }
-        return base;
     }
 
     // Shared client for redirect resolution: built once, reused for every

@@ -30,15 +30,11 @@ import com.gh4a.model.TrendService;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.MirrorHelper;
 import com.gh4a.utils.SingleFactory;
-import com.meisolsson.githubsdk.core.ServiceGenerator;
 
 import java.util.List;
 
 import io.reactivex.Single;
 import okhttp3.OkHttpClient;
-import retrofit2.Retrofit;
-import retrofit2.adapter.rxjava2.RxJava2CallAdapterFactory;
-import retrofit2.converter.moshi.MoshiConverterFactory;
 
 public class TrendingFragment extends ListDataBaseFragment<Trend> implements
         RootAdapter.OnItemClickListener<Trend> {
@@ -109,8 +105,7 @@ public class TrendingFragment extends ListDataBaseFragment<Trend> implements
 
     // 趋势接口走独立的 Retrofit service（不在 ServiceFactory 的 service 缓存里），
     // 这里为下拉刷新单独建一个带 no-cache 请求头的实例。
-    // 注意：构造参数与 SingleFactory.RetrofitHelper 中的趋势 service 保持一致，
-    // 若后者变更（baseUrl/转换器/镜像拦截器），这里需要同步修改。
+    // R-1：Builder 拼装收敛到 SingleFactory.trendService()，这里只定制 client。
     private static volatile TrendService sNoCacheTrendService;
 
     private static TrendService noCacheTrendService() {
@@ -125,13 +120,7 @@ public class TrendingFragment extends ListDataBaseFragment<Trend> implements
                                     .addHeader("Cache-Control", "no-cache")
                                     .build()))
                             .build();
-                    service = new Retrofit.Builder()
-                            .addCallAdapterFactory(RxJava2CallAdapterFactory.create())
-                            .addConverterFactory(MoshiConverterFactory.create(ServiceGenerator.moshi))
-                            .baseUrl("https://raw.githubusercontent.com/Unpublished/GithubTrending/")
-                            .client(client)
-                            .build()
-                            .create(TrendService.class);
+                    service = SingleFactory.trendService(client);
                     sNoCacheTrendService = service;
                 }
             }

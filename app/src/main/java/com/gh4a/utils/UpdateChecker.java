@@ -159,15 +159,11 @@ public class UpdateChecker {
      * （旧的串行逻辑在这种情况下要白等 30s+ 才报错）。
      */
     private static JSONObject fetchLatestRelease(Context context) throws IOException {
-        List<String> candidates = new ArrayList<>();
-        candidates.add(LATEST_RELEASE_URL);
-        if (MirrorHelper.isEnabled(context)) {
-            String base = MirrorHelper.getMirrorBase(context);
-            if (!base.isEmpty()) {
-                addDistinct(candidates, base + "/" + LATEST_RELEASE_URL);
-            }
-        }
-        addDistinct(candidates, MirrorHelper.DEFAULT_PRESET + "/" + LATEST_RELEASE_URL);
+        // R-5：三级链路候选收敛到 MirrorHelper.buildFallbackChain；
+        // 更新检查走 blindPrefix=true（见该方法注释：api.github.com 必须盲拼镜像前缀）。
+        // 并行竞速与顺序无关，所以 [自选, 默认, 直连] 的顺序不影响结果。
+        List<String> candidates =
+                MirrorHelper.buildFallbackChain(context, LATEST_RELEASE_URL, true);
 
         List<Call> calls = new ArrayList<>();
         for (String url : candidates) {
@@ -236,15 +232,6 @@ public class UpdateChecker {
         }
     }
 
-    private static void addDistinct(List<String> list, String url) {
-        for (String e : list) {
-            if (e.equalsIgnoreCase(url)) {
-                return;
-            }
-        }
-        list.add(url);
-    }
-
     /** True when the latest release version is newer than the installed one. */
     static boolean isNewer(String latest, String current) {
         String[] latestParts = latest.split("\\.");
@@ -269,22 +256,31 @@ public class UpdateChecker {
     }
 
     private static String resolveApkUrl(Context context, String version, String releaseBody) {
+        // M-NEW-2：fallback 探测加总预算——release body 完全可被恶意镜像控制，
+        // 不加限制会被 N 个 .apk 链接拖进串行 HEAD 长等待。最多探 5 个链接、
+        // 总计 20s，超时直接用兜底地址让下载阶段去报错（下载链路本身有重试）。
+        final long deadlineMs = SystemClock.elapsedRealtime() + TimeUnit.SECONDS.toMillis(20);
         // Preferred: the published naming convention.
         String conventional =
                 String.format(Locale.US,
                         "https://raw.githubusercontent.com/%s/%s/master/releases/OctoDroid_%s.apk",
                         OWNER, REPO, version);
-        String reachable = pickReachableUrl(context, conventional);
+        String reachable = pickReachableUrl(context, conventional, deadlineMs);
         if (reachable != null) {
             return reachable;
         }
         // Fallback: first reachable .apk link in the release notes (prefer raw links).
         String fallback = null;
         Matcher matcher = APK_URL_PATTERN.matcher(releaseBody != null ? releaseBody : "");
-        while (matcher.find()) {
+        int checked = 0;
+        while (matcher.find() && checked < MAX_BODY_APK_URLS) {
+            if (SystemClock.elapsedRealtime() >= deadlineMs) {
+                break;
+            }
+            checked++;
             String url = matcher.group(1);
             if (url.contains("raw.githubusercontent.com") || url.contains("/raw/")) {
-                String rawReachable = pickReachableUrl(context, url);
+                String rawReachable = pickReachableUrl(context, url, deadlineMs);
                 if (rawReachable != null) {
                     return rawReachable;
                 }
@@ -294,7 +290,7 @@ public class UpdateChecker {
             }
         }
         if (fallback != null) {
-            String fallbackReachable = pickReachableUrl(context, fallback);
+            String fallbackReachable = pickReachableUrl(context, fallback, deadlineMs);
             if (fallbackReachable != null) {
                 return fallbackReachable;
             }
@@ -304,18 +300,21 @@ public class UpdateChecker {
         return conventional;
     }
 
+    /** release body 里最多探测的 .apk 链接数（M-NEW-2 预算）。 */
+    private static final int MAX_BODY_APK_URLS = 5;
+
     /**
      * 在直连地址和镜像地址中挑一个 HEAD 可达的。开了镜像加速时优先探镜像
      * （下载本来就会被改写走镜像，探镜像更快且更准）；都没命中返回 null。
      */
-    private static String pickReachableUrl(Context context, String url) {
+    private static String pickReachableUrl(Context context, String url, long deadlineMs) {
         String mirrored = MirrorHelper.rewriteUrl(context, url);
         if (!mirrored.equals(url)) {
-            if (urlExists(mirrored)) {
+            if (urlExists(mirrored, deadlineMs)) {
                 return mirrored;
             }
         }
-        return urlExists(url) ? url : null;
+        return urlExists(url, deadlineMs) ? url : null;
     }
 
     private static String toRawUrl(String url) {
@@ -325,7 +324,10 @@ public class UpdateChecker {
                 .replace("/blob/", "/");
     }
 
-    private static boolean urlExists(String url) {
+    private static boolean urlExists(String url, long deadlineMs) {
+        if (SystemClock.elapsedRealtime() >= deadlineMs) {
+            return false;
+        }
         Request request = new Request.Builder()
                 .url(url)
                 .head()

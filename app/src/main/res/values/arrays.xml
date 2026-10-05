@@ -59,7 +59,6 @@
         <item>star_hub</item>
         <item>my_items</item>
         <item>gists</item>
-        <item>blog</item>
     </string-array>
     <string-array name="text_size_items">
         <item>Smallest</item>

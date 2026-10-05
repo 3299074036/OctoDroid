@@ -49,6 +49,9 @@ public class MirrorHelper {
     public static final String PREF_MIRROR_LIST = "mirror_list";
     public static final String PRESET_CUSTOM = "custom";
     public static final String DEFAULT_PRESET = "https://gh-proxy.com";
+
+    /** 镜像测速线程池上限（L-NEW-3）：mirror_list 可无限添加，无上限会 OOM。 */
+    private static final int MAX_SPEED_TEST_THREADS = 32;
     /** 已下线镜像（2026-10-01 实测不可用），老用户存量选择自动迁移到默认。 */
     private static final String DEAD_PRESET = "https://mirror.ghproxy.com";
 
@@ -342,6 +345,51 @@ public class MirrorHelper {
         return base + "/" + url;
     }
 
+    /**
+     * 镜像三级链路候选（R-5 收敛）：自选镜像 → 默认镜像 → 直连原地址，去重。
+     * 更新检查（并行竞速）与 APK 下载（顺序重试）共用同一策略；加第四条链路或
+     * 换默认镜像时只改这里。
+     *
+     * @param blindPrefix false=下载语义：用 {@link #rewriteUrlWithBase} 智能改写
+     *                    （只改写可镜像 host，已是镜像地址时原样返回）；
+     *                    true=更新检查语义：镜像基直接拼前缀。api.github.com
+     *                    不在 MIRRORABLE_HOSTS 里，智能改写不会给它加前缀，
+     *                    而 gh-proxy 实测可代理该 API，所以检查链路必须盲拼。
+     */
+    public static List<String> buildFallbackChain(Context context, String url,
+            boolean blindPrefix) {
+        List<String> chain = new ArrayList<>();
+        if (blindPrefix) {
+            if (isEnabled(context)) {
+                String base = getMirrorBase(context);
+                if (!base.isEmpty()) {
+                    addDistinctUrl(chain, base + "/" + url);
+                }
+            }
+            addDistinctUrl(chain, DEFAULT_PRESET + "/" + url);
+        } else {
+            // 下载语义：rewriteUrl 未开镜像时原样返回 url，保证未开镜像时
+            // 链路为 [直连, 默认镜像]（直连优先），与原 buildDownloadChain 一致
+            addDistinctUrl(chain, rewriteUrl(context, url));
+            addDistinctUrl(chain, rewriteUrlWithBase(DEFAULT_PRESET, url));
+        }
+        addDistinctUrl(chain, url);
+        return chain;
+    }
+
+    /** 链路去重（大小写不敏感），null/空直接跳过。 */
+    private static void addDistinctUrl(List<String> chain, String url) {
+        if (url == null || url.isEmpty()) {
+            return;
+        }
+        for (String e : chain) {
+            if (e.equalsIgnoreCase(url)) {
+                return;
+            }
+        }
+        chain.add(url);
+    }
+
     /** 单个镜像的测速结果；latencyMs &lt; 0 表示不可用。 */
     public static class MirrorSpeedResult {
         public final String name;
@@ -474,7 +522,9 @@ public class MirrorHelper {
         }
         final OkHttpClient client = getSpeedTestClient();
         new Thread(() -> {
-            ExecutorService pool = Executors.newFixedThreadPool(targets.size());
+            // L-NEW-3：线程池上限 32——mirror_list 可无限添加，无上限会 OOM
+            ExecutorService pool =
+                    Executors.newFixedThreadPool(Math.min(targets.size(), MAX_SPEED_TEST_THREADS));
             CompletionService<MirrorSpeedResult> cs = new ExecutorCompletionService<>(pool);
             for (MirrorSpeedResult t : targets) {
                 cs.submit(() -> probeMirror(client, t, handle));

@@ -152,8 +152,6 @@
             app:iconSpaceReserved="false"
             android:defaultValue="https://gh-proxy.com"
             android:dependency="mirror_enabled"
-            android:entries="@array/mirror_preset_items"
-            android:entryValues="@array/mirror_preset_values"
             android:key="mirror_preset"
             android:title="@string/mirror_preset" />
 

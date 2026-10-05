@@ -132,7 +132,8 @@ public class SettingsBackupManager {
      * 否则恢复时会静默丢弃该配置。
      */
     private static final Set<String> GH4A_PREF_KEYS = new HashSet<>(Arrays.asList(
-            // settings.xml 的全部 android:key
+            // settings.xml 的 android:key（download_manager 除外：它只是跳转入口，
+            // 无存储值，不进备份）
             "about", "accent_color", "account_manage", "auto_check_update",
             "backup_restore", "check_update", "customize_drawer", "dark_mode",
             "dark_mode_schedule_time", "font_scale", "http_gif_load_mode",
