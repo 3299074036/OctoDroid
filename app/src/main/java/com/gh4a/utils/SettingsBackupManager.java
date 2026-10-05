@@ -41,6 +41,19 @@ import java.util.Set;
  * Never backed up: account logins/tokens. Those stay on the device and
  * must be re-entered after a restore.
  * 注意：备份文件是明文 JSON，含翻译 API 凭据，请妥善保管备份文件。
+ *
+ * <p>备份政策总纲（R-6，两套备份机制共用）：
+ * <ul>
+ * <li>GitHub OAuth token（token_* / 含 token 的键）和账号标识
+ * （user_id_*、active_login、logins）永不进入任何备份——手动导出的
+ * {@link #isExcluded(String)} 与系统自动备份的
+ * res/xml/backup_descriptor.xml 各守一处，缺一不可。
+ * <li>翻译 API 凭据（translation_api_secret_* 等）只进手动备份，且落盘前必须
+ * 弹窗经用户确认；永不进系统自动备份。
+ * <li>新增凭据类设置键时，必须同步检查 {@link #isExcluded(String)} 和
+ * backup_descriptor.xml，并在 SettingsBackupManagerTest 里补断言——
+ * 单测是防止将来漏网的网。
+ * </ul>
  */
 public class SettingsBackupManager {
     private static final String TAG = "SettingsBackupManager";
@@ -52,7 +65,8 @@ public class SettingsBackupManager {
             "active_login", "logins",
     };
 
-    private static boolean isExcluded(String key) {
+    /** 凭据键黑名单：这些键永不进入手动备份（R-6 单测覆盖，见 SettingsBackupManagerTest）。 */
+    static boolean isExcluded(String key) {
         String lower = key.toLowerCase(Locale.US);
         if (lower.contains("token")) {
             return true;

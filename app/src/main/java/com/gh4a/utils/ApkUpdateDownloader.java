@@ -1,13 +1,9 @@
 package com.gh4a.utils;
 
 import android.Manifest;
-import android.app.DownloadManager;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
-import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
@@ -20,8 +16,6 @@ import com.gh4a.BaseActivity;
 import com.gh4a.R;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Downloads an APK via DownloadManager and launches the system installer
@@ -48,8 +42,29 @@ public class ApkUpdateDownloader {
         // 自选镜像（开了镜像加速）→ 默认镜像 → 直连。
         // VPN 下直连可用；无 VPN 时走镜像；自选镜像挂了还有默认镜像兜底。
         // 任何一条通就能下到包，两种网络下都成立。
-        final List<String> chain = buildDownloadChain(activity, apkUrl);
-        Runnable startDownload = () -> enqueue(appContext, chain, safeName);
+        // 重试机走 ChainDownloadHelper（与 Release 附件下载共用）。
+        Runnable startDownload = () -> {
+            Toast.makeText(appContext, R.string.downloading_update, Toast.LENGTH_SHORT).show();
+            ChainDownloadHelper.enqueueChain(appContext, apkUrl, safeName,
+                    appContext.getString(R.string.downloading_update),
+                    request -> request.setMimeType("application/vnd.android.package-archive"),
+                    (ctx, success, file) -> {
+                        if (!success) {
+                            Toast.makeText(ctx, R.string.download_failed,
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        // 自更新安全门：APK 签名必须与当前已安装应用一致，
+                        // 否则可能是镜像站被投毒，拒绝安装并删除文件 (L-3)
+                        if (!isSignatureMatch(ctx, file)) {
+                            Toast.makeText(ctx, R.string.apk_signature_mismatch,
+                                    Toast.LENGTH_LONG).show();
+                            file.delete();
+                            return;
+                        }
+                        installApk(ctx, file);
+                    });
+        };
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             activity.requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE,
                     (requestCode, permissions, grantResults) -> {
@@ -84,80 +99,6 @@ public class ApkUpdateDownloader {
         return url != null
                 && (url.regionMatches(true, 0, "http://", 0, 7)
                         || url.regionMatches(true, 0, "https://", 0, 8));
-    }
-
-    /**
-     * 构造下载链路并去重：自选镜像 → 默认镜像 → 直连。
-     * R-5：策略已收敛到 {@link MirrorHelper#buildFallbackChain}，
-     * 与更新检查共用同一份三级链路定义。
-     */
-    private static List<String> buildDownloadChain(Context context, String apkUrl) {
-        return MirrorHelper.buildFallbackChain(context, apkUrl, false);
-    }
-
-    private static void enqueue(Context context, List<String> urls, String fileName) {
-        String url = urls.get(0);
-        final List<String> rest = new ArrayList<>(urls.subList(1, urls.size()));
-        // R-3/R-4：拼装与入队走 DownloadUtils 共享方法（自动写下载记录），
-        // 换链重试逻辑保留在本类
-        final long downloadId = DownloadUtils.enqueuePublicDownload(context, url, fileName,
-                context.getString(R.string.downloading_update),
-                "application/vnd.android.package-archive");
-        Toast.makeText(context, R.string.downloading_update, Toast.LENGTH_SHORT).show();
-
-        BroadcastReceiver receiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
-                if (id != downloadId) {
-                    return;
-                }
-                context.unregisterReceiver(this);
-                onDownloadComplete(context, downloadId, rest, fileName);
-            }
-        };
-        // 用 application context 注册，避免 Activity 销毁后 receiver 泄漏；
-        // onReceive 里用传入的 context 反注册，两边一致
-        // targetSdk 34+ 必须显式声明 receiver 是否 exported，否则抛 SecurityException；
-        // 用 ContextCompat 兼容低版本（内部做版本判断），lint 也能识别
-        androidx.core.content.ContextCompat.registerReceiver(context, receiver,
-                new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
-    }
-
-    private static void onDownloadComplete(Context context, long downloadId,
-            List<String> remainingUrls, String fileName) {
-        DownloadManager dm =
-                (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
-        try (Cursor cursor = dm.query(query)) {
-            if (!cursor.moveToFirst()) {
-                return;
-            }
-            int status = cursor.getInt(
-                    cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-            if (status != DownloadManager.STATUS_SUCCESSFUL) {
-                if (!remainingUrls.isEmpty()) {
-                    // 本条线路失败，换下一条重试
-                    Toast.makeText(context, R.string.download_retry_alt, Toast.LENGTH_SHORT).show();
-                    enqueue(context, remainingUrls, fileName);
-                } else {
-                    Toast.makeText(context, R.string.download_failed, Toast.LENGTH_LONG).show();
-                }
-                return;
-            }
-            String localUri = cursor.getString(
-                    cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI));
-            File apkFile = new File(Uri.parse(localUri).getPath());
-            // 自更新安全门：APK 签名必须与当前已安装应用一致，
-            // 否则可能是镜像站被投毒，拒绝安装并删除文件 (L-3)
-            if (!isSignatureMatch(context, apkFile)) {
-                Toast.makeText(context, R.string.apk_signature_mismatch, Toast.LENGTH_LONG).show();
-                apkFile.delete();
-                return;
-            }
-            installApk(context, apkFile);
-        }
     }
 
     /**

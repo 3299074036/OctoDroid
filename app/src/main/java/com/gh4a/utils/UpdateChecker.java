@@ -21,8 +21,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import okhttp3.Call;
 import okhttp3.OkHttpClient;
@@ -45,8 +43,6 @@ public class UpdateChecker {
     private static final String REPO = "OctoDroid";
     private static final String LATEST_RELEASE_URL =
             "https://api.github.com/repos/" + OWNER + "/" + REPO + "/releases/latest";
-    private static final Pattern APK_URL_PATTERN =
-            Pattern.compile("(https?://[^\\s\"')]+\\.apk)");
 
     public interface Callback {
         void onResult(boolean hasUpdate, String latestVersion, String releaseNotes, String apkUrl);
@@ -109,13 +105,14 @@ public class UpdateChecker {
         boolean hasUpdate = isNewer(latestVersion, BuildConfig.VERSION_NAME);
         String apkUrl = null;
         if (hasUpdate) {
-            // 优先从 release assets 里拿与当前变体匹配的包：
+            // 从 release assets 里拿与当前变体匹配的包：
             // debug 版拿 debug 签名包，release 版拿 release 签名包，
-            // 签名一致才能覆盖安装，否则会“应用未安装”
+            // 签名一致才能覆盖安装，否则会“应用未安装”。
+            // assets 为空（发版漏传）时不再走正文扫描兜底——我们的 release
+            // 正文里本来也不放 apk 链接，兜底救不到，还多一个被恶意
+            // release body 卡死的攻击面（M-NEW-2）；此时 apkUrl 为 null，
+            // UI 层会提示“未找到安装包”。
             apkUrl = resolveApkUrlFromAssets(json.optJSONArray("assets"));
-            if (apkUrl == null) {
-                apkUrl = resolveApkUrl(context, latestVersion, body);
-            }
         }
         return new UpdateInfo(hasUpdate, latestVersion, body, apkUrl);
     }
@@ -252,91 +249,6 @@ public class UpdateChecker {
             return Integer.parseInt(part.replaceAll("[^0-9]", ""));
         } catch (NumberFormatException e) {
             return 0;
-        }
-    }
-
-    private static String resolveApkUrl(Context context, String version, String releaseBody) {
-        // M-NEW-2：fallback 探测加总预算——release body 完全可被恶意镜像控制，
-        // 不加限制会被 N 个 .apk 链接拖进串行 HEAD 长等待。最多探 5 个链接、
-        // 总计 20s，超时直接用兜底地址让下载阶段去报错（下载链路本身有重试）。
-        final long deadlineMs = SystemClock.elapsedRealtime() + TimeUnit.SECONDS.toMillis(20);
-        // Preferred: the published naming convention.
-        String conventional =
-                String.format(Locale.US,
-                        "https://raw.githubusercontent.com/%s/%s/master/releases/OctoDroid_%s.apk",
-                        OWNER, REPO, version);
-        String reachable = pickReachableUrl(context, conventional, deadlineMs);
-        if (reachable != null) {
-            return reachable;
-        }
-        // Fallback: first reachable .apk link in the release notes (prefer raw links).
-        String fallback = null;
-        Matcher matcher = APK_URL_PATTERN.matcher(releaseBody != null ? releaseBody : "");
-        int checked = 0;
-        while (matcher.find() && checked < MAX_BODY_APK_URLS) {
-            if (SystemClock.elapsedRealtime() >= deadlineMs) {
-                break;
-            }
-            checked++;
-            String url = matcher.group(1);
-            if (url.contains("raw.githubusercontent.com") || url.contains("/raw/")) {
-                String rawReachable = pickReachableUrl(context, url, deadlineMs);
-                if (rawReachable != null) {
-                    return rawReachable;
-                }
-            }
-            if (fallback == null) {
-                fallback = toRawUrl(url);
-            }
-        }
-        if (fallback != null) {
-            String fallbackReachable = pickReachableUrl(context, fallback, deadlineMs);
-            if (fallbackReachable != null) {
-                return fallbackReachable;
-            }
-        }
-        // Last resort: hand out the conventional URL anyway and let the
-        // download fail loudly rather than silently doing nothing.
-        return conventional;
-    }
-
-    /** release body 里最多探测的 .apk 链接数（M-NEW-2 预算）。 */
-    private static final int MAX_BODY_APK_URLS = 5;
-
-    /**
-     * 在直连地址和镜像地址中挑一个 HEAD 可达的。开了镜像加速时优先探镜像
-     * （下载本来就会被改写走镜像，探镜像更快且更准）；都没命中返回 null。
-     */
-    private static String pickReachableUrl(Context context, String url, long deadlineMs) {
-        String mirrored = MirrorHelper.rewriteUrl(context, url);
-        if (!mirrored.equals(url)) {
-            if (urlExists(mirrored, deadlineMs)) {
-                return mirrored;
-            }
-        }
-        return urlExists(url, deadlineMs) ? url : null;
-    }
-
-    private static String toRawUrl(String url) {
-        // https://github.com/owner/repo/blob/master/releases/x.apk
-        //   -> https://raw.githubusercontent.com/owner/repo/master/releases/x.apk
-        return url.replace("://github.com/", "://raw.githubusercontent.com/")
-                .replace("/blob/", "/");
-    }
-
-    private static boolean urlExists(String url, long deadlineMs) {
-        if (SystemClock.elapsedRealtime() >= deadlineMs) {
-            return false;
-        }
-        Request request = new Request.Builder()
-                .url(url)
-                .head()
-                .header("User-Agent", "OctoDroid")
-                .build();
-        try (Response response = getClient().newCall(request).execute()) {
-            return response.isSuccessful();
-        } catch (IOException e) {
-            return false;
         }
     }
 

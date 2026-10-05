@@ -2,14 +2,11 @@ package com.gh4a.utils;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.DownloadManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
-import android.net.Uri;
 import android.os.Build;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
@@ -55,7 +52,7 @@ public class DownloadUtils {
             if (resolveAuthRedirect) {
                 enqueueDownloadResolvingRedirect(activity, url, fileName, description, mimeType, null);
             } else {
-                enqueueDownload(activity, url, fileName, description, mimeType, null, false);
+                enqueueDownload(activity, url, fileName, description, mimeType, null);
             }
         });
     }
@@ -75,71 +72,6 @@ public class DownloadUtils {
                 };
         activity.requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE, cb,
                 R.string.download_permission_rationale);
-    }
-
-    /**
-     * 往 DownloadManager 排一个公开目录下载（R-3 收敛：自更新与普通下载共用一套拼装）。
-     * 入队后写下载记录（R-4：自更新 APK 也进"下载管理"列表）。
-     *
-     * @return DownloadManager 的 downloadId，调用方负责后续逻辑
-     *         （如自更新的换链重试、安装）。
-     */
-    static long enqueuePublicDownload(Context context, String url, String fileName,
-            String title, String mimeType) {
-        final DownloadManager dm =
-                (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        // 文件名来自网络：先 sanitize，防止路径穿越写到 Downloads 之外 (L-2)
-        final String safeName = FileUtils.sanitizeFileName(fileName);
-        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
-                .setTitle(title)
-                .setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setAllowedOverRoaming(false);
-        if (mimeType != null) {
-            request.setMimeType(mimeType);
-        }
-        long downloadId = dm.enqueue(request);
-        // 下载记录里的 URL 剥离 query：签名 URL 的 query 可能含 token，
-        // 不能让它进备份/下载记录 (L-17)
-        String recordUrl = Uri.parse(url).buildUpon().clearQuery().build().toString();
-        DownloadRecordManager.record(context, downloadId, safeName, recordUrl, title);
-        return downloadId;
-    }
-
-    private static void enqueueDownload(Context context, Uri uri, String fileName,
-            String description, String mimeType, String mediaType,
-            boolean wifiOnly, boolean addAuthHeader) {
-        final DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        // 文件名来自网络（release asset 名、gist 文件名等）：先 sanitize，
-        // 防止 "../../" 之类的路径穿越写到 Downloads 之外 (L-2)
-        final String safeName = FileUtils.sanitizeFileName(fileName);
-        DownloadManager.Request request = new DownloadManager.Request(uri)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
-                .setDescription(description)
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setAllowedOverRoaming(false);
-
-        if (mediaType != null) {
-            request.addRequestHeader("Accept", mediaType);
-        }
-        final String token = Gh4Application.get().getAuthToken();
-        if (addAuthHeader && token != null) {
-            request.addRequestHeader("Authorization", "Token " + token);
-        }
-        if (mimeType != null) {
-            request.setMimeType(mimeType);
-        }
-        if (wifiOnly) {
-            request.setAllowedOverMetered(false);
-        }
-
-        long downloadId = dm.enqueue(request);
-        // 下载记录里的 URL 剥离 query：签名 URL 的 query 可能含 token，
-        // 不能让它进备份/下载记录 (L-17)
-        String recordUrl = uri.buildUpon().clearQuery().build().toString();
-        DownloadRecordManager.record(context, downloadId, safeName,
-                recordUrl, description);
     }
 
     // Shared client for redirect resolution: built once, reused for every
@@ -207,7 +139,7 @@ public class DownloadUtils {
                         }
                     }
                     enqueueDownload(context, url, fileName, description,
-                            mimeType, acceptHeader, false);
+                            mimeType, acceptHeader);
                 });
             }
             private void notifyDownloadFailed() {
@@ -241,22 +173,24 @@ public class DownloadUtils {
 
     private static void enqueueDownload(final Context context, String url, final String fileName,
             final String description, final String mimeType,
-            final String mediaType, final boolean addAuthHeader) {
+            final String mediaType) {
         if (url == null) {
             return;
         }
 
-        // 国内加速：release 附件、源码包等下载走镜像
-        url = MirrorHelper.rewriteUrl(context, url);
-        final Uri uri = Uri.parse(url);
+        // 功能2：release 附件、源码包等下载走三级链路
+        // （自选镜像 → 默认镜像 → 直连），一条失败自动换下一条；
+        // 之前只是单镜像改写，镜像一挂就只能失败
         if (!downloadNeedsWarning(context)) {
-            enqueueDownload(context, uri, fileName, description, mimeType, mediaType, false, addAuthHeader);
+            enqueueChainDownload(context, url, fileName, description,
+                    mimeType, mediaType, false);
             return;
         }
 
         DialogInterface.OnClickListener buttonListener = (dialog, which) -> {
             boolean wifiOnly = which == DialogInterface.BUTTON_NEUTRAL;
-            enqueueDownload(context, uri, fileName, description, mimeType, mediaType, wifiOnly, addAuthHeader);
+            enqueueChainDownload(context, url, fileName, description,
+                    mimeType, mediaType, wifiOnly);
         };
 
         new AlertDialog.Builder(context)
@@ -266,6 +200,30 @@ public class DownloadUtils {
                 .setNeutralButton(R.string.download_wifi_button, buttonListener)
                 .setNegativeButton(R.string.cancel, null)
                 .show();
+    }
+
+    /** 附件下载走 ChainDownloadHelper：链路失败自动换线，全失败才 toast。 */
+    private static void enqueueChainDownload(Context context, String url, String fileName,
+            String description, String mimeType, String mediaType, boolean wifiOnly) {
+        ChainDownloadHelper.enqueueChain(context, url, fileName, description,
+                request -> {
+                    request.setDescription(description);
+                    if (mimeType != null) {
+                        request.setMimeType(mimeType);
+                    }
+                    if (mediaType != null) {
+                        request.addRequestHeader("Accept", mediaType);
+                    }
+                    if (wifiOnly) {
+                        request.setAllowedOverMetered(false);
+                    }
+                },
+                (ctx, success, file) -> {
+                    if (!success) {
+                        Toast.makeText(ctx, R.string.download_failed,
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
     }
 
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")

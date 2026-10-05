@@ -273,6 +273,11 @@ public class MirrorHelper {
     /**
      * OkHttp 拦截器：镜像加速开关打开时，把可走镜像的 URL 改写为镜像地址；
      * 否则原样放行。供图片、趋势等 OkHttp/Retrofit 客户端复用。
+     *
+     * <p>功能1（镜像线路自动故障转移）：只对幂等请求（GET/HEAD）——
+     * 镜像连接失败/超时（IOException）或返回 5xx 时，按测速缓存的延迟排序
+     * 自动换下一条镜像重试一次；没有可换的镜像时原样返回失败。
+     * 携带鉴权头的请求不改写也不转移（见下）。
      */
     public static okhttp3.Interceptor mirrorInterceptor(Context context) {
         final Context appContext = context.getApplicationContext();
@@ -285,16 +290,76 @@ public class MirrorHelper {
             }
             String original = request.url().toString();
             String rewritten = rewriteUrl(appContext, original);
-            if (!rewritten.equals(original)) {
-                // 改写目标是第三方镜像站：剥离 Authorization 等鉴权头，
-                // 镜像站本就无法使用该 token，纵深防御 (H-5)
-                request = request.newBuilder()
-                        .removeHeader("Authorization")
-                        .url(rewritten)
-                        .build();
+            if (rewritten.equals(original)) {
+                return chain.proceed(request);
             }
-            return chain.proceed(request);
+            request = request.newBuilder()
+                    .removeHeader("Authorization")
+                    .url(rewritten)
+                    .build();
+            boolean idempotent = isIdempotent(request.method());
+            try {
+                okhttp3.Response response = chain.proceed(request);
+                if (response.code() < 500 || !idempotent) {
+                    return response;
+                }
+                String failover = nextMirrorBase(appContext, getMirrorBase(appContext));
+                if (failover == null) {
+                    return response;
+                }
+                response.close();
+                return chain.proceed(request.newBuilder()
+                        .url(failover + "/" + original).build());
+            } catch (IOException e) {
+                if (!idempotent) {
+                    throw e;
+                }
+                String failover = nextMirrorBase(appContext, getMirrorBase(appContext));
+                if (failover == null) {
+                    throw e;
+                }
+                return chain.proceed(request.newBuilder()
+                        .url(failover + "/" + original).build());
+            }
         };
+    }
+
+    private static boolean isIdempotent(String method) {
+        return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
+    }
+
+    /**
+     * 故障转移用的下一条镜像基地址：有测速缓存的按延迟从低到高，
+     * 无缓存的按用户列表顺序，最后是默认镜像；跳过当前正在用的基地址。
+     * 都没有返回 null，调用方原样返回失败。
+     */
+    private static String nextMirrorBase(Context appContext, String currentBase) {
+        String normCurrent = normalizeUrl(currentBase);
+        List<String> candidates = new ArrayList<>();
+        List<java.util.Map.Entry<String, Long>> sorted =
+                new ArrayList<>(getCachedSpeedResults(appContext).entrySet());
+        sorted.sort((a, b) -> Long.compare(a.getValue(), b.getValue()));
+        for (java.util.Map.Entry<String, Long> e : sorted) {
+            if (e.getValue() != null && e.getValue() >= 0) {
+                String norm = normalizeUrl(e.getKey());
+                if (!norm.isEmpty() && !norm.equalsIgnoreCase(normCurrent)
+                        && !containsIgnoreCase(candidates, norm)) {
+                    candidates.add(norm);
+                }
+            }
+        }
+        for (String u : getMirrorUrls(appContext)) {
+            String norm = normalizeUrl(u);
+            if (!norm.isEmpty() && !norm.equalsIgnoreCase(normCurrent)
+                    && !containsIgnoreCase(candidates, norm)) {
+                candidates.add(norm);
+            }
+        }
+        if (!containsIgnoreCase(candidates, DEFAULT_PRESET)
+                && !DEFAULT_PRESET.equalsIgnoreCase(normCurrent)) {
+            candidates.add(DEFAULT_PRESET);
+        }
+        return candidates.isEmpty() ? null : candidates.get(0);
     }
 
     /**

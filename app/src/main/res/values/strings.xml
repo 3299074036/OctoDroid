@@ -72,6 +72,7 @@
     <string name="already_latest">You\'re on the latest version</string>
     <string name="checking_update">Checking for updates…</string>
     <string name="update_check_failed">Update check failed: %1$s</string>
+    <string name="update_no_apk">New version %1$s found, but no install package in the release</string>
     <string name="downloading_update">Downloading update…</string>
     <string name="allow_install_unknown_apps">Please allow installing unknown apps, then retry</string>
     <string name="apk_signature_mismatch">Update package signature does not match the installed app, installation blocked</string>

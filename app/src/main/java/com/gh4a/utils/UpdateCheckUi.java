@@ -48,7 +48,15 @@ public class UpdateCheckUi {
                     return;
                 }
                 if (hasUpdate) {
-                    showUpdateDialog(activity, latestVersion, releaseNotes, apkUrl);
+                    if (apkUrl != null) {
+                        showUpdateDialog(activity, latestVersion, releaseNotes, apkUrl);
+                    } else {
+                        // 有新版本但 release 里没找到安装包（发版漏传 assets）：
+                        // 直接说明，不弹一个点了下载只会失败的对话框
+                        Toast.makeText(activity,
+                                activity.getString(R.string.update_no_apk, latestVersion),
+                                Toast.LENGTH_LONG).show();
+                    }
                 } else {
                     Toast.makeText(activity, R.string.already_latest,
                             Toast.LENGTH_SHORT).show();
@@ -80,7 +88,9 @@ public class UpdateCheckUi {
             @Override
             public void onResult(boolean hasUpdate, String latestVersion,
                     String releaseNotes, String apkUrl) {
-                if (hasUpdate && !activity.isFinishing() && !activity.isDestroyed()) {
+                // 没找到安装包时保持静默：自动检查不该为一个下不了的版本弹窗
+                if (hasUpdate && apkUrl != null
+                        && !activity.isFinishing() && !activity.isDestroyed()) {
                     showUpdateDialog(activity, latestVersion, releaseNotes, apkUrl);
                 }
             }
