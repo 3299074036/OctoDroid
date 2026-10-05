@@ -54,14 +54,13 @@ public class UpdateCheckUi {
     }
 
     /**
-     * Silent startup check: only speaks up when an update is actually found.
-     * Runs at most once per day.
+     * Silent startup check: runs on every app startup when enabled,
+     * only speaks up when an update is actually found.
      */
     public static void checkAutomatically(BaseActivity activity) {
         if (!UpdateChecker.shouldAutoCheck(activity)) {
             return;
         }
-        UpdateChecker.markAutoChecked(activity);
         UpdateChecker.check(activity, new UpdateChecker.Callback() {
             @Override
             public void onResult(boolean hasUpdate, String latestVersion,

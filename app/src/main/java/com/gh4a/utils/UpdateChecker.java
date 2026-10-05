@@ -1,7 +1,6 @@
 package com.gh4a.utils;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -339,21 +338,11 @@ public class UpdateChecker {
         }
     }
 
-    // Auto-check bookkeeping: at most once per day.
+    // Auto-check policy: check on every startup (user requirement),
+    // no once-per-day throttling.
 
-    private static final String PREFS_UPDATE = "update_checker";
-    private static final String KEY_LAST_AUTO_CHECK = "last_auto_check";
-
+    /** Always true: auto check runs on every app startup when enabled. */
     public static boolean shouldAutoCheck(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_UPDATE, Context.MODE_PRIVATE);
-        long last = prefs.getLong(KEY_LAST_AUTO_CHECK, 0);
-        return System.currentTimeMillis() - last > TimeUnit.DAYS.toMillis(1);
-    }
-
-    public static void markAutoChecked(Context context) {
-        context.getSharedPreferences(PREFS_UPDATE, Context.MODE_PRIVATE)
-                .edit()
-                .putLong(KEY_LAST_AUTO_CHECK, System.currentTimeMillis())
-                .apply();
+        return true;
     }
 }

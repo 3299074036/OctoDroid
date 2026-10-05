@@ -65,7 +65,7 @@
     <string name="check_update">检查更新</string>
     <string name="check_update_summary">检查 GitHub 上是否有新版本</string>
     <string name="auto_check_update">自动检查更新</string>
-    <string name="auto_check_update_summary">启动时每天自动检查一次更新</string>
+    <string name="auto_check_update_summary">启动时自动检查更新</string>
     <string name="update_available">发现新版本</string>
     <string name="update_available_message">新版本 %1$s 可用（当前：%2$s）。\n\n%3$s</string>
     <string name="download_update">下载更新</string>

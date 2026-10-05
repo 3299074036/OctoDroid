@@ -65,7 +65,7 @@
     <string name="check_update">Check for updates</string>
     <string name="check_update_summary">Check if a newer version is available on GitHub</string>
     <string name="auto_check_update">Auto-check for updates</string>
-    <string name="auto_check_update_summary">Automatically check for updates once a day on startup</string>
+    <string name="auto_check_update_summary">Automatically check for updates on startup</string>
     <string name="update_available">Update available</string>
     <string name="update_available_message">New version %1$s is available (current: %2$s).\n\n%3$s</string>
     <string name="download_update">Download update</string>
