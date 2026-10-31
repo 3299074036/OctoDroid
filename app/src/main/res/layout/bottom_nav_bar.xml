@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0 底部栏接线加固：不再纯代码 new BottomNavigationView（无显式背景/高度，
+     曾被用户反馈“没有”），改由布局声明样式、背景、高程，HomeActivity 只做 inflate 与监听。 -->
+<com.google.android.material.bottomnavigation.BottomNavigationView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/bottom_nav"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="@dimen/bottom_nav_height"
+    android:background="@color/bottom_nav_background"
+    android:elevation="8dp"
+    app:menu="@menu/bottom_nav_main"
+    app:itemIconTint="@color/bottom_nav_tint"
+    app:itemTextColor="@color/bottom_nav_tint"
+    app:labelVisibilityMode="labeled" />

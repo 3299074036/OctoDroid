@@ -27,6 +27,19 @@ public abstract class ListDataBaseFragment<T> extends LoadingListFragmentBase {
     }
 
     @Override
+    public void onDestroyView() {
+        // 0.1.20 F-15: 照 PagedDataBaseFragment.onDestroyView() 的样子补齐——
+        // 视图销毁时释放订阅、置空 adapter，避免销毁后投递写已分离的 adapter
+        // 或 adapter 继续持有旧 Activity 作 mContext。
+        if (mSubscription != null) {
+            mSubscription.dispose();
+            mSubscription = null;
+        }
+        mAdapter = null;
+        super.onDestroyView();
+    }
+
+    @Override
     public void onRefresh() {
         setContentShown(false);
         if (mSubscription != null) {

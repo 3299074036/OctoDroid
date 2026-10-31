@@ -502,7 +502,12 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     if (htmlOpt.isPresent()) {
                         String html = HtmlUtils.rewriteRelativeUrls(htmlOpt.get(),
                                 repoOwner, repoName, mRef != null ? mRef : mRepository.defaultBranch(), "");
-                        mImageGetter.encode(context, id, html);
+                        // BUG-9: map stage can run after onDestroyView nulled
+                        // mImageGetter; skipping encode is safe (bind below
+                        // is guarded the same way, and the view is gone).
+                        if (isAdded() && mImageGetter != null) {
+                            mImageGetter.encode(context, id, html);
+                        }
                         return Optional.of(html);
                     }
                     return Optional.<String>empty();
@@ -513,6 +518,12 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     updateReadmeVisibility();
                 })
                 .subscribe(readmeOpt -> {
+                    // BUG-9: view may be gone (onDestroyView nulled
+                    // mImageGetter); do not touch mReadmeView/mImageGetter.
+                    if (!isAdded() || mImageGetter == null || getView() == null
+                            || mReadmeView == null) {
+                        return;
+                    }
                     if (readmeOpt.isPresent()) {
                         mOriginalReadmeHtml = readmeOpt.get();
                         mTranslatedReadmeHtml = null;
@@ -640,7 +651,12 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                 mIsTranslating = false;
                 mTranslatedReadmeHtml = translatedHtml;
                 mShowingTranslated = true;
-                if (getActivity() != null && mReadmeView != null) {
+                // BUG-9: onDestroyView cancels the translator, but guard
+                // anyway — mImageGetter may be nulled while this callback
+                // is in flight. Translation state is kept; cancel path
+                // (onDestroyView) is untouched.
+                if (isAdded() && mImageGetter != null && getView() != null
+                        && getActivity() != null && mReadmeView != null) {
                     mImageGetter.rebind(mReadmeView.getContext(), mReadmeView,
                             translatedHtml, mRepository.id());
                 }

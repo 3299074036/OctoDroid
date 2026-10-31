@@ -1,115 +1,106 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 0.4.0 像素重排：原型 Issue 行 = 标题 / 编号 / 状态与评论 meta 行。
+     旧版为创建者+时间在标题上方、评论/里程碑在右侧独立列、编号在标题下方。
+     改动：改为左头像 + 右列（标题 → 编号 → creator/时间/评论/里程碑单行 meta → 标签），删右侧列。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/selectableItemBackground"
     android:minHeight="?attr/listPreferredItemHeightLarge"
+    android:orientation="horizontal"
     android:padding="@dimen/content_padding">
-
-    <LinearLayout
-        android:id="@+id/info"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
-        android:layout_alignParentRight="true"
-        android:layout_marginLeft="8dp"
-        android:orientation="vertical">
-
-        <TextView
-            android:id="@+id/tv_milestone"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="4dp"
-            android:drawableLeft="@drawable/milestone_small"
-            android:drawablePadding="4dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:maxWidth="80dp"
-            android:textAppearance="@style/TextAppearance.VerySmall"
-            android:visibility="gone"
-            tools:text="v2.10.3"
-            tools:visibility="visible" />
-
-        <TextView
-            android:id="@+id/tv_comments"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:drawableLeft="@drawable/comments"
-            android:drawablePadding="4dp"
-            android:textAppearance="@style/TextAppearance.VerySmall"
-            tools:text="324" />
-
-    </LinearLayout>
 
     <com.gh4a.widget.FixedSizeImageView
         android:id="@+id/iv_gravatar"
         android:layout_width="40dp"
         android:layout_height="40dp"
-        android:layout_marginRight="16dp"
-        android:layout_marginTop="8dp"
+        android:layout_marginRight="12dp"
+        android:layout_marginTop="2dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         tools:src="@drawable/default_avatar" />
 
-    <com.gh4a.widget.LabelBadgeView
-        android:id="@+id/labels"
-        android:layout_width="40dp"
-        android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
-        android:layout_below="@id/iv_gravatar"
-        android:layout_gravity="bottom"
-        android:layout_marginTop="8dp" />
-
     <LinearLayout
-        android:id="@+id/username_and_date"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_toRightOf="@id/iv_gravatar">
+        android:layout_weight="1"
+        android:orientation="vertical">
 
         <TextView
-            android:id="@+id/tv_creator"
-            android:layout_width="wrap_content"
+            android:id="@+id/tv_desc"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:maxLines="2"
             android:ellipsize="end"
-            android:textAppearance="?android:attr/textAppearanceSmall"
-            android:textColor="?android:attr/textColorPrimary"
-            tools:text="IssueCreatorUsername"
-            tools:ignore="InefficientWeight" />
+            android:maxLines="2"
+            android:textAppearance="@style/TextAppearance.ItemTitle"
+            tools:text="Long issue title that is supposed to wrap in the layout preview." />
 
         <TextView
-            android:id="@+id/tv_timestamp"
-            android:layout_width="wrap_content"
+            android:id="@+id/tv_number"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginLeft="16dp"
-            android:textAppearance="@style/TextAppearance.VerySmall"
-            tools:text="yesterday" />
+            android:layout_marginTop="2dp"
+            android:fontFamily="monospace"
+            android:textAppearance="?android:attr/textAppearanceSmall"
+            tools:text="#999 on LongUsername/LongRepositoryName" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tv_creator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="?android:attr/textAppearanceSmall"
+                android:textColor="?android:attr/textColorPrimary"
+                tools:text="IssueCreatorUsername" />
+
+            <TextView
+                android:id="@+id/tv_timestamp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="12dp"
+                android:fontFamily="monospace"
+                android:textAppearance="@style/TextAppearance.VerySmall"
+                tools:text="yesterday" />
+
+            <TextView
+                android:id="@+id/tv_comments"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="12dp"
+                android:drawableLeft="@drawable/comments"
+                android:drawablePadding="4dp"
+                android:textAppearance="@style/TextAppearance.VerySmall"
+                tools:text="324" />
+
+            <TextView
+                android:id="@+id/tv_milestone"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="12dp"
+                android:drawableLeft="@drawable/milestone_small"
+                android:drawablePadding="4dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="@style/TextAppearance.VerySmall"
+                android:visibility="gone"
+                tools:text="v2.10.3"
+                tools:visibility="visible" />
+
+        </LinearLayout>
+
+        <com.gh4a.widget.LabelBadgeView
+            android:id="@+id/labels"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" />
+
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/tv_desc"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_below="@id/username_and_date"
-        android:layout_toLeftOf="@id/info"
-        android:layout_toRightOf="@id/iv_gravatar"
-        android:ellipsize="end"
-        android:maxLines="2"
-        android:textAppearance="@style/TextAppearance.ItemTitle"
-        tools:text="Long issue title that is supposed to wrap in the layout preview." />
-
-    <TextView
-        android:id="@+id/tv_number"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_below="@id/tv_desc"
-        android:layout_toLeftOf="@id/info"
-        android:layout_toRightOf="@id/iv_gravatar"
-        android:drawablePadding="4dp"
-        android:textAppearance="?android:attr/textAppearanceSmall"
-        tools:drawableLeft="@drawable/merged"
-        tools:text="#999 on LongUsername/LongRepositoryName" />
-
-</RelativeLayout>
+</LinearLayout>

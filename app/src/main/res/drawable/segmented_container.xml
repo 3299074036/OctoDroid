@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.1.1 Star 分段控件容器：单圆角容器，3 段等宽单行。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#e8e8e8" />
+    <corners android:radius="20dp" />
+</shape>

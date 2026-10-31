@@ -5,8 +5,8 @@
     android:gravity="center_vertical"
     android:minHeight="64dp"
     android:orientation="horizontal"
-    android:paddingStart="16dp"
-    android:paddingEnd="16dp"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
     android:paddingTop="8dp"
     android:paddingBottom="8dp">
 
@@ -45,6 +45,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
-        android:textAppearance="?android:attr/textAppearanceSmall" />
+        android:textAppearance="?android:attr/textAppearanceSmall"
+        android:fontFamily="monospace" />
 
 </LinearLayout>

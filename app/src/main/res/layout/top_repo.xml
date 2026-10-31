@@ -1,69 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+
+<!-- 0.4.0 像素重排：原型置顶仓库行 = 标题 / 描述 / 星·Fork meta 行。
+     旧版为标题/描述左列 + Fork/星右侧列。
+     改动：右侧列删除，Fork/星并入行尾 meta 行。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     style="@style/SelectableItem"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:minHeight="72dp"
-    android:orientation="horizontal"
+    android:minHeight="64dp"
+    android:orientation="vertical"
     android:paddingBottom="6dp"
     android:paddingLeft="@dimen/content_padding"
     android:paddingRight="@dimen/content_padding"
     android:paddingTop="6dp">
 
-    <LinearLayout
-        android:layout_width="0dp"
+    <TextView
+        android:id="@+id/tv_title"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:textAppearance="@style/TextAppearance.ItemTitle"
+        tools:text="username/repository" />
 
-        <TextView
-            android:id="@+id/tv_title"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="@style/TextAppearance.ItemTitle"
-            tools:text="username/repository" />
-
-        <TextView
-            android:id="@+id/tv_desc"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="2"
-            android:textAppearance="?android:attr/textAppearanceSmall"
-            tools:text="Repository description" />
-
-    </LinearLayout>
+    <TextView
+        android:id="@+id/tv_desc"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textAppearance="?android:attr/textAppearanceSmall"
+        tools:text="Repository description" />
 
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical"
-        android:layout_marginLeft="8dp"
-        android:orientation="vertical">
-
-        <TextView
-            android:id="@+id/tv_forks"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:drawableLeft="@drawable/fork_small"
-            android:drawablePadding="4dp"
-            android:gravity="right"
-            android:textAppearance="@style/TextAppearance.VerySmall"
-            tools:text="10" />
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
 
         <TextView
             android:id="@+id/tv_stars"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
             android:drawableLeft="@drawable/star_small"
             android:drawablePadding="4dp"
-            android:gravity="right"
+            android:fontFamily="monospace"
             android:textAppearance="@style/TextAppearance.VerySmall"
             tools:text="43" />
+
+        <TextView
+            android:id="@+id/tv_forks"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="12dp"
+            android:drawableLeft="@drawable/fork_small"
+            android:drawablePadding="4dp"
+            android:fontFamily="monospace"
+            android:textAppearance="@style/TextAppearance.VerySmall"
+            tools:text="10" />
 
     </LinearLayout>
 

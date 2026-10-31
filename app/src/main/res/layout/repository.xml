@@ -70,55 +70,7 @@
 
                 <Space
                     android:layout_width="match_parent"
-                    android:layout_height="16dp" />
-
-                <com.gh4a.widget.OverviewRow
-                    android:id="@+id/fork_parent_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:displayRedirectArrowWhenClickable="false"
-                    app:rowIcon="@drawable/icon_fork"
-                    app:rowText="Forked from other/repository" />
-
-                <com.gh4a.widget.OverviewRow
-                    android:id="@+id/private_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:rowIcon="@drawable/icon_private"
-                    app:rowText="@string/repo_type_private" />
-
-                <com.gh4a.widget.OverviewRow
-                    android:id="@+id/language_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:rowIcon="@drawable/icon_language"
-                    tools:rowText="Written in Java" />
-
-                <Space
-                    android:id="@+id/repository_overview_row_divider"
-                    android:layout_width="match_parent"
                     android:layout_height="8dp" />
-
-                <com.gh4a.widget.OverviewRow
-                    android:id="@+id/issues_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:rowIcon="@drawable/icon_issues"
-                    tools:rowText="50 issues" />
-
-                <com.gh4a.widget.OverviewRow
-                    android:id="@+id/pulls_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:rowIcon="@drawable/icon_pull_request"
-                    tools:rowText="9 pull requests" />
-
-                <com.gh4a.widget.OverviewRow
-                    android:id="@+id/forks_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:rowIcon="@drawable/icon_fork"
-                    tools:rowText="12 forks" />
 
                 <com.gh4a.widget.OverviewRow
                     android:id="@+id/stars_row"
@@ -128,7 +80,12 @@
                     app:rowIconActionHintOff="@string/repo_star_action"
                     app:rowIconActionHintOn="@string/repo_unstar_action"
                     tools:rowText="5 stars" />
-
+                <com.gh4a.widget.OverviewRow
+                    android:id="@+id/forks_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:rowIcon="@drawable/icon_fork"
+                    tools:rowText="12 forks" />
                 <com.gh4a.widget.OverviewRow
                     android:id="@+id/watchers_row"
                     android:layout_width="match_parent"
@@ -137,6 +94,49 @@
                     app:rowIconActionHintOff="@string/repo_watch_action"
                     app:rowIconActionHintOn="@string/repo_unwatch_action"
                     tools:rowText="54 Watchers" />
+                <com.gh4a.widget.OverviewRow
+                    android:id="@+id/issues_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:rowIcon="@drawable/icon_issues"
+                    tools:rowText="50 issues" />
+                <com.gh4a.widget.OverviewRow
+                    android:id="@+id/pulls_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:rowIcon="@drawable/icon_pull_request"
+                    tools:rowText="9 pull requests" />
+                <com.gh4a.widget.OverviewRow
+                    android:id="@+id/language_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:rowIcon="@drawable/icon_language"
+                    tools:rowText="Written in Java" />
+                <com.gh4a.widget.OverviewRow
+                    android:id="@+id/fork_parent_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:displayRedirectArrowWhenClickable="false"
+                    app:rowIcon="@drawable/icon_fork"
+                    app:rowText="Forked from other/repository" />
+                <com.gh4a.widget.OverviewRow
+                    android:id="@+id/private_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:rowIcon="@drawable/icon_private"
+                    app:rowText="@string/repo_type_private" />
+
+
+
+                <Space
+                    android:id="@+id/repository_overview_row_divider"
+                    android:layout_width="match_parent"
+                    android:layout_height="8dp" />
+
+
+
+
+
 
             </LinearLayout>
         </androidx.cardview.widget.CardView>

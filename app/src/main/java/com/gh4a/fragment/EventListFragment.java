@@ -100,6 +100,7 @@ import java.util.concurrent.TimeUnit;
 
 import io.reactivex.Completable;
 import io.reactivex.Single;
+import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
 import retrofit2.Response;
 
@@ -414,15 +415,29 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
         }
     }
 
+    // BUG-29: adapter positions include header/footer; a footer row must
+    // never reach mObjects.get(). Both context-menu entry points use this.
+    private GitHubEvent getEventForContextMenuPosition(int adapterPosition) {
+        if (mAdapter == null) {
+            return null;
+        }
+        int headerOffset = mAdapter.hasHeaderView() ? 1 : 0;
+        int index = adapterPosition - headerOffset;
+        if (index < 0 || index >= mAdapter.getCount()) {
+            return null;
+        }
+        return mAdapter.getItemFromAdapterPosition(adapterPosition);
+    }
+
     @Override
     public void onCreateContextMenu(ContextMenu menu, View v, ContextMenuInfo menuInfo) {
         super.onCreateContextMenu(menu, v, menuInfo);
 
         ContextMenuAwareRecyclerView.RecyclerContextMenuInfo info =
                 (ContextMenuAwareRecyclerView.RecyclerContextMenuInfo) menuInfo;
-        GitHubEvent event = mAdapter.getItemFromAdapterPosition(info.position);
+        GitHubEvent event = getEventForContextMenuPosition(info.position);
 
-        if (EventAdapter.hasInvalidPayload(event)) {
+        if (event == null || EventAdapter.hasInvalidPayload(event)) {
             return;
         }
 
@@ -433,8 +448,11 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
         menu.setHeaderTitle(R.string.go_to);
 
         /* Common menu */
-        menu.add(getString(R.string.menu_user, event.actor().login()))
-                .setIntent(UserActivity.makeIntent(getActivity(), event.actor()));
+        // BUG-29: actor() may be null on malformed events.
+        if (event.actor() != null) {
+            menu.add(getString(R.string.menu_user, event.actor().login()))
+                    .setIntent(UserActivity.makeIntent(getActivity(), event.actor()));
+        }
         if (repoOwnerAndName != null) {
             menu.add(getString(R.string.menu_repo, event.repo().repoWithUserName()))
                     .setIntent(RepositoryActivity.makeIntent(getActivity(), repoOwner, repoName));
@@ -553,12 +571,12 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
     public boolean onContextItemSelected(MenuItem item) {
         ContextMenuAwareRecyclerView.RecyclerContextMenuInfo info =
                 (ContextMenuAwareRecyclerView.RecyclerContextMenuInfo) item.getMenuInfo();
-        if (info.position >= mAdapter.getItemCount()) {
+        GitHubEvent event = getEventForContextMenuPosition(info.position);
+        if (event == null) {
             return false;
         }
 
         int id = item.getItemId();
-        GitHubEvent event = mAdapter.getItemFromAdapterPosition(info.position);
 
         if (id >= MENU_DOWNLOAD_START && id <= MENU_DOWNLOAD_END) {
             if (event.type() == GitHubEventType.ReleaseEvent) {
@@ -684,6 +702,12 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
                         // permanently leave the item unenriched.
                         mEnrichmentDisposables.add(
                                 Completable.timer(2, TimeUnit.SECONDS)
+                                        // BUG-12: timer runs on the computation
+                                        // thread; the retry mutates main-thread
+                                        // HashSet/HashMap fields, so hop to
+                                        // the main thread first. The single-arg
+                                        // subscribe is kept: timer cannot error.
+                                        .observeOn(AndroidSchedulers.mainThread())
                                         .subscribe(() -> {
                                             mEnrichmentRetried.remove(eventId);
                                             if (isAdded()) {

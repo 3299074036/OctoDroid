@@ -163,6 +163,12 @@ public class ServiceFactory {
                             ? token : Gh4Application.get().getAuthToken();
                     if (tokenToUse != null) {
                         requestBuilder.header("Authorization", "Token " + tokenToUse);
+                        // SEC-6: mirror the ImageViewerActivity no-store
+                        // pattern — authenticated responses (which may be
+                        // private-repo data) must never land in the shared
+                        // api-http disk cache. Unauthenticated requests keep
+                        // the existing caching behaviour (public data only).
+                        requestBuilder.header("Cache-Control", "no-store");
                     } else {
                         requestBuilder.header("Authorization",
                                 Credentials.basic(BuildConfig.CLIENT_ID, BuildConfig.CLIENT_SECRET));
@@ -217,5 +223,25 @@ public class ServiceFactory {
                 .cache(new Cache(new File(context.getCacheDir(), "image-http"), twentyMB))
                 .addInterceptor(MirrorHelper.mirrorInterceptor(context))
                 .build();
+    }
+
+    /**
+     * SEC-6: evicts both OkHttp disk caches. Called from
+     * Gh4Application.removeAccount() (which logout() delegates to), so no
+     * private-repo response survives an account removal. Best-effort:
+     * failures are swallowed, never breaking logout.
+     */
+    public static void evictCaches() {
+        evictOne(sApiHttpClient);
+        evictOne(sImageHttpClient);
+    }
+
+    private static void evictOne(OkHttpClient client) {
+        try {
+            if (client != null && client.cache() != null) {
+                client.cache().evictAll();
+            }
+        } catch (Exception ignored) {
+        }
     }
 }

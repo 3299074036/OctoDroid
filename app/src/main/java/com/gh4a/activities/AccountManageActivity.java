@@ -114,10 +114,13 @@ public class AccountManageActivity extends BaseActivity implements
         if (login.equals(Gh4Application.get().getAuthLogin())) {
             return;
         }
+        // 0.1.38：账号切换链埋点（不记登录名，只记事件）。
+        com.gh4a.utils.DiagTrace.log(this, "ACCOUNT_SWITCH", "");
         Gh4Application.get().setActiveLogin(login);
         Intent intent = new Intent(this, HomeActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        startActivity(intent);
+        // 0.1.32：与主题/语言整栈重启同口径，从应用上下文发，启动不依赖本实例死活。
+        getApplicationContext().startActivity(intent);
         finish();
     }
 
@@ -137,6 +140,9 @@ public class AccountManageActivity extends BaseActivity implements
 
         boolean wasActive = login.equals(Gh4Application.get().getAuthLogin());
         String newActiveLogin = Gh4Application.get().removeAccount(login);
+        // 0.1.38：账号删除链埋点（只记是否删了当前账号、有无接替账号，不记登录名）。
+        com.gh4a.utils.DiagTrace.log(this, "ACCOUNT_DELETE",
+                "wasActive=" + wasActive + " hasNext=" + (newActiveLogin != null));
         if (newActiveLogin == null) {
             // Last account deleted: back to the login screen.
             goToToplevelActivity();
@@ -145,7 +151,8 @@ public class AccountManageActivity extends BaseActivity implements
             // Restart the stack so every screen reloads with the new account.
             Intent intent = new Intent(this, HomeActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            startActivity(intent);
+            // 0.1.32：与主题/语言整栈重启同口径，从应用上下文发，启动不依赖本实例死活。
+            getApplicationContext().startActivity(intent);
             finish();
         } else {
             reloadAccounts();

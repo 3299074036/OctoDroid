@@ -88,6 +88,18 @@ public class Github4AndroidActivity extends BaseActivity implements
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // 0.1.19：登录页左上角什么都不留。BaseActivity.onCreate 会按默认
+        // 规则把 ActionBar 的向上按钮打开（登录页 intent 既不是 NO_HISTORY
+        // 也不是新任务 intent），抽屉下架后这个返回箭头仍在；这里在
+        // super 之后直接关掉它并清空导航图标。其他页的返回箭头不动。
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(false);
+        }
+        androidx.appcompat.widget.Toolbar toolbar = findViewById(R.id.toolbar);
+        if (toolbar != null) {
+            toolbar.setNavigationIcon(null);
+        }
+
         Gh4Application app = Gh4Application.get();
         if (app.isAuthorized()) {
             if (!handleIntent(getIntent())) {
@@ -138,22 +150,46 @@ public class Github4AndroidActivity extends BaseActivity implements
             prefs.edit().remove(PREF_OAUTH_STATE).remove(PREF_OAUTH_VERIFIER).apply();
             String actualState = data.getQueryParameter(PARAM_STATE);
             if (expectedState == null || !expectedState.equals(actualState)) {
+                // 0.1.38：回调校验埋点（不记 state 与 code）。
+                com.gh4a.utils.DiagTrace.log(this, "OAUTH_CALLBACK", "state_mismatch");
                 android.util.Log.w("Github4AndroidActivity",
                         "OAuth callback state mismatch, ignoring");
                 onLoginCanceled();
                 return true;
             }
+            // SEC-1 (hardening, secret retained — see below): PKCE verifier
+            // is mandatory. Never fall back to a secret-only exchange: a
+            // missing verifier means this callback did not come from our own
+            // launchOauthLogin() flow, and exchanging the code on the secret
+            // alone would give an intercepted code its full value.
+            if (verifier == null) {
+                // 0.1.38：回调校验埋点（不记 verifier 与 code）。
+                com.gh4a.utils.DiagTrace.log(this, "OAUTH_CALLBACK", "no_verifier");
+                android.util.Log.w("Github4AndroidActivity",
+                        "OAuth callback without PKCE verifier, ignoring");
+                onLoginCanceled();
+                return true;
+            }
 
             OAuthService service = ServiceGenerator.createAuthService();
+            // SEC-1 DEFERRED: CLIENT_SECRET is still sent here. The exchange
+            // does send code_verifier (above), but GitHub's web-application
+            // flow docs still list client_secret as Required for
+            // POST /login/oauth/access_token, and this OAuth-app registration
+            // has no "public client" mode that waives it — so a secret-less
+            // exchange cannot be assumed to succeed, and removing the secret
+            // risks breaking login outright. The secret stays in BuildConfig
+            // (gitignored client.properties, never logged) until a secret-less
+            // exchange is proven against this registration on device.
             RequestToken.Builder tokenBuilder = RequestToken.builder()
                     .clientId(BuildConfig.CLIENT_ID)
                     .clientSecret(BuildConfig.CLIENT_SECRET)
-                    .code(code);
-            if (verifier != null) {
-                tokenBuilder.codeVerifier(verifier);
-            }
+                    .code(code)
+                    .codeVerifier(verifier);
             RequestToken request = tokenBuilder.build();
 
+            // 0.1.38：换 token 开始埋点（不记 code 与 verifier）。
+            com.gh4a.utils.DiagTrace.log(this, "OAUTH_EXCHANGE", "start");
             service.getToken(request)
                     .map(ApiHelpers::throwOnFailure)
                     .flatMap(token -> {
@@ -174,7 +210,10 @@ public class Github4AndroidActivity extends BaseActivity implements
 
     @Override
     protected int getLeftNavigationDrawerMenuResource() {
-        return R.menu.home_nav_drawer;
+        // 0.1.18：登录页下架左侧边栏。返回 0 后 BaseActivity.setupNavigationDrawer
+        // 会把左抽屉锁定关闭且不显示汉堡图标，登录页不再有左抽屉入口；
+        // 登录流程与 OAuth 处理不受影响（onNavigationItemSelected 只是不再触发）。
+        return 0;
     }
 
     @IdRes
@@ -227,13 +266,34 @@ public class Github4AndroidActivity extends BaseActivity implements
 
     @Override
     public void onLoginFinished(String token, User user) {
+        // 0.1.38：登录链埋点（只记事件，不记 token 与用户信息）。
+        com.gh4a.utils.DiagTrace.log(this, "OAUTH_LOGIN", "finished");
         Gh4Application.get().addAccount(user, token);
+        // SEC-5: if encrypted storage was unavailable, the token just landed
+        // in the plaintext fallback file — say so visibly at login instead
+        // of letting the user believe it is encrypted.
+        if (Gh4Application.get().isSecurePrefsPlainFallback()) {
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("注意：令牌未加密存储")
+                    .setMessage("本设备加密存储不可用，本次登录的 GitHub 令牌已存入未加密文件。"
+                            + "换一台加密存储正常的设备重新登录后，该明文文件会自动迁移并删除。")
+                    .setPositiveButton("知道了", (d, w) -> {
+                        goToToplevelActivity();
+                        finish();
+                    })
+                    .setCancelable(false)
+                    .show();
+            return;
+        }
         goToToplevelActivity();
         finish();
     }
 
     @Override
     public void onLoginFailed(Throwable error) {
+        // 0.1.38：登录失败埋点（只记异常类名，不记消息与内容）。
+        com.gh4a.utils.DiagTrace.log(this, "OAUTH_LOGIN",
+                "failed " + (error != null ? error.getClass().getSimpleName() : "?"));
         handleLoadFailure(error);
         setProgressShown(false);
     }

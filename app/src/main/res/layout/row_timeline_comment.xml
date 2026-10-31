@@ -14,7 +14,7 @@
         android:id="@+id/iv_gravatar"
         android:layout_width="24dp"
         android:layout_height="24dp"
-        android:layout_marginRight="16dp"
+        android:layout_marginRight="12dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         tools:src="@drawable/default_avatar" />
 
@@ -45,24 +45,26 @@
         android:layout_height="wrap_content"
         android:layout_alignBaseline="@id/tv_extra"
         android:layout_alignWithParentIfMissing="true"
-        android:layout_marginLeft="16dp"
+        android:layout_marginLeft="12dp"
         android:layout_toLeftOf="@id/iv_menu"
         android:layout_toRightOf="@id/tv_extra"
         android:textAppearance="@style/TextAppearance.VerySmall"
-        tools:text="5 days ago" />
+        tools:text="5 days ago"
+        android:fontFamily="monospace" />
 
     <com.gh4a.widget.LinkHandlingTextView
         android:id="@+id/tv_edit_timestamp"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_below="@id/tv_timestamp"
-        android:layout_marginLeft="16dp"
+        android:layout_marginLeft="12dp"
         android:layout_toLeftOf="@id/iv_menu"
         android:layout_toRightOf="@id/tv_extra"
         android:drawableLeft="@drawable/comment_edit"
         android:drawablePadding="2dp"
         android:textAppearance="@style/TextAppearance.VerySmall"
-        tools:text="5 days ago" />
+        tools:text="5 days ago"
+        android:fontFamily="monospace" />
 
     <com.gh4a.widget.LinkHandlingTextView
         android:id="@+id/tv_desc"

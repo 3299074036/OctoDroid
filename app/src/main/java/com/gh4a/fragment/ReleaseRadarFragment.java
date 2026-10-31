@@ -82,12 +82,14 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
     private Disposable mDirectLoad;
     private List<RadarItem> mLatestItems; // latest items (for rotation)
     private boolean mLoadComplete;
+    private boolean mLoadFailed; // 0.1.20 F-09: 上次刷新失败时置真，旋转后强制重拉
     private boolean mShowingCache; // currently displaying cached data
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        mLogin = getArguments().getString("user");
+        Bundle args = getArguments();
+        mLogin = args != null ? args.getString("user") : null;
     }
 
     @Override
@@ -95,7 +97,7 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
         super.onViewCreated(view, savedInstanceState);
         // super.onViewCreated() hooks the no-op Single below into the Loader;
         // the actual load runs directly so its result always reaches the UI.
-        if (mLoadComplete && mLatestItems != null) {
+        if (mLoadComplete && !mLoadFailed && mLatestItems != null) {
             renderItems(mLatestItems);
             setContentShown(true);
             updateEmptyState();
@@ -202,6 +204,7 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
             return;
         }
         mLoadComplete = true;
+        mLoadFailed = false;
         mShowingCache = false;
         if (getContext() != null) {
             RadarCache.save(getContext(), mLogin, items);
@@ -229,7 +232,8 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
         if (!isAdded()) {
             return;
         }
-        mLoadComplete = true;
+        // 0.1.20 F-09: 失败不置 mLoadComplete，否则旋转后只渲染旧缓存不再重试。
+        mLoadFailed = true;
         if (mAdapter != null && mAdapter.getItemCount() > 0) {
             // Cache is already visible; the refresh just failed quietly.
             Log.d(Gh4Application.LOG_TAG, "Radar refresh failed", error);

@@ -57,7 +57,14 @@ public class SettingsActivity extends BaseActivity implements
     @Override
     public void onThemeChanged() {
         mResultIntent.putExtra(RESULT_EXTRA_THEME_CHANGED, true);
-        recreate();
+        // 0.1.21 Item 1: 主题色/语言均为 ListPreference 对话框，change 回调在
+        // 对话框窗口仍在位时触发；与下方 onFontScaleChanged 一致，post 再 recreate。
+        // 0.1.22：执行时再判存活，已销毁/正在结束就跳过。
+        new Handler(Looper.getMainLooper()).post(() -> {
+            if (!isDestroyed() && !isFinishing()) {
+                recreate();
+            }
+        });
     }
 
     @Override
@@ -68,6 +75,11 @@ public class SettingsActivity extends BaseActivity implements
         // persistence; otherwise the recreated activity could still read the
         // old font scale.
         mResultIntent.putExtra(RESULT_EXTRA_FONT_SCALE_CHANGED, true);
-        new Handler(Looper.getMainLooper()).post(() -> recreate());
+        // 0.1.22：执行时再判存活，已销毁/正在结束就跳过。
+        new Handler(Looper.getMainLooper()).post(() -> {
+            if (!isDestroyed() && !isFinishing()) {
+                recreate();
+            }
+        });
     }
 }

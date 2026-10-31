@@ -48,7 +48,14 @@ public class WikiActivity extends WebViewerActivity {
     @Nullable
     @Override
     protected String getActionBarTitle() {
-        return mWikiPageFeed.getTitle();
+        // BUG-13: readCompressedValueFromBundle returns null when the
+        // feed bytes are missing; fall back to the repo name (BaseActivity
+        // sets the title from this at onCreate time) instead of NPE-ing.
+        if (mWikiPageFeed != null && mWikiPageFeed.getTitle() != null
+                && !mWikiPageFeed.getTitle().isEmpty()) {
+            return mWikiPageFeed.getTitle();
+        }
+        return mRepoName != null ? mRepoName : "";
     }
 
     @Nullable

@@ -27,6 +27,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Rect;
+import android.os.Build;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.net.Uri;
@@ -90,6 +92,7 @@ import com.squareup.moshi.JsonDataException;
 
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import fr.castorflex.android.smoothprogressbar.SmoothProgressBar;
@@ -165,6 +168,17 @@ public abstract class BaseActivity extends AppCompatActivity implements
         Configuration config = new Configuration(newBase.getResources().getConfiguration());
         config.fontScale = getConfiguredFontScale(newBase);
         super.attachBaseContext(newBase.createConfigurationContext(config));
+        // 0.1.36：诊断追踪（建页时刻的开关与页面昼夜）。
+        com.gh4a.utils.ThemeTrace.logState(this, "ATTACH inst="
+                + com.gh4a.utils.ThemeTrace.instance(this));
+    }
+
+    // 0.1.36：诊断追踪（AppCompat 昼夜变化回调，临时，定论后删）。
+    @Override
+    public void onNightModeChanged(int mode) {
+        super.onNightModeChanged(mode);
+        com.gh4a.utils.ThemeTrace.logState(this, "NIGHT_CHANGED mode=" + mode
+                + " inst=" + com.gh4a.utils.ThemeTrace.instance(this));
     }
 
     private static float getConfiguredFontScale(Context context) {
@@ -247,6 +261,14 @@ public abstract class BaseActivity extends AppCompatActivity implements
         }
 
         boolean exceptionMustBeHandled = e instanceof ApiRequestException || e instanceof JsonDataException;
+        // 0.1.20 F-22: CompositeException 先拆叶子——只包良性网络错误时不走
+        // 崩溃路径；仅叶子含编程错误（非 Api/Json 的 RuntimeException）时崩溃。
+        // 拆法照 Gh4Application.isAllBenignDisposeErrors 的思路（递归拆复合、
+        // 解包 UndeliverableException）。
+        if (e instanceof io.reactivex.exceptions.CompositeException
+                || e instanceof io.reactivex.exceptions.UndeliverableException) {
+            exceptionMustBeHandled = !hasProgrammingErrorLeaf(e);
+        }
         if (!exceptionMustBeHandled && e instanceof RuntimeException) {
             // If this happens, it means Rx catched a programming error of us. Crash the app
             // in that case, as that's what would have happened without Rx as well.
@@ -258,6 +280,27 @@ public abstract class BaseActivity extends AppCompatActivity implements
             handler.uncaughtException(currentThread, e);
         }
         Log.e(Gh4Application.LOG_TAG, text, e);
+    }
+
+    /** 0.1.20 F-22: 递归拆复合/不可投递异常，任一叶子是编程错误即返回 true。 */
+    private static boolean hasProgrammingErrorLeaf(Throwable t) {
+        if (t == null) {
+            return false;
+        }
+        if (t instanceof io.reactivex.exceptions.UndeliverableException) {
+            return hasProgrammingErrorLeaf(t.getCause());
+        }
+        if (t instanceof io.reactivex.exceptions.CompositeException) {
+            for (Throwable leaf : ((io.reactivex.exceptions.CompositeException) t).getExceptions()) {
+                if (hasProgrammingErrorLeaf(leaf)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return t instanceof RuntimeException
+                && !(t instanceof ApiRequestException)
+                && !(t instanceof JsonDataException);
     }
 
     protected void registerTemporarySubscription(Disposable disposable) {
@@ -303,12 +346,45 @@ public abstract class BaseActivity extends AppCompatActivity implements
         }
     }
 
+    /**
+     * 0.5.0 抽屉头像不再占状态栏：旧做法只给 header 设 WindowInsets 监听，
+     * 但 NavigationView（ScrimInsetsFrameLayout）会拦截/消费系统栏 Insets，
+     * header 子项实际拿不到 top 值，于是头像区（含绿色背景）仍从屏顶开始、
+     * 压进状态栏。修法：用系统状态栏高度（android dimen，非机型硬编码）
+     * 给 header 设 topMargin，使 header 本体（含背景）从状态栏下方开始；
+     * Insets 监听保留作补充，取两者较大值，且不再叠加 padding（避免双倍下移）。
+     */
     protected void configureLeftDrawerHeader(View header) {
+        applyDrawerHeaderTopMargin(header, getSystemStatusBarHeight());
         ViewCompat.setOnApplyWindowInsetsListener(header, (view, insets) -> {
             int statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top;
-            view.setPadding(0, statusBarHeight, 0, 0);
+            applyDrawerHeaderTopMargin(view, statusBarHeight);
             return insets;
         });
+        ViewCompat.requestApplyInsets(header);
+    }
+
+    private int getSystemStatusBarHeight() {
+        int resId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return resId > 0 ? getResources().getDimensionPixelSize(resId) : 0;
+    }
+
+    private void applyDrawerHeaderTopMargin(View header, int statusBarHeight) {
+        if (header == null || statusBarHeight <= 0) {
+            return;
+        }
+        android.view.ViewGroup.LayoutParams lp = header.getLayoutParams();
+        if (lp instanceof android.view.ViewGroup.MarginLayoutParams) {
+            android.view.ViewGroup.MarginLayoutParams mlp =
+                    (android.view.ViewGroup.MarginLayoutParams) lp;
+            if (mlp.topMargin < statusBarHeight) {
+                mlp.topMargin = statusBarHeight;
+                header.setLayoutParams(mlp);
+            }
+        }
+        // 背景画在 header 本体内：margin 已把本体推到状态栏下方，padding 不再叠加
+        header.setPadding(header.getPaddingLeft(), 0,
+                header.getPaddingRight(), header.getPaddingBottom());
     }
 
     protected boolean canSwipeToRefresh() {
@@ -491,9 +567,21 @@ public abstract class BaseActivity extends AppCompatActivity implements
         mHeader.setExpanded(false);
     }
 
+    // 0.1.11：与 collapseAppBar 对称——切到顶栏固定的页（如动态页）时，
+    // 把之前被其他页滚动收起的 AppBar 重新展开，否则标题仍藏在折叠状态里。
+    public void expandAppBar() {
+        mHeader.setExpanded(true);
+    }
+
     public void setAppBarLocked(boolean locked) {
         mAppBarLocked = locked;
         updateAppBarEnabledState();
+    }
+
+    public void removeHeaderView(View view) {
+        if (view != null) {
+            mHeader.removeView(view);
+        }
     }
 
     protected void addHeaderView(View view, boolean scrollable) {
@@ -522,6 +610,29 @@ public abstract class BaseActivity extends AppCompatActivity implements
             lp.setScrollFlags(0);
         }
         view.setLayoutParams(lp);
+    }
+
+    @Override
+    protected void onDestroy() {
+        // 0.1.36：诊断追踪（旧实例销毁，区分重建与清栈）。
+        com.gh4a.utils.ThemeTrace.logState(this, "DESTROY finishing=" + isFinishing()
+                + " inst=" + com.gh4a.utils.ThemeTrace.instance(this));
+        // 0.1.20 F-23(d): 500ms 任务描述 runnable 在销毁时移除，避免销毁后回调。
+        mHandler.removeCallbacks(mUpdateTaskDescriptionRunnable);
+        super.onDestroy();
+    }
+
+    /**
+     * 0.1.24 finish 取证（仅记录，不改行为）：0.1.23 取证证明 DecorView
+     * 崩溃那次销毁是 finishing=true，但我页 Dark mode 行链路全程无
+     * finish()，故崩溃的销毁并非深色模式切换本身的销毁。下次再崩时，
+     * 崩溃头里的 lastFinish 能判定是 App 内哪处调了 finish()，还是
+     * 系统清栈（CLEAR_TOP/CLEAR_TASK 不走本方法，记不到即系统侧）。
+     */
+    @Override
+    public void finish() {
+        com.gh4a.utils.CrashBreadcrumb.noteFinish(getClass().getSimpleName());
+        super.finish();
     }
 
     @Override
@@ -619,6 +730,16 @@ public abstract class BaseActivity extends AppCompatActivity implements
     public boolean onNavigationItemSelected(@NonNull MenuItem item) {
         mDrawerLayout.closeDrawers();
         return false;
+    }
+
+    /**
+     * 0.1.0：仅 Home 调用——左侧抽屉下架后把它锁定关闭（物理结构不动，
+     * 其他详情页共用的 DrawerLayout 不受影响；右抽屉工具栏不受此影响）。
+     */
+    public void setLeftDrawerLockedClosed() {
+        if (mDrawerLayout != null) {
+            mDrawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED, Gravity.LEFT);
+        }
     }
 
     public void setRightDrawerLockedClosed(boolean locked) {
@@ -882,6 +1003,35 @@ public abstract class BaseActivity extends AppCompatActivity implements
         mRightDrawerHeader = mRightDrawer.inflateHeaderView(R.layout.drawer_header_right);
 
         updateRightNavigationDrawer();
+        updateDrawerGestureExclusion();
+    }
+
+    /**
+     * 左边缘手势冲突修复：全面屏手势导航下，从左边缘滑动既是系统返回手势，
+     * 也是 DrawerLayout 的开抽屉手势，两者抢手势时常误触返回。
+     * 把左边缘一条 20dp 宽的区域登记为系统手势排除区后，该区域的滑动优先
+     * 交给抽屉；右边缘的系统返回手势不受影响（仍可从右侧滑回）。
+     * 抽屉被锁定时（如无左抽屉的页面）不排除，系统手势恢复正常。
+     * 仅 API 29+ 有效，低版本直接跳过。
+     */
+    private void updateDrawerGestureExclusion() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || mDrawerLayout == null) {
+            return;
+        }
+        mDrawerLayout.post(() -> {
+            if (mDrawerLayout.getDrawerLockMode(GravityCompat.START)
+                    == DrawerLayout.LOCK_MODE_LOCKED_CLOSED) {
+                mDrawerLayout.setSystemGestureExclusionRects(Collections.emptyList());
+                return;
+            }
+            int width = (int) (20 * getResources().getDisplayMetrics().density + 0.5f);
+            int height = mDrawerLayout.getHeight();
+            if (height <= 0) {
+                return;
+            }
+            mDrawerLayout.setSystemGestureExclusionRects(
+                    Collections.singletonList(new Rect(0, 0, width, height)));
+        });
     }
 
     private void applyHighlightColor(NavigationView view) {

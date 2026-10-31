@@ -93,10 +93,15 @@ public class CommitActivity extends BaseFragmentPagerActivity implements
         loadComments(false);
     }
 
+    // BUG-13: Intent extras may be missing/short; never substring blindly.
+    private static String shortSha(String sha) {
+        return sha == null ? "" : sha.substring(0, Math.min(7, sha.length()));
+    }
+
     @Nullable
     @Override
     protected String getActionBarTitle() {
-        return getString(R.string.commit_title, mObjectSha.substring(0, 7));
+        return getString(R.string.commit_title, shortSha(mObjectSha));
     }
 
     @Nullable
@@ -188,10 +193,10 @@ public class CommitActivity extends BaseFragmentPagerActivity implements
                 return true;
             case R.id.share:
                 IntentUtils.share(this, getString(R.string.share_commit_subject,
-                        mObjectSha.substring(0, 7), mRepoOwner + "/" + mRepoName), diffUri);
+                        shortSha(mObjectSha), mRepoOwner + "/" + mRepoName), diffUri);
                 return true;
             case R.id.copy_sha:
-                IntentUtils.copyToClipboard(this, "Commit " + mObjectSha.substring(0, 7), mObjectSha);
+                IntentUtils.copyToClipboard(this, "Commit " + shortSha(mObjectSha), mObjectSha);
                 Snackbar.make(getRootLayout(), R.string.link_copied, Snackbar.LENGTH_SHORT).show();
                 return true;
         }

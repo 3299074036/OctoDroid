@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 package com.gh4a.fragment;
-
 import android.os.Bundle;
 import androidx.annotation.StringRes;
 import androidx.recyclerview.widget.RecyclerView;
@@ -44,6 +43,8 @@ public class TrendingFragment extends ListDataBaseFragment<Trend> implements
 
     private String mType;
     private @StringRes int mStarsTemplate;
+    // 0.1.13：固定在 AppBar 内的时间范围行（切走趋势页时摘掉，切回来重挂）。
+    private android.view.View mPinnedRangeRow;
 
     public static TrendingFragment newInstance(String type) {
         if (type == null) {
@@ -76,6 +77,110 @@ public class TrendingFragment extends ListDataBaseFragment<Trend> implements
         TrendAdapter adapter = new TrendAdapter(getActivity(), mStarsTemplate);
         adapter.setOnItemClickListener(this);
         return adapter;
+    }
+
+    /**
+     * 0.5.0 时间范围选择行：仅在 Home 内显示（独立 TrendingActivity 仍用原 3 Tab，
+     * 不加选择行）。点击经 HomeActivity.setTrendRange() 回到 TrendingFactory 改范围并刷新，
+     * 筛选逻辑与原右上角对话框的三选项完全一致（今日/本周/本月）。
+     * 0.1.13：不再以 Adapter header 挂在列表顶部（会随列表滑走），改为固定挂进
+     * AppBar（标题栏下方、不滚动），与动态白 Tab 行同款；切走趋势页时在
+     * onDestroyView 里摘掉。
+     */
+    @Override
+    protected void onRecyclerViewInflated(RecyclerView view, android.view.LayoutInflater inflater) {
+        super.onRecyclerViewInflated(view, inflater);
+        if (!(getActivity() instanceof com.gh4a.activities.home.HomeActivity)) {
+            return;
+        }
+        android.view.View header = inflater.inflate(R.layout.trend_range_selector, view, false);
+        android.widget.TextView today = header.findViewById(R.id.trend_range_today);
+        android.widget.TextView week = header.findViewById(R.id.trend_range_week);
+        android.widget.TextView month = header.findViewById(R.id.trend_range_month);
+        android.widget.TextView[] buttons = new android.widget.TextView[] { today, week, month };
+        int selected = TYPE_WEEKLY.equals(mType) ? 1 : TYPE_MONTHLY.equals(mType) ? 2 : 0;
+        for (int i = 0; i < buttons.length; i++) {
+            final int range = i;
+            boolean isSelected = i == selected;
+            // 0.1.20 D-09: 选中颜色走 UiUtils.rankOrSelectedColor。
+            buttons[i].setTextColor(
+                    com.gh4a.utils.UiUtils.rankOrSelectedColor(requireContext(), isSelected));
+            buttons[i].setTypeface(null, isSelected
+                    ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
+            buttons[i].setOnClickListener(v -> {
+                if (range != selected) {
+                    ((com.gh4a.activities.home.HomeActivity) requireActivity())
+                            .setTrendRange(range);
+                }
+            });
+        }
+        // 0.1.13：固定行挂进 AppBar（标题栏下方、不随列表滚动），不再挂 Adapter header。
+        // 行本身及其三个按钮都接左右滑监听（OnTouchListener 永不消费，点按仍有效），
+        // 所以直接在标签行上滑也能切范围，不只在列表区滑才行。
+        android.view.View.OnTouchListener rangeSwipe = makeRangeSwipeListener();
+        header.setOnTouchListener(rangeSwipe);
+        for (android.widget.TextView b : buttons) {
+            b.setOnTouchListener(rangeSwipe);
+        }
+        mPinnedRangeRow = header;
+        ((com.gh4a.activities.home.HomeActivity) requireActivity())
+                .setPinnedTrendRangeRow(header);
+        // 0.1.12：左右滑只切页内时间范围（今日/本周/本月），永不切底栏；
+        // 0.1.16：fling 判定改距离判定——慢速拖动松手不产生 fling，真机上
+        // 原判定完全没反应；现松手位移 >= 100dp 且水平大于竖直即切，首末不回绕。
+        view.addOnItemTouchListener(
+                new com.gh4a.utils.HorizontalSwipeListener.ForRecyclerView(
+                        new com.gh4a.utils.HorizontalSwipeListener.Callback() {
+                            @Override
+                            public void onSwipeLeft() {
+                                switchTrendRange(1);
+                            }
+
+                            @Override
+                            public void onSwipeRight() {
+                                switchTrendRange(-1);
+                            }
+                        }));
+    }
+
+    private void switchTrendRange(int step) {
+        if (!isAdded()) return;
+        int cur = TYPE_WEEKLY.equals(mType) ? 1
+                : TYPE_MONTHLY.equals(mType) ? 2 : 0;
+        // 手指向左滑 → 下一范围；向右滑 → 上一范围。
+        int next = cur + step;
+        if (next < 0 || next > 2) return;
+        ((com.gh4a.activities.home.HomeActivity) requireActivity())
+                .setTrendRange(next);
+    }
+
+    // 0.1.13：标签行左右滑监听。监听器永不消费事件（返回 false），点按仍走
+    // 按钮的 OnClickListener；0.1.16 起与列表区同款距离判定，首末不回绕。
+    private android.view.View.OnTouchListener makeRangeSwipeListener() {
+        return new com.gh4a.utils.HorizontalSwipeListener(
+                new com.gh4a.utils.HorizontalSwipeListener.Callback() {
+                    @Override
+                    public void onSwipeLeft() {
+                        switchTrendRange(1);
+                    }
+
+                    @Override
+                    public void onSwipeRight() {
+                        switchTrendRange(-1);
+                    }
+                });
+    }
+
+    @Override
+    public void onDestroyView() {
+        // 切走趋势页时把固定行从 AppBar 摘掉，避免残留在其他页顶栏下方。
+        if (mPinnedRangeRow != null
+                && getActivity() instanceof com.gh4a.activities.home.HomeActivity) {
+            ((com.gh4a.activities.home.HomeActivity) getActivity())
+                    .removePinnedTrendRangeRow(mPinnedRangeRow);
+            mPinnedRangeRow = null;
+        }
+        super.onDestroyView();
     }
 
     @Override

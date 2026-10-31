@@ -1,47 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.0 像素重排：原型 Issue/PR 头 = 状态标签在上、标题在下（可换行）。
+     旧版为横向：竖排状态文字在左 + 标题在横向滚动条里（单行、需横滑）。
+     改动：根改为竖向，状态改为横向标签（仍用 tv_state id，代码只按 TextView 使用），
+     标题取消横向滚动、改为最多 3 行换行。标题栏背景色过渡逻辑（transitionHeaderToColor）不受影响。 -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
+    android:orientation="vertical"
+    android:paddingLeft="12dp"
+    android:paddingRight="12dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
     tools:background="@color/issue_open"
     tools:theme="@style/HeaderTheme">
 
-    <com.gh4a.widget.VerticalTextView
+    <TextView
         android:id="@+id/tv_state"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical"
-        android:gravity="bottom|center"
-        android:paddingLeft="16dp"
-        android:paddingRight="16dp"
         android:textAppearance="@style/TextAppearance.VerySmall"
         android:textColor="?android:attr/textColorPrimary"
+        android:textStyle="bold"
         tools:text="OPEN" />
 
-    <HorizontalScrollView
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="1"
-        android:overScrollMode="never"
-        android:paddingBottom="8dp"
-        android:paddingLeft="16dp"
-        android:paddingRight="16dp"
-        android:paddingTop="8dp">
-
-        <com.gh4a.widget.LinkHandlingTextView
-            android:id="@+id/tv_title"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_vertical"
-            android:maxLines="1"
-            android:textAppearance="@style/TextAppearance.AppCompat.Title"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textIsSelectable="true"
-            android:fontFamily="sans-serif-condensed"
-            tools:text="Issue title that is long enough to make the content scrollable nice" />
-
-    </HorizontalScrollView>
+    <TextView
+        android:id="@+id/tv_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:maxLines="3"
+        android:textAppearance="@style/TextAppearance.AppCompat.Title"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textIsSelectable="true"
+        tools:text="Issue title that is long enough to make the content scrollable nice" />
 
 </LinearLayout>

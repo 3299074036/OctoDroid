@@ -5,8 +5,6 @@ import android.content.SharedPreferences;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import com.gh4a.Gh4Application;
-
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -35,15 +33,26 @@ public class StarGroupManager {
         }
     }
 
-    private static SharedPreferences prefsFor(Context context) {
-        String login = Gh4Application.get().getAuthLogin();
+    /**
+     * BUG-27：本地分组按显式传入的登录取键，不再读全局登录态
+     * （Gh4Application.getAuthLogin()）。调用方必须传被查看账号的登录；
+     * context 或 login 为空时返回空结果/不写，避免落入共享的 null 桶。
+     */
+    private static SharedPreferences prefsFor(Context context, String login) {
+        if (context == null || login == null) {
+            return null;
+        }
         return context.getSharedPreferences(PREFS_NAME + "_" + login, Context.MODE_PRIVATE);
     }
 
     @NonNull
-    public static List<String> getGroups(Context context) {
+    public static List<String> getGroups(Context context, String login) {
         List<String> groups = new ArrayList<>();
-        String json = prefsFor(context).getString(KEY_GROUPS, null);
+        SharedPreferences prefs = prefsFor(context, login);
+        if (prefs == null) {
+            return groups;
+        }
+        String json = prefs.getString(KEY_GROUPS, null);
         if (json == null) {
             return groups;
         }
@@ -57,58 +66,58 @@ public class StarGroupManager {
         return groups;
     }
 
-    public static boolean createGroup(Context context, String name) {
+    public static boolean createGroup(Context context, String login, String name) {
         name = name.trim();
         if (name.isEmpty()) {
             return false;
         }
-        List<String> groups = getGroups(context);
+        List<String> groups = getGroups(context, login);
         if (groups.contains(name)) {
             return false;
         }
         groups.add(name);
-        saveGroups(context, groups);
+        saveGroups(context, login, groups);
         return true;
     }
 
-    public static boolean renameGroup(Context context, String oldName, String newName) {
+    public static boolean renameGroup(Context context, String login, String oldName, String newName) {
         newName = newName.trim();
         if (newName.isEmpty()) {
             return false;
         }
-        List<String> groups = getGroups(context);
+        List<String> groups = getGroups(context, login);
         int index = groups.indexOf(oldName);
         if (index < 0 || groups.contains(newName)) {
             return false;
         }
         groups.set(index, newName);
-        saveGroups(context, groups);
+        saveGroups(context, login, groups);
 
-        JSONObject members = getMembersJson(context);
+        JSONObject members = getMembersJson(context, login);
         try {
             if (members.has(oldName)) {
                 members.put(newName, members.remove(oldName));
-                saveMembers(context, members);
+                saveMembers(context, login, members);
             }
         } catch (JSONException ignored) {
         }
         return true;
     }
 
-    public static void deleteGroup(Context context, String name) {
-        List<String> groups = getGroups(context);
+    public static void deleteGroup(Context context, String login, String name) {
+        List<String> groups = getGroups(context, login);
         groups.remove(name);
-        saveGroups(context, groups);
+        saveGroups(context, login, groups);
 
-        JSONObject members = getMembersJson(context);
+        JSONObject members = getMembersJson(context, login);
         members.remove(name);
-        saveMembers(context, members);
+        saveMembers(context, login, members);
     }
 
     @NonNull
-    public static List<StarRepo> getRepos(Context context, String group) {
+    public static List<StarRepo> getRepos(Context context, String login, String group) {
         List<StarRepo> repos = new ArrayList<>();
-        JSONObject members = getMembersJson(context);
+        JSONObject members = getMembersJson(context, login);
         JSONArray array = members.optJSONArray(group);
         if (array == null) {
             return repos;
@@ -125,8 +134,8 @@ public class StarGroupManager {
     }
 
     /** Assigns a repo to a group, removing it from any other group first. */
-    public static void assignRepo(Context context, String group, String fullName, String description) {
-        JSONObject members = getMembersJson(context);
+    public static void assignRepo(Context context, String login, String group, String fullName, String description) {
+        JSONObject members = getMembersJson(context, login);
         // A repo belongs to at most one group
         for (Iterator<String> it = members.keys(); it.hasNext(); ) {
             String key = it.next();
@@ -156,11 +165,11 @@ public class StarGroupManager {
             array.put(obj);
         } catch (JSONException ignored) {
         }
-        saveMembers(context, members);
+        saveMembers(context, login, members);
     }
 
-    public static void removeRepo(Context context, String group, String fullName) {
-        JSONObject members = getMembersJson(context);
+    public static void removeRepo(Context context, String login, String group, String fullName) {
+        JSONObject members = getMembersJson(context, login);
         JSONArray array = members.optJSONArray(group);
         if (array == null) {
             return;
@@ -171,12 +180,12 @@ public class StarGroupManager {
                 array.remove(i);
             }
         }
-        saveMembers(context, members);
+        saveMembers(context, login, members);
     }
 
     @Nullable
-    public static String findGroupFor(Context context, String fullName) {
-        JSONObject members = getMembersJson(context);
+    public static String findGroupFor(Context context, String login, String fullName) {
+        JSONObject members = getMembersJson(context, login);
         for (Iterator<String> it = members.keys(); it.hasNext(); ) {
             String key = it.next();
             JSONArray array = members.optJSONArray(key);
@@ -193,16 +202,23 @@ public class StarGroupManager {
         return null;
     }
 
-    private static void saveGroups(Context context, List<String> groups) {
+    private static void saveGroups(Context context, String login, List<String> groups) {
         JSONArray array = new JSONArray();
         for (String g : groups) {
             array.put(g);
         }
-        prefsFor(context).edit().putString(KEY_GROUPS, array.toString()).apply();
+        SharedPreferences prefs = prefsFor(context, login);
+        if (prefs != null) {
+            prefs.edit().putString(KEY_GROUPS, array.toString()).apply();
+        }
     }
 
-    private static JSONObject getMembersJson(Context context) {
-        String json = prefsFor(context).getString(KEY_MEMBERS, null);
+    private static JSONObject getMembersJson(Context context, String login) {
+        SharedPreferences prefs = prefsFor(context, login);
+        if (prefs == null) {
+            return new JSONObject();
+        }
+        String json = prefs.getString(KEY_MEMBERS, null);
         if (json == null) {
             return new JSONObject();
         }
@@ -213,7 +229,10 @@ public class StarGroupManager {
         }
     }
 
-    private static void saveMembers(Context context, JSONObject members) {
-        prefsFor(context).edit().putString(KEY_MEMBERS, members.toString()).apply();
+    private static void saveMembers(Context context, String login, JSONObject members) {
+        SharedPreferences prefs = prefsFor(context, login);
+        if (prefs != null) {
+            prefs.edit().putString(KEY_MEMBERS, members.toString()).apply();
+        }
     }
 }

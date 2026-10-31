@@ -2,8 +2,6 @@ package com.gh4a.fragment;
 
 import android.util.Log;
 
-import com.gh4a.Gh4Application;
-import com.gh4a.ServiceFactory;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -17,11 +15,6 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 import io.reactivex.Single;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
 
 /**
  * Fetches the latest releases of the user's starred repositories via a
@@ -30,46 +23,16 @@ import okhttp3.Response;
  */
 public class RadarGraphQL {
     private static final String TAG = "RadarGraphQL";
-    private static final MediaType JSON =
-            MediaType.get("application/json; charset=utf-8");
     private static final int MAX_REPOS = 30;
 
     /**
-     * token 失效/被撤销时抛出的异常（HTTP 401），调用方应与普通网络异常
-     * 区分处理：401 重试永远不会成功，不应无限 retry (N-2)。
+     * 0.1.20 D-02: 401 异常现由 GraphQLClient 抛出；本类保留同名异常作
+     * 子类兼容（旧调用方 catch RadarGraphQL.UnauthorizedException 仍有效）。
      */
-    public static class UnauthorizedException extends RuntimeException {
+    public static class UnauthorizedException extends GraphQLClient.UnauthorizedException {
         public UnauthorizedException(String message) {
             super(message);
         }
-    }
-
-    /** Reused client: an OkHttpClient per request leaks threads/connections. */
-    private static volatile OkHttpClient sClient;
-
-    private static OkHttpClient client() {
-        OkHttpClient c = sClient;
-        if (c == null) {
-            synchronized (RadarGraphQL.class) {
-                c = sClient;
-                if (c == null) {
-                    c = ServiceFactory.getHttpClientBuilder()
-                            .addInterceptor(chain -> {
-                                Request original = chain.request();
-                                Request.Builder b = original.newBuilder()
-                                        .method(original.method(), original.body());
-                                String t = Gh4Application.get().getAuthToken();
-                                if (t != null) {
-                                    b.header("Authorization", "Bearer " + t);
-                                }
-                                return chain.proceed(b.build());
-                            })
-                            .build();
-                    sClient = c;
-                }
-            }
-        }
-        return c;
     }
 
     private static final String QUERY =
@@ -95,46 +58,27 @@ public class RadarGraphQL {
 
     /** Single GraphQL request returning radar items, newest first. */
     public static Single<List<ReleaseRadarFragment.RadarItem>> fetch(String login) {
-        return Single.fromCallable(() -> doFetch(login));
+        // 0.1.20 F-11/D-02: dispose 时取消在途 GraphQL 调用（与官方列表同款）。
+        return Single.fromCallable(() -> doFetch(login))
+                .doOnDispose(GraphQLClient::cancelActiveCall);
     }
 
     private static List<ReleaseRadarFragment.RadarItem> doFetch(String login) throws Exception {
-        String token = Gh4Application.get().getAuthToken();
-
-        JSONObject body = new JSONObject();
-        body.put("query", QUERY);
+        // 0.1.20 D-02: 请求体拼装、HTTP、401/errors 处理收敛到 GraphQLClient；
+        // 本类只留查询串与结果解析。parse() 仍自带 errors 检查（无害的二次检查）。
         JSONObject vars = new JSONObject();
         vars.put("login", login);
-        body.put("variables", vars);
-
-        Request.Builder reqBuilder = new Request.Builder()
-                .url("https://api.github.com/graphql")
-                .post(RequestBody.create(body.toString(), JSON));
-        if (token != null) {
-            reqBuilder.header("Authorization", "Bearer " + token);
-        }
-
-        OkHttpClient client = client();
-
-        try (Response response = client.newCall(reqBuilder.build()).execute()) {
-            String json = response.body() != null ? response.body().string() : "";
-            if (!response.isSuccessful()) {
-                if (response.code() == 401) {
-                    throw new UnauthorizedException("GraphQL HTTP 401");
-                }
-                throw new RuntimeException("GraphQL HTTP " + response.code());
-            }
-            return parse(json);
-        }
+        return parse(GraphQLClient.execute(QUERY, vars));
     }
 
     private static List<ReleaseRadarFragment.RadarItem> parse(String json) throws Exception {
         JSONObject root = new JSONObject(json);
         if (root.has("errors")) {
-            JSONArray errors = root.getJSONArray("errors");
-            if (errors.length() > 0) {
+            JSONArray errors = root.optJSONArray("errors");
+            if (errors != null && errors.length() > 0) {
+                JSONObject first = errors.optJSONObject(0);
                 throw new RuntimeException(
-                        "GraphQL: " + errors.getJSONObject(0).optString("message"));
+                        "GraphQL: " + (first != null ? first.optString("message") : ""));
             }
         }
         List<ReleaseRadarFragment.RadarItem> items = new ArrayList<>();
@@ -146,13 +90,18 @@ public class RadarGraphQL {
         if (user == null) {
             return items;
         }
-        JSONArray repos = user.optJSONObject("starredRepositories")
-                .optJSONArray("nodes");
+        // BUG-26：与 UserListsGraphQL 一致的空安全链——字段缺失时
+        // optJSONObject 返回 null，不再直接解引用抛 NPE 拖垮整页。
+        JSONObject starred = user.optJSONObject("starredRepositories");
+        JSONArray repos = starred != null ? starred.optJSONArray("nodes") : null;
         if (repos == null) {
             return items;
         }
         for (int i = 0; i < repos.length() && i < MAX_REPOS; i++) {
-            JSONObject repo = repos.getJSONObject(i);
+            JSONObject repo = repos.optJSONObject(i);
+            if (repo == null) {
+                continue;
+            }
             String nameWithOwner = repo.optString("nameWithOwner", "");
             int slash = nameWithOwner.indexOf('/');
             if (slash <= 0) {
@@ -161,14 +110,17 @@ public class RadarGraphQL {
             String owner = nameWithOwner.substring(0, slash);
             String name = nameWithOwner.substring(slash + 1);
 
-            JSONArray releases = repo.optJSONObject("releases")
-                    .optJSONArray("nodes");
+            JSONObject releasesObj = repo.optJSONObject("releases");
+            JSONArray releases = releasesObj != null ? releasesObj.optJSONArray("nodes") : null;
             if (releases == null) {
                 continue;
             }
             // First non-draft release (already newest-first)
             for (int j = 0; j < releases.length(); j++) {
-                JSONObject r = releases.getJSONObject(j);
+                JSONObject r = releases.optJSONObject(j);
+                if (r == null) {
+                    continue;
+                }
                 if (r.optBoolean("isDraft", false)) {
                     continue;
                 }
@@ -192,14 +144,21 @@ public class RadarGraphQL {
         if (iso == null || iso.isEmpty()) {
             return 0;
         }
-        try {
-            SimpleDateFormat f = new SimpleDateFormat(
-                    "yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
-            f.setTimeZone(TimeZone.getTimeZone("UTC"));
-            return f.parse(iso).getTime();
-        } catch (ParseException e) {
-            Log.w(TAG, "Bad date: " + iso);
-            return 0;
+        // BUG-26：先试带毫秒格式（GitHub 常返回 …ss.SSS'Z'），再试无毫秒
+        // 格式；都失败才记日志回 0，避免带毫秒时间戳被排到底部。
+        String[] formats = {
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        };
+        for (String format : formats) {
+            try {
+                SimpleDateFormat f = new SimpleDateFormat(format, Locale.US);
+                f.setTimeZone(TimeZone.getTimeZone("UTC"));
+                return f.parse(iso).getTime();
+            } catch (ParseException ignored) {
+            }
         }
+        Log.w(TAG, "Bad date: " + iso);
+        return 0;
     }
 }

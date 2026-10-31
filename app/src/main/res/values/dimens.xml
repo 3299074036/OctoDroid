@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <dimen name="content_padding">16dp</dimen>
+    <!-- View 全量改造（A 结构高密度）：多屏共用内边距由 16dp 收紧到 12dp -->
+    <dimen name="content_padding">12dp</dimen>
+    <!-- 0.3.1：底部栏高度唯一数值源，bottom_nav_bar 的 minHeight 与 HomeActivity 给 SwipeLayout 留的 bottomMargin 共用此值 -->
+    <dimen name="bottom_nav_height">56dp</dimen>
     <dimen name="overview_item_spacing">12dp</dimen>
     <dimen name="overview_header_spacing">4dp</dimen>
     <dimen name="default_label_badge_size">6dp</dimen>
@@ -19,7 +22,7 @@
     <dimen name="bottom_sheet_top_shadow_height">4dp</dimen>
     <dimen name="issue_edit_header_bottom_padding">@dimen/content_padding</dimen>
 
-    <dimen name="breadcrumb_height">42dp</dimen>
+    <dimen name="breadcrumb_height">36dp</dimen>
     <dimen name="breadcrumb_padding_side">8dp</dimen>
     <dimen name="breadcrumb_arrow_size">18dp</dimen>
     <dimen name="breadcrumb_arrow_margin">8dp</dimen>

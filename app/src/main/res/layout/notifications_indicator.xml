@@ -10,7 +10,7 @@
         android:id="@+id/notifications_indicator"
         android:layout_width="24dp"
         android:layout_height="24dp"
-        android:padding="16dp"
+        android:padding="12dp"
         android:scaleType="centerInside"
         android:src="@drawable/circle"
         android:visibility="gone"

@@ -1,7 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <!-- Gh4a-pref.xml 含全部账号的 GitHub OAuth token 和翻译 API key，
-         禁止随系统备份上传云端 (H-2)。设置迁移请用应用内的手动备份/恢复。 -->
-    <include domain="database" path="gh4adb.db" />
-    <include domain="database" path="suggestions.db" />
+    <!-- SEC-7: gh4adb.db（书签）与 suggestions.db（搜索历史，含对私有用户/
+         仓库的搜索）不再随系统自动备份上传云端。注意：这里用 <exclude>
+         而不用删 <include> 了事——旧的 <include> 只在 Android 11 及以下
+         生效的 fullBackupContent 语义下才起作用，且 exclude 对未包含
+         的文件是无害的 no-op；Android 12+ 的实际规则见 backup_rules.xml
+         （dataExtractionRules），两处排除对象一致。
+         Gh4a-pref 等 shared_prefs 保持原状：本文件从不 include 它们。 -->
+    <exclude domain="database" path="gh4adb.db" />
+    <exclude domain="database" path="suggestions.db" />
+    <!-- 0.1.20 F-04: 与 backup_rules.xml 同一排除清单（Android 11 及以下语义）。 -->
+    <exclude domain="sharedpref" path="com.gh4a_preferences.xml" />
+    <exclude domain="sharedpref" path="com.gh4a.debug_preferences.xml" />
+    <exclude domain="sharedpref" path="Gh4a-secure.xml" />
+    <exclude domain="sharedpref" path="Gh4a-secure-plain.xml" />
 </full-backup-content>

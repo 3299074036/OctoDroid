@@ -62,8 +62,9 @@ public class DrawerManager {
                 R.string.star_hub, R.drawable.icon_star));
         DEFAULT_ITEMS.add(new DrawerItemDef("my_items", R.id.issues_prs,
                 R.string.my_items, R.drawable.icon_issues));
-        DEFAULT_ITEMS.add(new DrawerItemDef("my_gists", R.id.my_gists,
-                R.string.my_gists, R.drawable.icon_gists));
+        // 0.5.0：my_gists 已下架；topic_discovery 从趋势页摘出为抽屉独立项
+        DEFAULT_ITEMS.add(new DrawerItemDef("topic_discovery", R.id.topic_discovery,
+                R.string.topic_discovery, R.drawable.icon_search));
     }
 
     private static SharedPreferences prefs(Context context) {
@@ -87,7 +88,7 @@ public class DrawerManager {
         m.put("star_groups", "star_hub");
         m.put("release_radar", "star_hub");
         m.put("trend", "discover_hub");
-        m.put("topic_discovery", "discover_hub");
+        // 0.5.0：topic_discovery 不再合并进 discover_hub，它已是独立抽屉项
         m.put("blog", "discover_hub");
         MERGED_KEY_MAP = Collections.unmodifiableMap(m);
     }

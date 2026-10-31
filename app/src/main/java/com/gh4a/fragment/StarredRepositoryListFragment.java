@@ -21,10 +21,16 @@ import androidx.appcompat.app.AlertDialog;
 
 import android.text.InputType;
 import android.text.TextUtils;
+import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.view.View;
 import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import com.gh4a.R;
 import com.gh4a.ServiceFactory;
@@ -41,8 +47,20 @@ import java.util.HashMap;
 import java.util.List;
 
 import io.reactivex.Single;
+import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.schedulers.Schedulers;
 import retrofit2.Response;
 
+/**
+ * Merged starred page: the paged "all starred" list (REST, unchanged)
+ * plus a header showing the official GitHub lists (GraphQL, see
+ * UserListsGraphQL) aggregated on top of it. The old standalone
+ * "STAR 分组" tab was removed (StarHubFactory); local groups are kept
+ * only as a fallback section when official lists fail to load or are
+ * empty, and are never auto-uploaded (official lists are public by
+ * default, so uploading local groups silently would publish them).
+ */
 public class StarredRepositoryListFragment extends PagedDataBaseFragment<Repository> {
     private static final String STATE_KEY_SORT_ORDER = "sort_order";
     private static final String STATE_KEY_SORT_DIRECTION = "sort_direction";
@@ -63,6 +81,19 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
     private RepositoryListContainerFragment.SortDrawerHelper mSortHelper;
     private RepositoryAdapter mAdapter;
 
+    // Official-lists header state (null = still loading)
+    private LinearLayout mListsContainer;
+    private TextView mListsTitle;
+    private TextView mListsStatus;
+    private List<UserListsGraphQL.UserList> mOfficialLists;
+    private boolean mListsFailed;
+    private String mExpandedOfficialId;
+    private String mExpandedLocalGroup;
+    private Disposable mListsDisposable;
+    // Dialog-initiated Schedulers.io() subscriptions (BUG-11).
+    private io.reactivex.disposables.CompositeDisposable mDialogDisposables =
+            new io.reactivex.disposables.CompositeDisposable();
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -75,6 +106,32 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
             mSortDirection = savedInstanceState.getString(STATE_KEY_SORT_DIRECTION);
         }
         setHasOptionsMenu(true);
+    }
+
+    @Override
+    public void onDestroyView() {
+        // BUG-11: direct Schedulers.io() subscription must not outlive
+        // the view (onDestroy alone is too late; isAdded() stays true
+        // after onDestroyView). loadOfficialLists() reassigns it when
+        // the view is recreated.
+        if (mListsDisposable != null && !mListsDisposable.isDisposed()) {
+            mListsDisposable.dispose();
+        }
+        mListsDisposable = null;
+        mDialogDisposables.dispose();
+        mListsContainer = null;
+        mListsTitle = null;
+        mListsStatus = null;
+        mAdapter = null;
+        super.onDestroyView();
+    }
+
+    @Override
+    public void onDestroy() {
+        if (mListsDisposable != null && !mListsDisposable.isDisposed()) {
+            mListsDisposable.dispose();
+        }
+        super.onDestroy();
     }
 
     public void setSortOrderAndDirection(String sortOrder, String direction) {
@@ -131,17 +188,275 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
 
     @Override
     protected void onRecyclerViewInflated(RecyclerView view, android.view.LayoutInflater inflater) {
+        if (mDialogDisposables.isDisposed()) {
+            mDialogDisposables = new io.reactivex.disposables.CompositeDisposable();
+        }
         super.onRecyclerViewInflated(view, inflater);
+        // 0.5.0 Star 页重排：给列表留出底栏高度的底边距并关闭 clip，
+        // 使最后一行描述能完整滚到固定底栏上方，不再被截断。
+        view.setClipToPadding(false);
+        view.setPadding(view.getPaddingLeft(), view.getPaddingTop(),
+                view.getPaddingRight(),
+                view.getResources().getDimensionPixelSize(R.dimen.bottom_nav_height));
+        View header = inflater.inflate(R.layout.star_lists_header, view, false);
+        mListsContainer = header.findViewById(R.id.lists_container);
+        mListsTitle = header.findViewById(R.id.lists_title);
+        mListsStatus = header.findViewById(R.id.lists_status);
+        mAdapter.setHeaderView(header);
         mAdapter.setOnItemLongClickListener(item -> {
             showAssignToGroupDialog(item);
             return true;
         });
+        loadOfficialLists();
+    }
+
+    private void loadOfficialLists() {
+        if (mListsDisposable != null && !mListsDisposable.isDisposed()) {
+            mListsDisposable.dispose();
+        }
+        mListsDisposable = UserListsGraphQL.fetchLists(mLogin)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(lists -> {
+                    if (!isAdded()) {
+                        return;
+                    }
+                    mOfficialLists = lists;
+                    mListsFailed = false;
+                    renderListsHeader();
+                }, error -> {
+                    if (!isAdded()) {
+                        return;
+                    }
+                    // Official lists unavailable (network / scope): fall back
+                    // to local groups instead of breaking the starred page.
+                    mOfficialLists = new ArrayList<>();
+                    mListsFailed = true;
+                    renderListsHeader();
+                });
+    }
+
+    private void renderListsHeader() {
+        if (mListsContainer == null || getActivity() == null) {
+            return;
+        }
+        LayoutInflater inflater = LayoutInflater.from(getActivity());
+        mListsContainer.removeAllViews();
+
+        if (mOfficialLists == null) {
+            mListsStatus.setVisibility(View.VISIBLE);
+            mListsStatus.setText(R.string.my_lists_loading);
+            return;
+        }
+
+        if (!mOfficialLists.isEmpty()) {
+            mListsTitle.setText(R.string.my_lists);
+            mListsStatus.setVisibility(View.GONE);
+            for (UserListsGraphQL.UserList list : mOfficialLists) {
+                addGroupRow(inflater, list.name,
+                        getResources().getQuantityString(
+                                R.plurals.star_group_repo_count, list.repos.size(), list.repos.size()),
+                        TextUtils.equals(mExpandedOfficialId, list.id),
+                        () -> {
+                            mExpandedOfficialId = TextUtils.equals(mExpandedOfficialId, list.id)
+                                    ? null : list.id;
+                            renderListsHeader();
+                        });
+                if (TextUtils.equals(mExpandedOfficialId, list.id)) {
+                    for (UserListsGraphQL.Repo repo : list.repos) {
+                        addRepoRow(inflater, repo.fullName, repo.description);
+                    }
+                }
+            }
+            return;
+        }
+
+        // No official lists: show local groups (if any) under their own title.
+        List<String> groups = StarGroupManager.getGroups(getActivity(), mLogin);
+        if (groups.isEmpty()) {
+            mListsTitle.setText(R.string.my_lists);
+            mListsStatus.setVisibility(View.VISIBLE);
+            mListsStatus.setText(mListsFailed
+                    ? R.string.my_lists_failed : R.string.my_lists_empty);
+            return;
+        }
+        mListsTitle.setText(R.string.local_groups);
+        mListsStatus.setVisibility(View.VISIBLE);
+        mListsStatus.setText(mListsFailed
+                ? R.string.my_lists_failed : R.string.my_lists_empty);
+        // Keep the status line only as a hint when it failed; otherwise hide it
+        // so local groups are not pushed down by an empty-list message.
+        if (!mListsFailed) {
+            mListsStatus.setVisibility(View.GONE);
+        }
+        for (String group : groups) {
+            List<StarGroupManager.StarRepo> repos = StarGroupManager.getRepos(getActivity(), mLogin, group);
+            addGroupRow(inflater, group,
+                    getResources().getQuantityString(
+                            R.plurals.star_group_repo_count, repos.size(), repos.size()),
+                    TextUtils.equals(mExpandedLocalGroup, group),
+                    () -> {
+                        mExpandedLocalGroup = TextUtils.equals(mExpandedLocalGroup, group)
+                                ? null : group;
+                        renderListsHeader();
+                    });
+            if (TextUtils.equals(mExpandedLocalGroup, group)) {
+                for (StarGroupManager.StarRepo repo : repos) {
+                    addRepoRow(inflater, repo.fullName, repo.description);
+                }
+            }
+        }
+    }
+
+    private void addGroupRow(LayoutInflater inflater, String title, String subtitle,
+            boolean expanded, Runnable onClick) {
+        View row = inflater.inflate(R.layout.row_star_group, mListsContainer, false);
+        ImageView icon = row.findViewById(R.id.iv_icon);
+        icon.setImageResource(R.drawable.icon_bookmark);
+        // 0.5.0：书签图标改用现行主色（不再是纯黑大块），尺寸已在布局里缩到 24dp
+        icon.setImageTintList(android.content.res.ColorStateList.valueOf(
+                com.gh4a.utils.UiUtils.resolveColor(getActivity(),
+                        androidx.appcompat.R.attr.colorPrimary)));
+        ((TextView) row.findViewById(R.id.tv_title)).setText(title);
+        TextView sub = row.findViewById(R.id.tv_subtitle);
+        sub.setTypeface(android.graphics.Typeface.MONOSPACE);
+        sub.setText(subtitle);
+        sub.setVisibility(subtitle == null || subtitle.isEmpty() ? View.GONE : View.VISIBLE);
+        row.setOnClickListener(v -> onClick.run());
+        mListsContainer.addView(row);
+    }
+
+    private void addRepoRow(LayoutInflater inflater, String fullName, String description) {
+        View row = inflater.inflate(R.layout.row_star_group, mListsContainer, false);
+        int indent = (int) (32 * getResources().getDisplayMetrics().density + 0.5f);
+        row.setPadding(row.getPaddingLeft() + indent, row.getPaddingTop(),
+                row.getPaddingRight(), row.getPaddingBottom());
+        ((ImageView) row.findViewById(R.id.iv_icon))
+                .setImageResource(R.drawable.icon_repositories);
+        ((TextView) row.findViewById(R.id.tv_title)).setText(fullName);
+        TextView sub = row.findViewById(R.id.tv_subtitle);
+        sub.setTypeface(android.graphics.Typeface.MONOSPACE);
+        sub.setText(description);
+        sub.setVisibility(description == null || description.isEmpty() ? View.GONE : View.VISIBLE);
+        row.setOnClickListener(v -> {
+            String[] parts = fullName.split("/", 2);
+            if (parts.length == 2) {
+                startActivity(RepositoryActivity.makeIntent(getActivity(), parts[0], parts[1]));
+            }
+        });
+        mListsContainer.addView(row);
     }
 
     private void showAssignToGroupDialog(Repository repository) {
-        final List<String> groups = StarGroupManager.getGroups(getActivity());
+        if (mOfficialLists != null && !mOfficialLists.isEmpty()) {
+            showAssignToOfficialListsDialog(repository);
+        } else {
+            showAssignToLocalGroupDialog(repository);
+        }
+    }
+
+    /** Official lists: a repo may belong to several lists (unlike local groups). */
+    private void showAssignToOfficialListsDialog(Repository repository) {
+        final String fullName = repository.fullName();
+        final List<String> names = new ArrayList<>();
+        final boolean[] checked = new boolean[mOfficialLists.size()];
+        for (int i = 0; i < mOfficialLists.size(); i++) {
+            UserListsGraphQL.UserList list = mOfficialLists.get(i);
+            names.add(list.name);
+            for (UserListsGraphQL.Repo repo : list.repos) {
+                if (fullName.equals(repo.fullName)) {
+                    checked[i] = true;
+                    break;
+                }
+            }
+        }
+        new AlertDialog.Builder(getActivity())
+                .setTitle(R.string.assign_official_title)
+                .setMultiChoiceItems(names.toArray(new CharSequence[0]), checked,
+                        (dialog, which, isChecked) -> checked[which] = isChecked)
+                .setPositiveButton(R.string.ok, (dialog, which) -> {
+                    List<String> selectedIds = new ArrayList<>();
+                    for (int i = 0; i < checked.length; i++) {
+                        if (checked[i]) {
+                            selectedIds.add(mOfficialLists.get(i).id);
+                        }
+                    }
+                    assignToOfficialLists(fullName, selectedIds);
+                })
+                .setNeutralButton(R.string.assign_official_create_new, (dialog, which) ->
+                        showCreateOfficialListDialog(repository))
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void showCreateOfficialListDialog(Repository repository) {
+        final EditText input = new EditText(getActivity());
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        int padding = (int) (16 * getResources().getDisplayMetrics().density);
+        input.setPadding(padding, padding, padding, padding);
+        new AlertDialog.Builder(getActivity())
+                .setTitle(R.string.star_group_create_title)
+                .setView(input)
+                .setPositiveButton(R.string.ok, (d, w) -> {
+                    String name = input.getText().toString().trim();
+                    if (name.isEmpty()) {
+                        return;
+                    }
+                    mDialogDisposables.add(UserListsGraphQL.createList(name)
+                            .subscribeOn(Schedulers.io())
+                            .observeOn(AndroidSchedulers.mainThread())
+                            .subscribe(list -> {
+                                if (!isAdded()) {
+                                    return;
+                                }
+                                List<String> ids = new ArrayList<>();
+                                ids.add(list.id);
+                                assignToOfficialLists(repository.fullName(), ids);
+                            }, error -> {
+                                if (isAdded()) {
+                                    Toast.makeText(getActivity(), R.string.assign_official_failed,
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            }));
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void assignToOfficialLists(String fullName, List<String> listIds) {
+        String[] parts = fullName.split("/", 2);
+        if (parts.length != 2) {
+            return;
+        }
+        mDialogDisposables.add(UserListsGraphQL.fetchRepositoryNodeId(parts[0], parts[1])
+                .flatMap(nodeId -> {
+                    if (nodeId.isEmpty()) {
+                        return Single.error(new RuntimeException("empty node id"));
+                    }
+                    return UserListsGraphQL.updateListsForRepo(nodeId, listIds);
+                })
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(ok -> {
+                    if (!isAdded()) {
+                        return;
+                    }
+                    Toast.makeText(getActivity(), R.string.assign_official_success,
+                            Toast.LENGTH_SHORT).show();
+                    loadOfficialLists();
+                }, error -> {
+                    if (isAdded()) {
+                        Toast.makeText(getActivity(), R.string.assign_official_failed,
+                                Toast.LENGTH_LONG).show();
+                    }
+                }));
+    }
+
+    /** Pre-existing local-group dialog, kept for the fallback path. */
+    private void showAssignToLocalGroupDialog(Repository repository) {
+        final List<String> groups = StarGroupManager.getGroups(getActivity(), mLogin);
         final String currentGroup =
-                StarGroupManager.findGroupFor(getActivity(), repository.fullName());
+                StarGroupManager.findGroupFor(getActivity(), mLogin, repository.fullName());
         final List<String> options = new ArrayList<>(groups);
         options.add(getString(R.string.star_group_create_new));
 
@@ -152,7 +467,7 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
                         (dialog, which) -> {
                             dialog.dismiss();
                             if (which < groups.size()) {
-                                StarGroupManager.assignRepo(getActivity(), groups.get(which),
+                                StarGroupManager.assignRepo(getActivity(), mLogin, groups.get(which),
                                         repository.fullName(), repository.description());
                             } else {
                                 showCreateAndAssignDialog(repository);
@@ -172,8 +487,8 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
                 .setView(input)
                 .setPositiveButton(R.string.ok, (d, w) -> {
                     String name = input.getText().toString().trim();
-                    if (StarGroupManager.createGroup(getActivity(), name)) {
-                        StarGroupManager.assignRepo(getActivity(), name,
+                    if (StarGroupManager.createGroup(getActivity(), mLogin, name)) {
+                        StarGroupManager.assignRepo(getActivity(), mLogin, name,
                                 repository.fullName(), repository.description());
                     }
                 })

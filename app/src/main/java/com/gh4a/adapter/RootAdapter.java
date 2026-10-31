@@ -77,13 +77,16 @@ public abstract class RootAdapter<T, VH extends RecyclerView.ViewHolder>
     private final Filter mFilter = new Filter() {
         @Override
         protected FilterResults performFiltering(CharSequence constraint) {
+            // 0.1.20 F-21: 先快照再遍历——performFiltering 在非 UI 线程跑，
+            // 而 addAll()/clear() 在 UI 线程改 mUnfilteredObjects，并发遍历会 CME。
+            final ArrayList<T> snapshot = new ArrayList<>(mUnfilteredObjects);
             FilterResults results = new FilterResults();
             if (TextUtils.isEmpty(constraint)) {
-                results.values = mUnfilteredObjects;
-                results.count = mUnfilteredObjects.size();
+                results.values = snapshot;
+                results.count = snapshot.size();
             } else {
                 final ArrayList<T> filtered = new ArrayList<>();
-                for (T object : mUnfilteredObjects) {
+                for (T object : snapshot) {
                     if (isFiltered(constraint, object)) {
                         filtered.add(object);
                     }
@@ -97,7 +100,9 @@ public abstract class RootAdapter<T, VH extends RecyclerView.ViewHolder>
         @SuppressWarnings("unchecked")
         @Override
         protected void publishResults(CharSequence constraint, FilterResults results) {
-            mObjects = (List<T>) results.values;
+            // BUG-28: never alias mUnfilteredObjects — a later add()/clear()
+            // on mObjects would otherwise mutate the unfiltered list too.
+            mObjects = new ArrayList<>((List<T>) results.values);
             notifyDataSetChanged();
         }
     };
@@ -112,6 +117,10 @@ public abstract class RootAdapter<T, VH extends RecyclerView.ViewHolder>
         mUnfilteredObjects = new ArrayList<>();
         mContext = context;
         mInflater = LayoutInflater.from(mContext);
+    }
+
+    public boolean hasHeaderView() {
+        return mHeaderView != null;
     }
 
     public void setHeaderView(View headerView) {
@@ -176,7 +185,13 @@ public abstract class RootAdapter<T, VH extends RecyclerView.ViewHolder>
     }
 
     public T getItemFromAdapterPosition(int position) {
-        return mObjects.get(position - (mHeaderView != null ? 1 : 0));
+        // 0.1.20 F-21: 绑定与点按之间增删 header 会使偏移错位——越界返回 null，
+        // 调用点（绑定/点按/长按）各自判空，不再错项或末行越界。
+        int index = position - (mHeaderView != null ? 1 : 0);
+        if (index < 0 || index >= mObjects.size()) {
+            return null;
+        }
+        return mObjects.get(index);
     }
 
     /**
@@ -272,7 +287,11 @@ public abstract class RootAdapter<T, VH extends RecyclerView.ViewHolder>
                 mFooterListener.onScrolledToFooter();
             }
         } else if (!(holder instanceof HeaderViewHolder)) {
-            onBindViewHolder((VH) holder, getItemFromAdapterPosition(position));
+            T item = getItemFromAdapterPosition(position);
+            if (item == null) {
+                return;
+            }
+            onBindViewHolder((VH) holder, item);
             if (position == mHighlightPosition) {
                 final View v = holder.itemView;
                 v.post(() -> {
@@ -294,7 +313,10 @@ public abstract class RootAdapter<T, VH extends RecyclerView.ViewHolder>
         VH holder = (VH) view.getTag();
         int position = holder.getBindingAdapterPosition();
         if (position != RecyclerView.NO_POSITION) {
-            mItemClickListener.onItemClick(getItemFromAdapterPosition(position));
+            T item = getItemFromAdapterPosition(position);
+            if (item != null) {
+                mItemClickListener.onItemClick(item);
+            }
         }
     }
 
@@ -303,7 +325,10 @@ public abstract class RootAdapter<T, VH extends RecyclerView.ViewHolder>
         VH holder = (VH) view.getTag();
         int position = holder.getBindingAdapterPosition();
         if (position != RecyclerView.NO_POSITION) {
-            return mItemLongClickListener.onItemLongClick(getItemFromAdapterPosition(position));
+            T item = getItemFromAdapterPosition(position);
+            if (item != null) {
+                return mItemLongClickListener.onItemLongClick(item);
+            }
         }
 
         return false;

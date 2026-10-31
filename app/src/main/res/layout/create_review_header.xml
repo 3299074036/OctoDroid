@@ -5,12 +5,12 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="12dp">
 
     <com.gh4a.widget.LinkHandlingTextView
         android:id="@+id/review_dialog_title"
         android:layout_width="match_parent"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="12dp"
         android:layout_height="wrap_content"
         android:textAppearance="@style/TextAppearance.AppCompat.Title"
         tools:text="@string/pull_request_review_dialog_title" />

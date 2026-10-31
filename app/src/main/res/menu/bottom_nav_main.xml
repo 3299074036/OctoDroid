@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.1.0：底部 5 Tab 主入口，顺序固定：趋势/动态/搜索/Star/我，默认趋势。抽屉已下架（Home 锁定关闭），不再是入口。 -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/discover_hub"
+        android:title="@string/discover_hub"
+        android:icon="@drawable/icon_trending" />
+    <item
+        android:id="@+id/feed_hub"
+        android:title="@string/feed_hub"
+        android:icon="@drawable/icon_news_feed" />
+    <item
+        android:id="@+id/search"
+        android:title="@string/search"
+        android:icon="@drawable/icon_search" />
+    <item
+        android:id="@+id/star_hub"
+        android:title="@string/star_hub"
+        android:icon="@drawable/icon_star" />
+    <item
+        android:id="@+id/profile"
+        android:title="@string/my_profile"
+        android:icon="@drawable/profile" />
+</menu>

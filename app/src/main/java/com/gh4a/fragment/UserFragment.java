@@ -50,6 +50,7 @@ import com.meisolsson.githubsdk.service.organizations.OrganizationMemberService;
 import com.meisolsson.githubsdk.service.organizations.OrganizationService;
 import com.meisolsson.githubsdk.service.repositories.RepositoryService;
 import com.meisolsson.githubsdk.service.users.UserFollowerService;
+import com.meisolsson.githubsdk.service.users.UserService;
 import com.vdurmont.emoji.EmojiParser;
 
 import java.util.Collection;
@@ -72,12 +73,29 @@ public class UserFragment extends LoadingFragmentBase implements
         return f;
     }
 
+    /**
+     * 0.5.0 “我”内嵌页用：只给 login，不给完整 User 对象（Home 页面在
+     * 用户信息到达前就已创建）。Fragment 自行按 login 懒加载用户，
+     * 加载完成后再填充数据；与 UserActivity 的 User 重载行为一致。
+     */
+    public static UserFragment newInstance(String login) {
+        UserFragment f = new UserFragment();
+
+        Bundle args = new Bundle();
+        args.putString("login", login);
+        f.setArguments(args);
+
+        return f;
+    }
+
     private static final int ID_LOADER_REPO_LIST = 0;
     private static final int ID_LOADER_ORG_LIST = 1;
     private static final int ID_LOADER_IS_FOLLOWING = 2;
     private static final int ID_LOADER_ORG_MEMBER_COUNT = 3;
+    private static final int ID_LOADER_USER = 4;
 
     private User mUser;
+    private String mLogin;
     private View mContentView;
     private OverviewRow mFollowersRow;
     private Boolean mIsFollowing;
@@ -87,7 +105,9 @@ public class UserFragment extends LoadingFragmentBase implements
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         mUser = getArguments().getParcelable("user");
-        mIsSelf = ApiHelpers.loginEquals(mUser, Gh4Application.get().getAuthLogin());
+        mLogin = getArguments().getString("login");
+        mIsSelf = mUser != null
+                && ApiHelpers.loginEquals(mUser, Gh4Application.get().getAuthLogin());
         setHasOptionsMenu(true);
     }
 
@@ -100,6 +120,13 @@ public class UserFragment extends LoadingFragmentBase implements
     @Override
     public void onRefresh() {
         mIsFollowing = null;
+        if (mUser == null) {
+            // login 懒加载路径：用户信息还没到时刷新即重新拉用户
+            if (mLogin != null && !mLogin.isEmpty()) {
+                loadUser(true);
+            }
+            return;
+        }
         loadTopRepositories(true);
         loadOrganizationsIfUser(true);
         loadOrganizationMemberCountIfOrg(true);
@@ -110,6 +137,15 @@ public class UserFragment extends LoadingFragmentBase implements
     public void onViewCreated(View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        if (mUser == null) {
+            if (mLogin == null || mLogin.isEmpty()) {
+                // 未登录：不填充、不崩溃，显示空白内容区
+                setContentShown(true);
+            } else {
+                loadUser(false);
+            }
+            return;
+        }
         fillData();
         loadTopRepositories(false);
         loadOrganizationsIfUser(false);
@@ -117,6 +153,25 @@ public class UserFragment extends LoadingFragmentBase implements
         loadIsFollowingStateIfNeeded(false);
 
         setContentShown(true);
+    }
+
+    /** 0.5.0 login 懒加载：按 login 拉取完整用户，成功后按正常路径填充。 */
+    private void loadUser(boolean force) {
+        UserService service = ServiceFactory.get(UserService.class, force);
+        service.getUser(mLogin)
+                .map(ApiHelpers::throwOnFailure)
+                .compose(makeLoaderSingle(ID_LOADER_USER, force))
+                .subscribe(user -> {
+                    mUser = user;
+                    mIsSelf = ApiHelpers.loginEquals(mUser,
+                            Gh4Application.get().getAuthLogin());
+                    fillData();
+                    loadTopRepositories(false);
+                    loadOrganizationsIfUser(false);
+                    loadOrganizationMemberCountIfOrg(false);
+                    loadIsFollowingStateIfNeeded(false);
+                    setContentShown(true);
+                }, this::handleLoadFailure);
     }
 
     private boolean canFollowUser() {
@@ -166,11 +221,17 @@ public class UserFragment extends LoadingFragmentBase implements
         }
 
         OverviewRow gistsRow = mContentView.findViewById(R.id.gists_row);
-        gistsRow.setVisibility(isUser ? View.VISIBLE : View.GONE);
-        if (isUser) {
-            int totalCount = orZero(mUser.publicGists()) + orZero(mUser.privateGists());
-            gistsRow.setText(getResources().getQuantityString(R.plurals.gist, totalCount, totalCount));
-            gistsRow.setClickIntent(GistListActivity.makeIntent(getActivity(), mUser.login()));
+        // 0.5.0 “我的 Gist”已下架：本人的 Gist 行不再显示；他人资料页的
+        // Gist 行不是“我的 Gist”，予以保留（仍进该用户的 Gist 列表）。
+        if (mIsSelf) {
+            gistsRow.setVisibility(View.GONE);
+        } else {
+            gistsRow.setVisibility(isUser ? View.VISIBLE : View.GONE);
+            if (isUser) {
+                int totalCount = orZero(mUser.publicGists()) + orZero(mUser.privateGists());
+                gistsRow.setText(getResources().getQuantityString(R.plurals.gist, totalCount, totalCount));
+                gistsRow.setClickIntent(GistListActivity.makeIntent(getActivity(), mUser.login()));
+            }
         }
 
         OverviewRow reposRow = mContentView.findViewById(R.id.repos_row);
@@ -262,6 +323,9 @@ public class UserFragment extends LoadingFragmentBase implements
     }
 
     private void fillTopRepos(Collection<Repository> topRepos) {
+        if (mContentView == null) {
+            return;
+        }
         View progress = mContentView.findViewById(R.id.pb_top_repos);
         LinearLayout ll = mContentView.findViewById(R.id.ll_top_repos);
         ll.removeAllViews();
@@ -295,10 +359,14 @@ public class UserFragment extends LoadingFragmentBase implements
             }
         }
 
-        View btnMore = getView().findViewById(R.id.btn_repos);
+        // BUG-10: use the method's mContentView pattern (not getView(),
+        // which is null after view destruction) with a null guard.
+        View btnMore = mContentView.findViewById(R.id.btn_repos);
         if (topRepos != null && !topRepos.isEmpty()) {
-            btnMore.setOnClickListener(this);
-            btnMore.setVisibility(View.VISIBLE);
+            if (btnMore != null) {
+                btnMore.setOnClickListener(this);
+                btnMore.setVisibility(View.VISIBLE);
+            }
         } else {
             TextView hintView = (TextView) inflater.inflate(R.layout.hint_view, ll, false);
             hintView.setText(R.string.user_no_repos);

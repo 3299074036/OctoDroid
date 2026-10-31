@@ -160,6 +160,13 @@ public abstract class WebViewerActivity extends BaseActivity implements
     private void initWebViewSettings(WebSettings s) {
         s.setLayoutAlgorithm(WebSettings.LayoutAlgorithm.NORMAL);
         s.setAllowFileAccess(false);
+        // SEC-13: explicit hardening (were defaults before). No code in
+        // this app uses DOM storage or content:// URLs (verified by grep),
+        // and Wiki/Gist/file pages load https/file-asset content only, so
+        // never-allowing mixed content does not break them.
+        s.setDomStorageEnabled(false);
+        s.setAllowContentAccess(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false);
         s.setLoadsImagesAutomatically(true);
@@ -370,7 +377,31 @@ public abstract class WebViewerActivity extends BaseActivity implements
             content.append(String.format("html = HtmlUtils.rewriteRelativeUrls(html, '%s', '%s', '%s', '%s');\n",
                     repoOwner, repoName, actualRef, folderPath));
         }
-        content.append("document.getElementById('content').innerHTML = html;");
+        // SEC-13: sanitize showdown output before innerHTML — attacker
+        // markdown may carry raw HTML. Drops script/style/iframe/object/
+        // embed/form/base/link/meta/title elements, on* attributes, and
+        // javascript:/vbscript:/data:text/html URLs; links, images and
+        // formatting survive untouched.
+        content.append("function sanitizeHtml(html) {"
+                + "var tpl = document.createElement('template');"
+                + "tpl.innerHTML = html;"
+                + "var bad = ['script','style','iframe','object','embed','form',"
+                + "'base','link','meta','title'];"
+                + "var els = tpl.content.querySelectorAll('*');"
+                + "for (var i = 0; i < els.length; i++) {"
+                + "var el = els[i];"
+                + "if (bad.indexOf(el.tagName.toLowerCase()) >= 0) {"
+                + "if (el.parentNode) el.parentNode.removeChild(el);"
+                + "continue; }"
+                + "var attrs = el.attributes;"
+                + "for (var j = attrs.length - 1; j >= 0; j--) {"
+                + "var n = attrs[j].name.toLowerCase();"
+                + "var v = (attrs[j].value || '').replace(/[\\s\\u0000-\\u0020]+/g, '').toLowerCase();"
+                + "if (n.indexOf('on') === 0 || v.indexOf('javascript:') === 0"
+                + "|| v.indexOf('vbscript:') === 0 || v.indexOf('data:text/html') === 0) {"
+                + "el.removeAttribute(attrs[j].name); } } }"
+                + "return tpl.innerHTML; }\n");
+        content.append("document.getElementById('content').innerHTML = sanitizeHtml(html);");
         content.append("</script>");
 
         content.append("</body></html>");
@@ -433,6 +464,13 @@ public abstract class WebViewerActivity extends BaseActivity implements
                 : "txt";  // plain text, no highlighting
     }
 
+    // 0.1.20 F-05: Wiki 内容是远端编辑者写的原始 HTML，必须先走与
+    // generateMarkdownHtml() 同款 sanitizeHtml 过滤再上屏。做法与 Markdown
+    // 路径一致：JS 在 innerHTML 前清洗（去 script/style/iframe/object/
+    // embed/form/base/link/meta/title、on* 属性、javascript:/vbscript:/
+    // data:text/html 链接），链接/图片/排版原样保留；JS 接口与基址不变。
+    // 注意：原始 HTML 不直接拼进页面，而是转义后放进 JS 字符串再清洗，
+    // 其中 "</" 写成 "<\/"，避免原始 HTML 里的 </script> 提前截断脚本。
     protected static String wrapWithMarkdownStyling(String html, String cssTheme, String title) {
         StringBuilder content = new StringBuilder();
         HtmlUtils.writeCssInclude(content, "markdown", cssTheme);
@@ -440,7 +478,37 @@ public abstract class WebViewerActivity extends BaseActivity implements
         if (title != null) {
             content.append("<h2>").append(TextUtils.htmlEncode(title)).append("</h2>");
         }
-        content.append(html);
+        content.append("<div id='content'></div>");
+        content.append("<script>");
+        content.append("function sanitizeHtml(html) {"
+                + "var tpl = document.createElement('template');"
+                + "tpl.innerHTML = html;"
+                + "var bad = ['script','style','iframe','object','embed','form',"
+                + "'base','link','meta','title'];"
+                + "var els = tpl.content.querySelectorAll('*');"
+                + "for (var i = 0; i < els.length; i++) {"
+                + "var el = els[i];"
+                + "if (bad.indexOf(el.tagName.toLowerCase()) >= 0) {"
+                + "if (el.parentNode) el.parentNode.removeChild(el);"
+                + "continue; }"
+                + "var attrs = el.attributes;"
+                + "for (var j = attrs.length - 1; j >= 0; j--) {"
+                + "var n = attrs[j].name.toLowerCase();"
+                + "var v = (attrs[j].value || '').replace(/[\\s\\u0000-\\u0020]+/g, '').toLowerCase();"
+                + "if (n.indexOf('on') === 0 || v.indexOf('javascript:') === 0"
+                + "|| v.indexOf('vbscript:') === 0 || v.indexOf('data:text/html') === 0) {"
+                + "el.removeAttribute(attrs[j].name); } } }"
+                + "return tpl.innerHTML; }\n");
+        String escaped = html == null ? "" : html
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+                .replace("</", "<\\/");
+        content.append("document.getElementById('content').innerHTML = sanitizeHtml('");
+        content.append(escaped);
+        content.append("');");
+        content.append("</script>");
         content.append("</body>");
         return content.toString();
     }

@@ -48,6 +48,18 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
 
     public static final String PREF_NAME = "Gh4a-pref";
 
+    // 0.3.0 设置拆分：同一 Fragment 按传入的 xml 资源加载某一分组，
+    // 旧构造（无参数）仍加载完整 settings.xml，兼容旧调用。
+    private static final String ARG_XML_RES = "xml_res";
+
+    public static SettingsFragment newInstance(int xmlRes) {
+        SettingsFragment f = new SettingsFragment();
+        android.os.Bundle args = new android.os.Bundle();
+        args.putInt(ARG_XML_RES, xmlRes);
+        f.setArguments(args);
+        return f;
+    }
+
     public static final String KEY_THEME = "theme";
     public static final String KEY_ACCENT_COLOR = "accent_color";
     public static final String KEY_LANGUAGE = "language";
@@ -89,10 +101,8 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private IntegerListPreference mReleaseRadarIntervalPref;
     private Preference mDarkModeScheduleTimePref;
     private ListPreference mDarkModePref;
-    /** 进行中的镜像测速任务，销毁时取消 (M-10)。 */
-    private MirrorHelper.SpeedTestHandle mSpeedTestHandle;
-    /** 测速中的进度对话框，存为字段以便销毁时主动 dismiss，避免 leaked window。 */
-    private AlertDialog mSpeedTestDialog;
+    /** 进行中的镜像源卡片对话框，存为字段以便销毁时主动关闭，避免 leaked window。 */
+    private MirrorSourceDialog mMirrorDialog;
 
     private final androidx.activity.result.ActivityResultLauncher<String[]> mRestoreLauncher =
             registerForActivityResult(
@@ -120,18 +130,10 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
 
     @Override
     public void onDestroy() {
-        // 测速中途退出：取消任务，避免回调强引用已销毁的 Fragment (M-10)
-        if (mSpeedTestHandle != null) {
-            mSpeedTestHandle.cancel();
-            mSpeedTestHandle = null;
-        }
-        // 进度对话框是局部变量时销毁后无法主动 dismiss，会 leaked window
-        if (mSpeedTestDialog != null) {
-            try {
-                mSpeedTestDialog.dismiss();
-            } catch (Exception ignored) {
-            }
-            mSpeedTestDialog = null;
+        // 镜像源对话框打开时退出：关闭对话框并取消测速，避免 leaked window
+        if (mMirrorDialog != null) {
+            mMirrorDialog.dismiss();
+            mMirrorDialog = null;
         }
         super.onDestroy();
     }
@@ -139,36 +141,54 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
         getPreferenceManager().setSharedPreferencesName(PREF_NAME);
-        addPreferencesFromResource(R.xml.settings);
+        android.os.Bundle args = getArguments();
+        int xmlRes = args != null ? args.getInt(ARG_XML_RES, R.xml.settings) : R.xml.settings;
+        addPreferencesFromResource(xmlRes);
 
         // settings.xml 里已没有 "theme" 键（主题改由深色模式控制），
         // findPreference 永远返回 null，mThemePref 相关代码已删除 (L-11)；
         // KEY_THEME 常量保留：Gh4Application.updateTheme/迁移与 HomeActivity 仍读写该键
 
         Preference accentColorPref = findPreference(KEY_ACCENT_COLOR);
-        accentColorPref.setOnPreferenceChangeListener(this);
+        if (accentColorPref != null) {
+            accentColorPref.setOnPreferenceChangeListener(this);
+        }
 
         Preference languagePref = findPreference(KEY_LANGUAGE);
-        languagePref.setOnPreferenceChangeListener(this);
+        if (languagePref != null) {
+            languagePref.setOnPreferenceChangeListener(this);
+        }
 
         mFontScalePref = findPreference(KEY_FONT_SCALE);
-        mFontScalePref.setOnPreferenceChangeListener(this);
+        if (mFontScalePref != null) {
+            mFontScalePref.setOnPreferenceChangeListener(this);
+        }
 
         mAboutPref = findPreference(KEY_ABOUT);
-        mAboutPref.setOnPreferenceClickListener(this);
-        mAboutPref.setSummary(getAppName());
+        if (mAboutPref != null) {
+            mAboutPref.setOnPreferenceClickListener(this);
+            mAboutPref.setSummary(getAppName());
+        }
 
         mOpenSourcePref = findPreference(KEY_OPEN_SOURCE_COMPONENTS);
-        mOpenSourcePref.setOnPreferenceClickListener(this);
+        if (mOpenSourcePref != null) {
+            mOpenSourcePref.setOnPreferenceClickListener(this);
+        }
 
         Preference customizeDrawerPref = findPreference(KEY_CUSTOMIZE_DRAWER);
-        customizeDrawerPref.setOnPreferenceClickListener(this);
+        if (customizeDrawerPref != null) {
+            customizeDrawerPref.setOnPreferenceClickListener(this);
+        }
 
         Preference accountManagePref = findPreference(KEY_ACCOUNT_MANAGE);
-        accountManagePref.setOnPreferenceClickListener(this);
+        if (accountManagePref != null) {
+            accountManagePref.setOnPreferenceClickListener(this);
+        }
 
         Preference checkUpdatePref = findPreference(KEY_CHECK_UPDATE);
-        checkUpdatePref.setOnPreferenceClickListener(this);
+        if (checkUpdatePref != null) {
+            checkUpdatePref.setOnPreferenceClickListener(this);
+        }
 
         Preference translationSettingsPref = findPreference(KEY_TRANSLATION_SETTINGS);
         if (translationSettingsPref != null) {
@@ -176,10 +196,14 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         }
 
         mNotificationsPref = findPreference(KEY_NOTIFICATIONS);
-        mNotificationsPref.setOnPreferenceChangeListener(this);
+        if (mNotificationsPref != null) {
+            mNotificationsPref.setOnPreferenceChangeListener(this);
+        }
 
         mNotificationIntervalPref = findPreference(KEY_NOTIFICATION_INTERVAL);
-        mNotificationIntervalPref.setOnPreferenceChangeListener(this);
+        if (mNotificationIntervalPref != null) {
+            mNotificationIntervalPref.setOnPreferenceChangeListener(this);
+        }
 
         // 镜像源：点击不弹原生对话框，改走“选择+实时测速”合并对话框
         // （MirrorPresetPreference.onClick 已空实现，原生对话框永不弹出）
@@ -189,10 +213,14 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         }
 
         mReleaseRadarPref = findPreference(KEY_RELEASE_RADAR_NOTIFICATIONS);
-        mReleaseRadarPref.setOnPreferenceChangeListener(this);
+        if (mReleaseRadarPref != null) {
+            mReleaseRadarPref.setOnPreferenceChangeListener(this);
+        }
 
         mReleaseRadarIntervalPref = findPreference(KEY_RELEASE_RADAR_INTERVAL);
-        mReleaseRadarIntervalPref.setOnPreferenceChangeListener(this);
+        if (mReleaseRadarIntervalPref != null) {
+            mReleaseRadarIntervalPref.setOnPreferenceChangeListener(this);
+        }
 
         mDarkModePref = findPreference(KEY_DARK_MODE);
         if (mDarkModePref != null) {
@@ -224,6 +252,9 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
 
     @Override
     public boolean onPreferenceChange(Preference pref, Object newValue) {
+        // 0.1.38：设置变更链埋点（只记键名，不记新值）。
+        com.gh4a.utils.DiagTrace.log(getActivity(), "SETTINGS",
+                "key=" + (pref != null ? pref.getKey() : "?"));
         if (KEY_ACCENT_COLOR.equals(pref.getKey())) {
             // Accent color needs a full restart like theme change
             mListener.onThemeChanged();
@@ -328,24 +359,23 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         if (getActivity() == null) {
             return;
         }
-        new MirrorManageDialog(getActivity(), findPreference(KEY_MIRROR_PRESET)).show();
-    }
+        final ListPreference pref = findPreference(KEY_MIRROR_PRESET);
+        mMirrorDialog = new MirrorSourceDialog(getActivity(),
+                new MirrorSourceDialog.PresetStore() {
+                    @Override
+                    public String get() {
+                        return pref != null ? pref.getValue() : null;
+                    }
 
-    /** 按延迟从低到高排序：可用的按延迟升序，不可用的排最后。 */
-    private static void sortByLatency(List<MirrorHelper.MirrorSpeedResult> items) {
-        java.util.Collections.sort(items, (a, b) -> {
-            if (a.isOk() != b.isOk()) {
-                return a.isOk() ? -1 : 1;
-            }
-            return Long.compare(a.latencyMs, b.latencyMs);
-        });
-    }
-
-    private void cancelSpeedTest() {
-        if (mSpeedTestHandle != null) {
-            mSpeedTestHandle.cancel();
-            mSpeedTestHandle = null;
-        }
+                    @Override
+                    public void set(String value) {
+                        if (pref != null) {
+                            pref.setValue(value);
+                        }
+                        refreshMirrorPresetSummary();
+                    }
+                });
+        mMirrorDialog.show();
     }
 
     /** 镜像源设置项的摘要：显示当前选中地址的 host。 */
@@ -356,450 +386,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         }
         String v = pref.getValue();
         pref.setSummary(v == null || v.isEmpty() ? "" : MirrorHelper.displayHost(v));
-    }
-
-    /** 镜像源管理对话框的会话：列表数据、测速、行内增删改都在这里。
-     * 行用 ListView 承载（0.0.42 验证过的 UI，名称单行显示正常）。
-     * 编辑中不做任何 notifyDataSetChanged（探针只直改徽章），行内输入框
-     * 实例保持稳定；键盘显式唤起。 */
-    private class MirrorManageDialog {
-        private final android.content.Context mContext;
-        private final ListPreference mPresetPref;
-        private final List<MirrorHelper.MirrorSpeedResult> mItems = new java.util.ArrayList<>();
-        private final java.util.Set<String> mDoneUrls = new java.util.HashSet<>();
-        private AlertDialog mDialog;
-        private android.widget.TextView mSubtitle;
-        private android.widget.ListView mListView;
-        private MirrorManageAdapter mAdapter;
-        private String mCurrentValue;
-        private boolean mUserPicked;
-        private boolean mTestDone;
-        // 底部固定输入条（0.0.47）：随对话框只创建一次，不在列表行里，
-        // 不受测速逐行刷新、排序重排影响。mEditingOldUrl 为 null 表示新增。
-        private android.view.View mFooterBar;
-        private android.widget.EditText mUrlInput;
-        private boolean mEditingIsNew;
-        private String mEditingOldUrl;
-
-        MirrorManageDialog(android.content.Context context, ListPreference presetPref) {
-            mContext = context;
-            mPresetPref = presetPref;
-            mCurrentValue = presetPref != null ? presetPref.getValue() : null;
-        }
-
-        void show() {
-            // 新对话框打开前取消上一次未完成的测速，避免回调叠加
-            cancelSpeedTest();
-            mAdapter = new MirrorManageAdapter();
-            android.view.View content = android.view.LayoutInflater.from(mContext)
-                    .inflate(R.layout.dialog_mirror_manage, null);
-            mSubtitle = content.findViewById(R.id.subtitle);
-            mSubtitle.setText(R.string.mirror_manage_testing);
-
-            mListView = content.findViewById(R.id.list);
-            mListView.setAdapter(mAdapter);
-            // 点行即选用（输入条展开时忽略，避免误触丢掉未保存的输入）
-            mListView.setOnItemClickListener((parent, view, position, id) -> {
-                if (!isFooterOpen()) {
-                    pick(position);
-                }
-            });
-
-            // 底部固定输入条：随对话框只创建一次
-            mFooterBar = content.findViewById(R.id.footer_bar);
-            mUrlInput = content.findViewById(R.id.url);
-            content.findViewById(R.id.confirm).setOnClickListener(v -> saveFooter());
-            content.findViewById(R.id.cancel).setOnClickListener(v -> cancelFooter());
-            mUrlInput.setOnEditorActionListener((tv, actionId, event) -> {
-                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
-                    saveFooter();
-                    return true;
-                }
-                return false;
-            });
-
-            content.findViewById(R.id.add).setOnClickListener(v -> startAdding());
-            content.findViewById(R.id.close).setOnClickListener(v -> {
-                cancel();
-                mDialog.dismiss();
-            });
-
-            mDialog = new AlertDialog.Builder(mContext)
-                    .setView(content)
-                    .create();
-            mDialog.setOnCancelListener(d -> cancel());
-            mDialog.show();
-            if (mDialog.getWindow() != null) {
-                mDialog.getWindow().setSoftInputMode(
-                        android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-            }
-            // 存为字段：Fragment 销毁时若任务还在跑，可主动 cancel/dismiss
-            mSpeedTestDialog = mDialog;
-            refreshAndRetest();
-        }
-
-        /** 点行选用：测速结果仅供参考，随时可点，不用等测完。 */
-        private void pick(int position) {
-            MirrorHelper.MirrorSpeedResult r = mItems.get(position);
-            mUserPicked = true;
-            mCurrentValue = r.url;
-            if (mPresetPref != null) {
-                mPresetPref.setValue(r.url);
-            }
-            refreshMirrorPresetSummary();
-            android.widget.Toast.makeText(mContext,
-                    mContext.getString(R.string.mirror_speed_selected, r.name),
-                    android.widget.Toast.LENGTH_SHORT).show();
-            cancel();
-            mDialog.dismiss();
-        }
-
-        /** 增删改后：重建列表、当前选中失效则回退、重新测速。 */
-        private void refreshAndRetest() {
-            cancelSpeedTest();
-            mTestDone = false;
-            collapseFooter();
-            mItems.clear();
-            mDoneUrls.clear();
-            List<MirrorHelper.MirrorSpeedResult> targets =
-                    MirrorHelper.getSpeedTestTargets(mContext);
-            // 上次缓存的延迟：打开即显示并按缓存排序，不用干等；后台再实时刷新
-            java.util.Map<String, Long> cached =
-                    MirrorHelper.getCachedSpeedResults(mContext);
-            for (MirrorHelper.MirrorSpeedResult t : targets) {
-                Long c = cached.get(t.url);
-                mItems.add(c != null
-                        ? new MirrorHelper.MirrorSpeedResult(t.name, t.url, t.presetValue, c)
-                        : t);
-            }
-            if (!cached.isEmpty()) {
-                sortByLatency(mItems);
-            }
-            // 当前选中的地址若已被删掉：优先回退默认地址，否则取第一个，否则置空
-            if (!containsUrl(mCurrentValue)) {
-                mCurrentValue = "";
-                for (MirrorHelper.MirrorSpeedResult r : mItems) {
-                    if (r.url.equalsIgnoreCase(MirrorHelper.DEFAULT_PRESET)) {
-                        mCurrentValue = r.url;
-                        break;
-                    }
-                }
-                if (mCurrentValue.isEmpty() && !mItems.isEmpty()) {
-                    mCurrentValue = mItems.get(0).url;
-                }
-                if (mPresetPref != null) {
-                    mPresetPref.setValue(mCurrentValue);
-                }
-                refreshMirrorPresetSummary();
-            }
-            mAdapter.notifyDataSetChanged();
-            if (mItems.isEmpty()) {
-                // 空列表也不关对话框：用户可点“+ 新增镜像源”重新添加
-                mSubtitle.setText(R.string.mirror_empty_hint);
-                return;
-            }
-            mSubtitle.setText(R.string.mirror_manage_testing);
-            startSpeedTest();
-        }
-
-        private boolean containsUrl(String url) {
-            if (url == null) {
-                return false;
-            }
-            for (MirrorHelper.MirrorSpeedResult r : mItems) {
-                if (url.equalsIgnoreCase(r.url)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private void startSpeedTest() {
-            final List<MirrorHelper.MirrorSpeedResult> probes =
-                    new java.util.ArrayList<>(mItems);
-            mSpeedTestHandle = MirrorHelper.testAllMirrorsSpeed(mContext, probes,
-                    new MirrorHelper.SpeedTestCallback() {
-                        @Override
-                        public void onProbeComplete(MirrorHelper.MirrorSpeedResult result) {
-                            if (!isAdded()) {
-                                return;
-                            }
-                            mDoneUrls.add(result.url);
-                            for (int i = 0; i < mItems.size(); i++) {
-                                if (mItems.get(i).url.equals(result.url)) {
-                                    mItems.set(i, result);
-                                    break;
-                                }
-                            }
-                            // 只直改该行的延迟徽章，不 notify（保住编辑中的输入框）
-                            updateRowBadge(result);
-                        }
-
-                        @Override
-                        public void onAllComplete() {
-                            mSpeedTestHandle = null;
-                            if (!isAdded()) {
-                                return;
-                            }
-                            // 存缓存，下次打开直接显示
-                            MirrorHelper.saveSpeedTestResults(mContext, mItems);
-                            mTestDone = true;
-                            // 输入条在列表之外：排序重排碰不到它，无需推迟收尾
-                            finishTest();
-                        }
-                    });
-        }
-
-        /** 测速收尾：按实测延迟重排（低的在上，不可用的在下）；没手动选过就自动选中延迟最低的。 */
-        private void finishTest() {
-            sortByLatency(mItems);
-            MirrorHelper.MirrorSpeedResult fastest = null;
-            for (MirrorHelper.MirrorSpeedResult r : mItems) {
-                if (r.isOk()) {
-                    fastest = r;
-                    break;
-                }
-            }
-            if (fastest != null && !mUserPicked) {
-                mCurrentValue = fastest.url;
-                if (mPresetPref != null) {
-                    mPresetPref.setValue(fastest.url);
-                }
-                refreshMirrorPresetSummary();
-                mSubtitle.setText(R.string.mirror_manage_auto_selected);
-            } else {
-                mSubtitle.setText("");
-            }
-            mAdapter.notifyDataSetChanged();
-        }
-
-        /** 探针完成：找到可见行只刷新延迟徽章，不重建。 */
-        private void updateRowBadge(MirrorHelper.MirrorSpeedResult result) {
-            if (mListView == null) {
-                return;
-            }
-            for (int i = 0; i < mItems.size(); i++) {
-                if (!mItems.get(i).url.equals(result.url)) {
-                    continue;
-                }
-                int visible = i - mListView.getFirstVisiblePosition();
-                if (visible < 0 || visible >= mListView.getChildCount()) {
-                    return;
-                }
-                android.view.View row = mListView.getChildAt(visible);
-                mAdapter.bindBadge(row, result);
-                return;
-            }
-        }
-
-        private void cancel() {
-            cancelSpeedTest();
-        }
-
-        /** 点“+ 新增镜像源”：底部输入条展开，输入框清空。 */
-        private void startAdding() {
-            if (isFooterOpen()) {
-                return;
-            }
-            mEditingIsNew = true;
-            mEditingOldUrl = null;
-            mUrlInput.setText("");
-            showFooter();
-        }
-
-        /** 点行内编辑图标：底部输入条展开并预填该行地址（按地址定位，不怕重排）。 */
-        private void startEditing(String url) {
-            if (isFooterOpen()) {
-                return;
-            }
-            mEditingIsNew = false;
-            mEditingOldUrl = url;
-            mUrlInput.setText(url);
-            mUrlInput.setSelection(mUrlInput.getText().length());
-            showFooter();
-        }
-
-        private void showFooter() {
-            mFooterBar.setVisibility(android.view.View.VISIBLE);
-            // 附着后要焦点并显式唤起键盘（直接调可能因未附着而静默失败）
-            mUrlInput.post(() -> {
-                mUrlInput.requestFocus();
-                showKeyboard(mUrlInput);
-            });
-        }
-
-        private boolean isFooterOpen() {
-            return mFooterBar != null
-                    && mFooterBar.getVisibility() == android.view.View.VISIBLE;
-        }
-
-        private void collapseFooter() {
-            if (mFooterBar != null) {
-                mFooterBar.setVisibility(android.view.View.GONE);
-            }
-            mEditingOldUrl = null;
-        }
-
-        /** 底部输入条保存：新增或修改地址。 */
-        private void saveFooter() {
-            String url = MirrorHelper.normalizeUrl(mUrlInput.getText().toString());
-            if (url.isEmpty()
-                    || !url.regionMatches(true, 0, "https://", 0, 8)) {
-                android.widget.Toast.makeText(mContext,
-                        R.string.mirror_custom_url_invalid,
-                        android.widget.Toast.LENGTH_LONG).show();
-                return;
-            }
-            if (!mEditingIsNew && url.equalsIgnoreCase(mEditingOldUrl)) {
-                // 地址没改：直接收起输入条
-                cancelFooter();
-                return;
-            }
-            for (MirrorHelper.MirrorSpeedResult r : mItems) {
-                if (url.equalsIgnoreCase(r.url)) {
-                    android.widget.Toast.makeText(mContext,
-                            R.string.mirror_url_exists,
-                            android.widget.Toast.LENGTH_SHORT).show();
-                    return;
-                }
-            }
-            hideKeyboard();
-            collapseFooter();
-            if (mEditingIsNew) {
-                MirrorHelper.addMirrorUrl(mContext, url);
-                android.widget.Toast.makeText(mContext, R.string.mirror_added,
-                        android.widget.Toast.LENGTH_SHORT).show();
-            } else {
-                MirrorHelper.updateMirrorUrl(mContext, mEditingOldUrl, url);
-                android.widget.Toast.makeText(mContext, R.string.mirror_updated,
-                        android.widget.Toast.LENGTH_SHORT).show();
-            }
-            refreshAndRetest();
-        }
-
-        /** 收起底部输入条（点 ✕ 或地址未改）。 */
-        private void cancelFooter() {
-            hideKeyboard();
-            collapseFooter();
-        }
-
-        /** 删除行：弹确认框（按地址删，确认框弹出期间列表重排也不怕删错）。 */
-        private void deleteAt(int position) {
-            if (isFooterOpen()) {
-                return;
-            }
-            final String url = mItems.get(position).url;
-            new AlertDialog.Builder(mContext)
-                    .setMessage(R.string.mirror_delete_confirm)
-                    .setPositiveButton(android.R.string.ok, (d, which) -> {
-                        MirrorHelper.removeMirrorUrl(mContext, url);
-                        android.widget.Toast.makeText(mContext, R.string.mirror_deleted,
-                                android.widget.Toast.LENGTH_SHORT).show();
-                        refreshAndRetest();
-                    })
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show();
-        }
-
-        private void hideKeyboard() {
-            android.view.View focus = mDialog.getCurrentFocus();
-            if (focus != null) {
-                android.view.inputmethod.InputMethodManager imm =
-                        (android.view.inputmethod.InputMethodManager)
-                                mContext.getSystemService(
-                                        android.content.Context.INPUT_METHOD_SERVICE);
-                if (imm != null) {
-                    imm.hideSoftInputFromWindow(focus.getWindowToken(), 0);
-                }
-            }
-        }
-
-        /** 显式唤起键盘（flag=0 表示用户主动操作，输入法不会忽略）。 */
-        private void showKeyboard(android.widget.EditText input) {
-            android.view.inputmethod.InputMethodManager imm =
-                    (android.view.inputmethod.InputMethodManager)
-                            mContext.getSystemService(
-                                    android.content.Context.INPUT_METHOD_SERVICE);
-            if (imm != null) {
-                imm.showSoftInput(input, 0);
-            }
-        }
-
-        /** 列表适配器：只有普通行；输入条在列表之外，不参与回收。 */
-        private class MirrorManageAdapter extends android.widget.BaseAdapter {
-
-            @Override
-            public int getCount() {
-                return mItems.size();
-            }
-
-            @Override
-            public Object getItem(int position) {
-                return mItems.get(position);
-            }
-
-            @Override
-            public long getItemId(int position) {
-                return position;
-            }
-
-            @Override
-            public android.view.View getView(int position,
-                    android.view.View convertView, android.view.ViewGroup parent) {
-                android.view.View v = convertView;
-                if (v == null) {
-                    v = android.view.LayoutInflater.from(mContext).inflate(
-                            R.layout.dialog_mirror_source_item, parent, false);
-                }
-                bindNormalRow(v, position);
-                return v;
-            }
-
-            private void bindNormalRow(android.view.View v, final int position) {
-                MirrorHelper.MirrorSpeedResult r = mItems.get(position);
-                android.widget.TextView name = v.findViewById(R.id.name);
-                android.widget.RadioButton radio = v.findViewById(R.id.radio);
-                name.setText(r.name);
-                boolean selected = r.url.equalsIgnoreCase(mCurrentValue);
-                radio.setChecked(selected);
-                v.setBackground(mContext.getDrawable(selected
-                        ? R.drawable.mirror_row_selected : R.drawable.mirror_row_card));
-                bindBadge(v, r);
-                v.findViewById(R.id.edit).setOnClickListener(
-                        eb -> startEditing(r.url));
-                v.findViewById(R.id.delete).setOnClickListener(
-                        db -> deleteAt(position));
-            }
-
-            /** 绑定/刷新延迟徽章（颜色随延迟区间变化）。 */
-            void bindBadge(android.view.View v, MirrorHelper.MirrorSpeedResult r) {
-                android.widget.TextView status = v.findViewById(R.id.status);
-                android.content.res.Resources res = mContext.getResources();
-                int badgeColor;
-                if (!mDoneUrls.contains(r.url) && r.latencyMs < 0) {
-                    // 无缓存且本次还没测完
-                    status.setText(R.string.mirror_source_testing);
-                    badgeColor = res.getColor(android.R.color.darker_gray);
-                } else if (r.isOk()) {
-                    // 本次实测或上次缓存的延迟：按区间着色（<500绿，<1000橙，否则红）
-                    status.setText(mContext.getString(
-                            R.string.mirror_source_latency, r.latencyMs));
-                    badgeColor = r.latencyMs < 500
-                            ? res.getColor(R.color.primary)
-                            : r.latencyMs < 1000
-                                    ? res.getColor(R.color.accent_orange)
-                                    : res.getColor(R.color.accent_red);
-                } else {
-                    status.setText(R.string.mirror_source_unavailable);
-                    badgeColor = res.getColor(android.R.color.darker_gray);
-                }
-                android.graphics.drawable.Drawable badge = mContext
-                        .getDrawable(R.drawable.mirror_latency_badge).mutate();
-                badge.setTint(badgeColor);
-                status.setBackground(badge);
-                status.setTextColor(res.getColor(android.R.color.white));
-            }
-        }
     }
 
     private void showBackupRestoreDialog() {

@@ -10,9 +10,9 @@ import com.gh4a.R;
 import com.meisolsson.githubsdk.model.User;
 
 /**
- * 动态聚合页：抽屉「动态」入口，下设「关注」「全站」双 Tab。
+ * 动态聚合页：抽屉「动态」入口，下设「关注」「公开」双 Tab。
  * 分别复用 NewsFeedFactory（关注的人/组织的动态，带组织切换器）
- * 与 TimelineFactory（全站公共时间线），Fragment 零改动。
+ * 与 TimelineFactory（公开公共时间线），Fragment 零改动。
  *
  * 菜单、生命周期等调用按当前 Tab 委托给对应的子 Factory；
  * 组织切换器只在「关注」Tab 显示，切 Tab 时 HomeActivity 会刷新菜单。

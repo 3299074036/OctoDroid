@@ -1,8 +1,5 @@
 package com.gh4a.activities.home;
 
-import android.view.Menu;
-import android.view.MenuItem;
-
 import androidx.annotation.StringRes;
 import androidx.fragment.app.Fragment;
 
@@ -10,17 +7,16 @@ import com.gh4a.R;
 import com.gh4a.fragment.TrendingFragment;
 
 /**
- * 趋势子页：原内层 3 Tab（今日/本周/本月）改为右上角「时间范围」筛选对话框，
- * 供发现聚合页（DiscoverHubFactory）复用。
+ * 趋势子页：时间范围不再是右上角工具栏菜单（0.5.0 摘除）。
+ * 范围选择改为趋势列表上方的固定选择行（见 TrendingFragment 的选择行，
+ * 仅在 Home 内显示；独立 TrendingActivity 仍用原 3 Tab，不受影响）。
+ * 本 Factory 只持有范围状态，点击选择行经 HomeActivity.setTrendRange()
+ * 回到这里并刷新页面，筛选逻辑与原来对话框的三选项完全一致。
  */
 public class TrendingFactory extends FragmentFactory {
     public static final int RANGE_DAILY = 0;
     public static final int RANGE_WEEKLY = 1;
     public static final int RANGE_MONTHLY = 2;
-
-    private static final int[] RANGE_TITLES = new int[] {
-            R.string.trend_today, R.string.trend_week, R.string.trend_month
-    };
 
     private int mRange = RANGE_DAILY;
 
@@ -30,6 +26,10 @@ public class TrendingFactory extends FragmentFactory {
 
     public int getRange() {
         return mRange;
+    }
+
+    public void setRange(int range) {
+        mRange = range;
     }
 
     @Override
@@ -53,39 +53,5 @@ public class TrendingFactory extends FragmentFactory {
             default:
                 return TrendingFragment.newInstance(TrendingFragment.TYPE_DAILY);
         }
-    }
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        menu.add(Menu.NONE, Menu.FIRST, Menu.NONE, R.string.trend_range)
-                .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_IF_ROOM);
-        return super.onCreateOptionsMenu(menu);
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == Menu.FIRST) {
-            showRangeDialog();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
-    }
-
-    private void showRangeDialog() {
-        final String[] entries = new String[RANGE_TITLES.length];
-        for (int i = 0; i < entries.length; i++) {
-            entries[i] = mActivity.getString(RANGE_TITLES[i]);
-        }
-        new androidx.appcompat.app.AlertDialog.Builder(mActivity)
-                .setTitle(R.string.trend_range)
-                .setSingleChoiceItems(entries, mRange, (dialog, which) -> {
-                    dialog.dismiss();
-                    if (which != mRange) {
-                        mRange = which;
-                        mActivity.invalidateFragments();
-                    }
-                })
-                .setNegativeButton(R.string.cancel, null)
-                .show();
     }
 }

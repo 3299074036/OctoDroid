@@ -8,16 +8,15 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import android.text.InputType;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.EditText;
 import android.widget.TextView;
 
+import com.gh4a.Gh4Application;
 import com.gh4a.R;
 import com.gh4a.activities.RepositoryActivity;
 import com.gh4a.adapter.StarGroupAdapter;
@@ -92,8 +91,8 @@ public class StarGroupFragment extends Fragment {
     private void reload() {
         List<StarGroupAdapter.Row> rows = new ArrayList<>();
         if (mSelectedGroup == null) {
-            for (String group : StarGroupManager.getGroups(getActivity())) {
-                int count = StarGroupManager.getRepos(getActivity(), group).size();
+            for (String group : StarGroupManager.getGroups(getActivity(), Gh4Application.get().getAuthLogin())) {
+                int count = StarGroupManager.getRepos(getActivity(), Gh4Application.get().getAuthLogin(), group).size();
                 rows.add(new StarGroupAdapter.Row(
                         StarGroupAdapter.Row.KIND_GROUP, group,
                         getResources().getQuantityString(
@@ -103,7 +102,7 @@ public class StarGroupFragment extends Fragment {
             mEmptyView.setText(R.string.no_star_groups);
         } else {
             for (StarGroupManager.StarRepo repo :
-                    StarGroupManager.getRepos(getActivity(), mSelectedGroup)) {
+                    StarGroupManager.getRepos(getActivity(), Gh4Application.get().getAuthLogin(), mSelectedGroup)) {
                 rows.add(new StarGroupAdapter.Row(
                         StarGroupAdapter.Row.KIND_REPO, repo.fullName,
                         repo.description, repo.fullName));
@@ -135,7 +134,7 @@ public class StarGroupFragment extends Fragment {
             new AlertDialog.Builder(getActivity())
                     .setMessage(getString(R.string.star_group_remove_confirm, row.key))
                     .setPositiveButton(R.string.remove, (d, w) -> {
-                        StarGroupManager.removeRepo(getActivity(), mSelectedGroup, row.key);
+                        StarGroupManager.removeRepo(getActivity(), Gh4Application.get().getAuthLogin(), mSelectedGroup, row.key);
                         reload();
                     })
                     .setNegativeButton(R.string.cancel, null)
@@ -156,14 +155,14 @@ public class StarGroupFragment extends Fragment {
                                 getString(R.string.star_group_rename_title),
                                 group,
                                 newName -> {
-                                    StarGroupManager.renameGroup(getActivity(), group, newName);
+                                    StarGroupManager.renameGroup(getActivity(), Gh4Application.get().getAuthLogin(), group, newName);
                                     reload();
                                 });
                     } else {
                         new AlertDialog.Builder(getActivity())
                                 .setMessage(getString(R.string.star_group_delete_confirm, group))
                                 .setPositiveButton(R.string.delete, (d2, w) -> {
-                                    StarGroupManager.deleteGroup(getActivity(), group);
+                                    StarGroupManager.deleteGroup(getActivity(), Gh4Application.get().getAuthLogin(), group);
                                     reload();
                                 })
                                 .setNegativeButton(R.string.cancel, null)
@@ -177,20 +176,11 @@ public class StarGroupFragment extends Fragment {
         void onName(String name);
     }
 
+    // 0.1.20 D-08: 文本输入走 TextInputDialogHelper（本方法仅作薄委托，
+    // 调用点传的 NameCallback 不变；去空白语义与原先一致）。
     private void showNameInputDialog(String title, String initial, NameCallback callback) {
-        EditText input = new EditText(getActivity());
-        input.setInputType(InputType.TYPE_CLASS_TEXT);
-        input.setText(initial);
-        input.setSelectAllOnFocus(true);
-        int padding = (int) (16 * getResources().getDisplayMetrics().density);
-        input.setPadding(padding, padding, padding, padding);
-        new AlertDialog.Builder(getActivity())
-                .setTitle(title)
-                .setView(input)
-                .setPositiveButton(R.string.ok, (d, w) ->
-                        callback.onName(input.getText().toString().trim()))
-                .setNegativeButton(R.string.cancel, null)
-                .show();
+        com.gh4a.utils.TextInputDialogHelper.show(getActivity(), title, initial,
+                name -> callback.onName(name));
     }
 
     @Override
@@ -207,7 +197,7 @@ public class StarGroupFragment extends Fragment {
             showNameInputDialog(
                     getString(R.string.star_group_create_title), "",
                     name -> {
-                        if (StarGroupManager.createGroup(getActivity(), name)) {
+                        if (StarGroupManager.createGroup(getActivity(), Gh4Application.get().getAuthLogin(), name)) {
                             reload();
                         }
                     });

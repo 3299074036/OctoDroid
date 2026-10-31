@@ -19,7 +19,6 @@ import android.content.Context;
 import androidx.recyclerview.widget.RecyclerView;
 import android.text.format.Formatter;
 import android.view.LayoutInflater;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Filterable;
@@ -56,13 +55,21 @@ public class RepositoryAdapter extends RootAdapter<Repository, RepositoryAdapter
             holder.tvDesc.setVisibility(View.GONE);
         }
 
-        holder.tvLanguage.setText(repository.language() != null
+        // 0.4.0 像素重排：原型仓库行 meta 为单行“语言  ★ 星  ⑂ Fork  体积”，
+        // private/fork 改为 meta 前缀词，不再分栏显示。
+        StringBuilder meta = new StringBuilder();
+        if (repository.isPrivate()) {
+            meta.append(mContext.getString(R.string.repo_type_private)).append("  ·  ");
+        }
+        if (repository.isFork()) {
+            meta.append(mContext.getString(R.string.fork)).append("  ·  ");
+        }
+        meta.append(repository.language() != null
                 ? repository.language() : mContext.getString(R.string.unknown));
-        holder.tvForks.setText(String.valueOf(repository.forksCount()));
-        holder.tvStars.setText(String.valueOf(repository.stargazersCount()));
-        holder.tvSize.setText(Formatter.formatFileSize(mContext, 1024L * repository.size()));
-        holder.tvPrivate.setVisibility(repository.isPrivate() ? View.VISIBLE : View.GONE);
-        holder.tvFork.setVisibility(repository.isFork() ? View.VISIBLE : View.GONE);
+        meta.append("  ★ ").append(repository.stargazersCount());
+        meta.append("  ⑂ ").append(repository.forksCount());
+        meta.append("  ").append(Formatter.formatFileSize(mContext, 1024L * repository.size()));
+        holder.tvMeta.setText(meta.toString());
     }
 
     @Override
@@ -72,42 +79,16 @@ public class RepositoryAdapter extends RootAdapter<Repository, RepositoryAdapter
         return name.contains(lcFilter);
     }
 
-    public static class ViewHolder extends RecyclerView.ViewHolder implements View.OnClickListener,
-            View.OnTouchListener {
+    public static class ViewHolder extends RecyclerView.ViewHolder {
         private ViewHolder(View view) {
             super(view);
             tvTitle = view.findViewById(R.id.tv_title);
             tvDesc = view.findViewById(R.id.tv_desc);
-            tvLanguage = view.findViewById(R.id.tv_language);
-            tvForks = view.findViewById(R.id.tv_forks);
-            tvStars = view.findViewById(R.id.tv_stars);
-            tvSize = view.findViewById(R.id.tv_size);
-            tvPrivate = view.findViewById(R.id.tv_private);
-            tvFork = view.findViewById(R.id.tv_fork);
-
-            view.findViewById(R.id.attributes).setOnClickListener(this);
-            view.findViewById(R.id.scrollView).setOnTouchListener(this);
+            tvMeta = view.findViewById(R.id.tv_meta);
         }
 
         private final TextView tvTitle;
         private final TextView tvDesc;
-        private final TextView tvLanguage;
-        private final TextView tvForks;
-        private final TextView tvStars;
-        private final TextView tvSize;
-        private final TextView tvPrivate;
-        private final TextView tvFork;
-
-        @Override
-        public void onClick(View v) {
-            // Workaround to make it possible to open repositories when clicking inside of
-            // attributes ScrollView
-            itemView.performClick();
-        }
-
-        @Override
-        public boolean onTouch(View v, MotionEvent event) {
-            return false;
-        }
+        private final TextView tvMeta;
     }
 }

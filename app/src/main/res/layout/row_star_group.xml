@@ -1,19 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 0.1.10：分组行改卡片式。组头（TYPE_LIST）显示左彩条 + 首字母圆标 +
+     数量胶囊 + 箭头，整行带圆角卡片背景与阴影；组下仓库行（TYPE_LIST_REPO）
+     复用同一布局但隐藏上述装饰，只留趋势字体标题 + 简介。原有
+     iv_icon 在 0.1.2 起已置空，继续保持 GONE。
+     0.1.12：外层改竖向，底部加分隔线视图（仅组下仓库行、且后面还有同组仓库行时显示，
+     与趋势页列表分隔线同款 listDivider）；组头卡片不显示分隔线。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:gravity="center_vertical"
-    android:minHeight="64dp"
-    android:orientation="horizontal"
-    android:paddingStart="16dp"
-    android:paddingEnd="16dp"
+    android:orientation="vertical"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
     android:paddingTop="8dp"
     android:paddingBottom="8dp">
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:minHeight="40dp"
+        android:orientation="horizontal">
+
+    <View
+        android:id="@+id/v_color_bar"
+        android:layout_width="5dp"
+        android:layout_height="40dp"
+        android:layout_marginEnd="10dp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tv_letter"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginEnd="12dp"
+        android:gravity="center"
+        android:textColor="#ffffffff"
+        android:textSize="17sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
     <ImageView
         android:id="@+id/iv_icon"
-        android:layout_width="32dp"
-        android:layout_height="32dp"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
         android:layout_marginEnd="12dp" />
 
     <LinearLayout
@@ -28,7 +57,8 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textAppearance="?android:attr/textAppearanceMedium" />
+            android:textAppearance="?android:attr/textAppearanceMedium"
+            android:textSize="16sp" />
 
         <TextView
             android:id="@+id/tv_subtitle"
@@ -39,5 +69,39 @@
             android:textAppearance="?android:attr/textAppearanceSmall" />
 
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/tv_count_pill"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/star_count_pill"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:textColor="@color/star_count_pill_text"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tv_chevron"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:text="\u203A"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="20sp"
+        android:visibility="gone" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/v_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="8dp"
+        android:background="?android:attr/listDivider"
+        android:visibility="gone" />
 
 </LinearLayout>

@@ -28,7 +28,7 @@
                 android:id="@+id/iv_avatar"
                 android:layout_width="24dp"
                 android:layout_height="24dp"
-                android:layout_marginLeft="16dp"
+                android:layout_marginLeft="12dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:contentDescription="@string/repository_owner_avatar"
                 tools:src="@drawable/default_avatar" />

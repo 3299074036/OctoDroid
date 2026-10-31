@@ -47,6 +47,23 @@ public class TrendAdapter extends RootAdapter<Trend, TrendAdapter.ViewHolder> {
 
     @Override
     public void onBindViewHolder(ViewHolder holder, Trend trend) {
+        // 0.1.0 排名号：adapter 位置减去 header（Home 内的时间范围选择行）即为行号，
+        // 再 +1；前 3 名用现行主色加粗，其余用次要文字色。独立 TrendingActivity 无 header，
+        // 位置即行号，同一算法适用。
+        int adapterPos = holder.getBindingAdapterPosition();
+        int rank = adapterPos == RecyclerView.NO_POSITION
+                ? -1 : adapterPos - (hasHeaderView() ? 1 : 0) + 1;
+        if (rank > 0) {
+            holder.tvRank.setText(String.valueOf(rank));
+            boolean top = rank <= 3;
+            holder.tvRank.setTypeface(null, top ? Typeface.BOLD : Typeface.NORMAL);
+            // 0.1.20 D-09: 排名颜色走 UiUtils.rankOrSelectedColor。
+            holder.tvRank.setTextColor(
+                    com.gh4a.utils.UiUtils.rankOrSelectedColor(mContext, top));
+        } else {
+            holder.tvRank.setText("");
+        }
+
         String owner = trend.getRepoOwner();
         String name = trend.getRepoName();
 
@@ -72,6 +89,7 @@ public class TrendAdapter extends RootAdapter<Trend, TrendAdapter.ViewHolder> {
     public static class ViewHolder extends RecyclerView.ViewHolder {
         private ViewHolder(View view) {
             super(view);
+            tvRank = view.findViewById(R.id.tv_rank);
             tvTitle = view.findViewById(R.id.tv_title);
             tvDesc = view.findViewById(R.id.tv_desc);
             tvLang = view.findViewById(R.id.tv_lang);
@@ -79,6 +97,7 @@ public class TrendAdapter extends RootAdapter<Trend, TrendAdapter.ViewHolder> {
             tvForks = view.findViewById(R.id.tv_forks);
         }
 
+        private final TextView tvRank;
         private final TextView tvTitle;
         private final TextView tvDesc;
         private final TextView tvLang;

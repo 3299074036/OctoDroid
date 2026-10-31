@@ -32,7 +32,7 @@
     <string name="about">关于</string>
     <string name="retry">重试</string>
     <string name="open_source_components">开源组件</string>
-    <string name="my_profile">我的主页</string>
+    <string name="my_profile">我</string>
     <string name="user_context">账号</string>
     <string name="add_account">添加账号</string>
     <string name="my_email">zolayuren@gmail.com</string>
@@ -61,6 +61,9 @@
     <string name="settings_category_network">网络加速</string>
     <string name="settings_category_updates">更新</string>
     <string name="settings_category_translation">翻译</string>
+    <string name="settings_section_browsing_account_network">浏览与账号网络</string>
+    <string name="settings_section_updates_translation">更新与翻译</string>
+    <string name="settings_category_about_updates">关于与更新</string>
     <string name="settings_category_about">关于</string>
     <string name="check_update">检查更新</string>
     <string name="check_update_summary">检查 GitHub 上是否有新版本</string>
@@ -103,13 +106,13 @@
     <string name="pub_timeline">公开时间线</string>
     <string name="feed_hub">动态</string>
     <string name="feed_tab_following">关注</string>
-    <string name="feed_tab_public">全站</string>
+    <string name="feed_tab_public">公开</string>
     <string name="my_items">事项</string>
     <string name="issues_tab">议题</string>
     <string name="prs_tab">拉取请求</string>
     <string name="issues_filter">筛选</string>
     <string name="star_hub">Star</string>
-    <string name="discover_hub">发现</string>
+    <string name="discover_hub">趋势</string>
     <string name="trend_range">时间范围</string>
     <string name="load_failure_explanation">从 GitHub 加载数据失败。请检查网络连接是否正常，然后重试。</string>
     <string name="load_failure_explanation_dmca">该仓库因法律原因被下架。\n详情请参阅 %1$s。</string>
@@ -178,7 +181,6 @@
     <string name="my_repositories">我的仓库</string>
     <string name="my_issues">我的议题</string>
     <string name="my_pull_requests">我的拉取请求</string>
-    <string name="my_gists">我的 Gist</string>
     <string name="start_page">启动页</string>
     <string name="start_page_last_selected">上次选择的</string>
     <string name="comment_editor_locked_hint">只有协作者才能发表评论</string>
@@ -771,6 +773,21 @@
     <string name="star_group_assign_title">加入分组</string>
     <string name="star_group_remove_confirm">把 %1$s 移出这个分组？</string>
     <string name="star_group_delete_confirm">删除分组 \u201c%1$s\u201d？仓库的 Star 不会受影响。</string>
+    <!-- 官方 GitHub 列表，已合并进已加星标页 -->
+    <string name="star_tab_groups">分组</string>
+    <string name="star_tab_list">列表</string>
+    <string name="star_tab_updates">更新</string>
+    <string name="mark_all_read">全部已读</string>
+    <string name="my_lists">我的列表</string>
+    <string name="my_lists_loading">正在加载官方列表\u2026</string>
+    <string name="my_lists_failed">官方列表加载失败，已显示本机分组。</string>
+    <string name="my_lists_empty">还没有官方列表。长按已加星标的仓库可以新建官方列表。</string>
+    <string name="local_groups">本机分组</string>
+    <string name="starred_all">已加星标（全部）</string>
+    <string name="assign_official_title">加入官方列表</string>
+    <string name="assign_official_create_new">新建官方列表\u2026</string>
+    <string name="assign_official_success">列表归属已更新</string>
+    <string name="assign_official_failed">列表归属更新失败，请检查网络和账号权限。</string>
     <string name="rename">重命名</string>
     <string name="remove">移出</string>
     <string name="mirror_enabled">启用镜像加速</string>
@@ -833,6 +850,61 @@
     <string name="dark_mode_schedule_summary">%1$s – %2$s 使用深色</string>
     <string name="dark_mode_switched_manual">已切换为手动模式</string>
 
+    <!-- View 全量改造：HomeActivity 新建入口 -->
+    <string name="bottom_nav_create">新建</string>
+    <string name="create_pr_web">PR（浏览器新建）</string>
+    <string name="create_repo_hint">owner/repo，例如 3299074036/OctoDroid</string>
+    <string name="create_repo_invalid">请按 owner/repo 格式输入仓库</string>
+    <string name="create_pr_web_note">本应用没有应用内 PR 新建表单，将在浏览器打开 GitHub 对比页新建。</string>
+
     <string name="dark_mode_start">开始时间</string>
     <string name="dark_mode_end">结束时间</string>
+
+    <string name="me_section_functions">功能</string>
+    <string name="me_section_browsing_network">浏览与网络</string>
+    <string name="me_section_translation_about">翻译与关于</string>
+    <string name="me_activity_hint">点进动态流 ›</string>
+
+    <string name="switch_account">切换账号</string>
+
+    <string name="loading">加载中\u2026</string>
+
+    <string name="dark_mode_light">浅色</string>
+    <string name="dark_mode_dark">深色</string>
+    <string name="start_page_saved">起始页已保存</string>
+    <string name="search_recent_searches">最近搜索</string>
+    <string name="search_hot_suggestions">热门建议</string>
+    <string name="search_no_recent_searches">暂无最近搜索</string>
+    <string name="search_delete_recent_confirm">删除这条最近搜索？</string>
+    <string name="search_type_repo_desc">搜仓库名与描述</string>
+    <string name="search_type_user_desc">搜用户与组织</string>
+    <string name="search_type_code_desc">搜代码内容</string>
+    <string name="me_star_badge_note">底栏 Star 角标，默认开启</string>
+    <string name="me_mirror_speed_test">测速</string>
+    <string name="me_mirror_add">新增镜像</string>
+    <string name="me_mirror_edit">修改</string>
+    <string name="me_mirror_delete">删除</string>
+    <string name="me_account_switch_hint">点整行切换账号</string>
+    <string name="me_star_update_reminder">Star 仓库新版本提醒</string>
+    <string name="diagnostic_log">诊断日志</string>
+    <string name="diagnostic_log_empty">暂无诊断日志</string>
+    <string name="diagnostic_log_live">实时收集中 · 自动滚动</string>
+    <string name="diagnostic_log_paused">已暂停 · 不再自动滚动</string>
+    <string name="diagnostic_log_pause">暂停</string>
+    <string name="diagnostic_log_resume">继续</string>
+    <string name="diagnostic_log_clear">清空</string>
+    <string name="diagnostic_log_export">导出文件</string>
+    <string name="diagnostic_log_filter_all">全部</string>
+    <string name="diagnostic_log_filter_trace">链路追踪</string>
+    <string name="diagnostic_log_filter_crash">崩溃</string>
+    <string name="diagnostic_log_note">只记链路与崩溃，不记账号、凭据、内容。</string>
+    <string name="diagnostic_log_clear_confirm">确定清空全部诊断日志吗？清空后不可恢复，崩溃记录也会一起清掉。</string>
+    <string name="diagnostic_log_cleared">日志已清空</string>
+    <string name="diagnostic_log_export_share">系统分享</string>
+    <string name="diagnostic_log_export_download">保存到“下载”文件夹</string>
+    <string name="diagnostic_log_export_copy">复制全部日志文本</string>
+    <string name="diagnostic_log_saved">已保存到“下载”文件夹：diag-export.txt</string>
+    <string name="diagnostic_log_copied">日志已复制到剪贴板</string>
+    <string name="diagnostic_log_export_failed">导出失败</string>
+    <string name="diagnostic_log_download_unsupported">当前系统版本不支持直接保存，请用系统分享。</string>
 </resources>

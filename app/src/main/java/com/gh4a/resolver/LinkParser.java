@@ -94,7 +94,8 @@ public class LinkParser {
                 return new ParseResult(HomeActivity.makeIntent(activity, R.id.issues_prs,
                         IssuesPrsFactory.TAB_PRS));
             case "gists":
-                return new ParseResult(HomeActivity.makeIntent(activity, R.id.my_gists));
+                // 0.5.0：我的 Gist 已下架，返回 null 走浏览器打开（与 blog 同例）
+                return null;
             case "dashboard":
             case "dashboard-feed":
                 return new ParseResult(HomeActivity.makeIntent(activity, R.id.feed_hub));

@@ -52,6 +52,9 @@ public class StarGroupAdapter extends RootAdapter<StarGroupAdapter.Row, StarGrou
         holder.ivIcon.setImageResource(row.kind == Row.KIND_GROUP
                 ? R.drawable.icon_bookmark : R.drawable.icon_repositories);
         holder.tvTitle.setText(row.title);
+        // 0.1.10：布局里的等宽副标题移到此处显式设置（布局改后默认字体
+        // 已变，此处保持旧版外观不变，仅 merged 分组页用新字体）。
+        holder.tvSubtitle.setTypeface(android.graphics.Typeface.MONOSPACE);
         holder.tvSubtitle.setText(row.subtitle);
         holder.tvSubtitle.setVisibility(
                 row.subtitle == null || row.subtitle.isEmpty() ? View.GONE : View.VISIBLE);

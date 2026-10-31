@@ -5,7 +5,7 @@
     android:id="@+id/edit_fab"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:layout_marginRight="16dp"
+    android:layout_marginRight="12dp"
     android:src="@drawable/menu_edit"
     app:backgroundTint="?attr/colorIssueEditFab"
     app:fabSize="mini"

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 0.1.1 搜索：类型与排序不再是 Spinner 下拉 / 子菜单，点即打开底部动作表。
+     0.1.6 排序移到搜索框后面：类型在前、搜索框居中、排序在后。光改顺序不够，
+     展开的 SearchView 会占满剩余工具栏宽度，排在它后面的 always 项会被量成
+     0 宽而不可见；所以 SearchFragment 里给 SearchView 设了 maxWidth 上限，
+     留出排序按钮的位置（见 onCreateOptionsMenu）。 -->
 <menu
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
@@ -6,27 +11,21 @@
     <item
         android:id="@+id/type"
         android:title="@string/search_type"
+        android:icon="@drawable/menu_search_repos"
         android:orderInCategory="10"
-        app:showAsAction="always"
-        app:actionViewClass="android.widget.Spinner" />
-    <!-- Sort comes before the SearchView in menu order on purpose: the expanded
-         SearchView consumes all remaining toolbar width during measurement, so any
-         item placed after it would be measured with 0 width and become invisible
-         (without even falling into the overflow menu, since it is marked always). -->
-    <item
-        android:id="@+id/sort"
-        android:title="@string/search_sort_title"
-        android:icon="@drawable/menu_sort_order"
-        android:orderInCategory="20"
-        app:showAsAction="always">
-        <menu />
-    </item>
+        app:showAsAction="always" />
     <item
         android:id="@+id/search"
         android:title="@string/search"
         android:icon="@drawable/menu_search"
-        android:orderInCategory="30"
+        android:orderInCategory="20"
         app:showAsAction="always"
         app:actionViewClass="androidx.appcompat.widget.SearchView" />
+    <item
+        android:id="@+id/sort"
+        android:title="@string/search_sort_title"
+        android:icon="@drawable/menu_sort_order"
+        android:orderInCategory="30"
+        app:showAsAction="always" />
 
 </menu>

@@ -35,7 +35,7 @@
                         android:id="@+id/iv_gravatar"
                         android:layout_width="60dp"
                         android:layout_height="60dp"
-                        android:layout_marginRight="16dp"
+                        android:layout_marginRight="12dp"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         tools:src="@drawable/default_avatar" />
 
@@ -47,6 +47,18 @@
                         android:layout_toRightOf="@id/iv_gravatar"
                         android:textAppearance="@style/TextAppearance.HeaderTitle"
                         tools:text="Username" />
+
+                <com.gh4a.widget.LinkHandlingTextView
+                    android:id="@+id/tv_bio"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="@dimen/overview_item_spacing"
+                    android:paddingLeft="@dimen/content_padding"
+                    android:paddingRight="@dimen/content_padding"
+                    android:autoLink="web"
+                    android:textAppearance="?android:attr/textAppearanceSmall"
+                    app:needsLinkHandling="true"
+                    tools:text="Bio of the user" />
 
                     <com.gh4a.widget.LinkHandlingTextView
                         android:id="@+id/tv_email"
@@ -98,38 +110,13 @@
                         tools:text="Location" />
                 </RelativeLayout>
 
-                <com.gh4a.widget.LinkHandlingTextView
-                    android:id="@+id/tv_bio"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="@dimen/overview_item_spacing"
-                    android:paddingLeft="@dimen/content_padding"
-                    android:paddingRight="@dimen/content_padding"
-                    android:autoLink="web"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    app:needsLinkHandling="true"
-                    tools:text="Bio of the user" />
 
                 <com.gh4a.widget.OverviewRow
-                    android:id="@+id/type_row"
+                    android:id="@+id/repos_row"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:visibility="gone" />
-
-                <com.gh4a.widget.OverviewRow
-                    android:id="@+id/join_date_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:rowIcon="@drawable/icon_calendar"
-                    tools:rowText="Member since 09 February 2019" />
-
-                <com.gh4a.widget.OverviewRow
-                    android:id="@+id/members_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:rowIcon="@drawable/icon_members"
-                    tools:rowText="5 members" />
-
+                    app:rowIcon="@drawable/icon_repositories"
+                    tools:rowText="39 repositories" />
                 <com.gh4a.widget.OverviewRow
                     android:id="@+id/followers_row"
                     android:layout_width="match_parent"
@@ -138,27 +125,41 @@
                     app:rowIconActionHintOff="@string/user_follow_action"
                     app:rowIconActionHintOn="@string/user_unfollow_action"
                     tools:rowText="Followed by 82 users" />
-
                 <com.gh4a.widget.OverviewRow
                     android:id="@+id/following_row"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     app:rowIcon="@drawable/icon_following"
                     tools:rowText="Following 33 users" />
-
-                <com.gh4a.widget.OverviewRow
-                    android:id="@+id/repos_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:rowIcon="@drawable/icon_repositories"
-                    tools:rowText="39 repositories" />
-
                 <com.gh4a.widget.OverviewRow
                     android:id="@+id/gists_row"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     app:rowIcon="@drawable/icon_gists"
                     tools:rowText="12 gists" />
+                <com.gh4a.widget.OverviewRow
+                    android:id="@+id/type_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:visibility="gone" />
+                <com.gh4a.widget.OverviewRow
+                    android:id="@+id/join_date_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:rowIcon="@drawable/icon_calendar"
+                    tools:rowText="Member since 09 February 2019" />
+                <com.gh4a.widget.OverviewRow
+                    android:id="@+id/members_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:rowIcon="@drawable/icon_members"
+                    tools:rowText="5 members" />
+
+
+
+
+
+
 
             </LinearLayout>
 

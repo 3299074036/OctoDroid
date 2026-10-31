@@ -26,9 +26,21 @@ public class ApkUpdateDownloader {
         final Context appContext = activity.getApplicationContext();
         // M-NEW-1：apkUrl/fileName 来自远端 release JSON（可能经不可信镜像），
         // 先校验：非 http(s) 直接拒绝，避免 DownloadManager.Request 抛异常导致主线程崩溃
-        if (!isHttpUrl(apkUrl)) {
+        // SEC-8: APK 下载只接受 HTTPS。http:// 在此直接拒绝（见 isHttpsUrl）。
+        if (!isHttpsUrl(apkUrl)) {
             Toast.makeText(appContext, R.string.download_failed, Toast.LENGTH_LONG).show();
             return;
+        }
+        // SEC-8: 链路级防降级——ChainDownloadHelper 会按 [自选镜像 → 默认
+        // 镜像 → 直连] 展开同一条链；这里先把整条链算出来，任一环非 HTTPS
+        // 即整单拒绝，不让某条镜像链把下载降级到 http。注意 DownloadManager
+        // 内部跟随的重定向无法被应用层观测（无拦截接口），那一层残余风险
+        // 靠 HTTPS 入口 + 下面的签名一致性检查兜底。
+        for (String chainUrl : MirrorHelper.buildFallbackChain(appContext, apkUrl, false)) {
+            if (!isHttpsUrl(chainUrl)) {
+                Toast.makeText(appContext, R.string.download_failed, Toast.LENGTH_LONG).show();
+                return;
+            }
         }
         // 文件名二次清洗：恶意 tag 拼出的非法名在这里拦下，转失败 toast，不抛异常
         final String safeName;
@@ -95,10 +107,9 @@ public class ApkUpdateDownloader {
         return "OctoDroid_" + v + ".apk";
     }
 
-    private static boolean isHttpUrl(String url) {
-        return url != null
-                && (url.regionMatches(true, 0, "http://", 0, 7)
-                        || url.regionMatches(true, 0, "https://", 0, 8));
+    /** SEC-8: APK 下载路径只接受 HTTPS；http:// 一律拒绝。 */
+    private static boolean isHttpsUrl(String url) {
+        return url != null && url.regionMatches(true, 0, "https://", 0, 8);
     }
 
     /**

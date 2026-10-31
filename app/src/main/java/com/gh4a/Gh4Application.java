@@ -24,6 +24,7 @@ import android.os.Build;
 import android.util.Log;
 import android.util.LongSparseArray;
 
+import com.gh4a.fragment.SearchFragment;
 import com.gh4a.fragment.SettingsFragment;
 import com.gh4a.utils.StringUtils;
 import com.gh4a.worker.NotificationsWorker;
@@ -59,6 +60,19 @@ public class Gh4Application extends Application implements
     private static Gh4Application sInstance;
     private PrettyTime mPt;
 
+    // 0.1.23 crash breadcrumb: in-memory only, activity simple class names +
+    // booleans, never any credential, repo name, URL, or user content. The
+    // destroy-time DecorView crash has zero app frames, so without this the
+    // destroyed activity cannot be identified from the trace. onActivityStopped
+    // fires before the destroy-time crash (destroy callbacks may not), so the
+    // stopped snapshot is recorded alongside the destroyed snapshot.
+    private volatile String mLastResumedActivity = "?";
+    private volatile String mLastStoppedActivity = "?";
+    private volatile boolean mLastStoppedFinishing = false;
+    private volatile boolean mLastStoppedDialogShowing = false;
+    private volatile String mLastDestroyedActivity = "?";
+    private volatile boolean mLastDestroyedFinishing = false;
+
     private static final int THEME_DARK = 0;
     private static final int THEME_LIGHT = 1;
     private static final int THEME_SYSTEM = 2;
@@ -80,6 +94,7 @@ public class Gh4Application extends Application implements
         sInstance = this;
 
         installCrashRecorder();
+        installCrashBreadcrumbs();
         installRxErrorHandler();
 
         SharedPreferences prefs = getPrefs();
@@ -135,12 +150,24 @@ public class Gh4Application extends Application implements
 
         prefs.registerOnSharedPreferenceChangeListener(this);
         updateTheme(prefs);
+        // 0.1.36：诊断追踪（进程启动时刻）。
+        com.gh4a.utils.ThemeTrace.logState(this, "APP_CREATED");
+        // 0.1.38：启动链埋点（只记事件，不记账号与内容）。
+        com.gh4a.utils.DiagTrace.log(this, "APP_CREATED", "");
+        // 0.1.12：启动时按已保存主题色启用对应桌面图标别名（已是目标状态时不重复设置）。
+        com.gh4a.utils.LauncherIcon.apply(this);
         if (true || BuildConfig.DEBUG) {
             Traceur.enableLogging();
         }
 
         mPt = new PrettyTime();
         ServiceFactory.initClient(this);
+
+        // 0.1.10：启动时后台预取热门建议（仅已登录且缓存不新鲜时发请求，
+        // 静默写盘），进搜索页时多数情况下已有缓存可秒出。
+        if (isAuthorized()) {
+            SearchFragment.prefetchHotSuggestions(this);
+        }
 
         updateNotificationWorker(prefs);
     }
@@ -183,8 +210,11 @@ public class Gh4Application extends Application implements
             default: nightMode = AppCompatDelegate.MODE_NIGHT_NO; break;
         }
         AppCompatDelegate.setDefaultNightMode(nightMode);
+        // 0.1.36：诊断追踪。
+        com.gh4a.utils.ThemeTrace.logState(this, "UPDATE_THEME theme=" + theme + " night=" + nightMode);
         // Scheduled / follow-system dark mode overrides the manual theme pref
         com.gh4a.utils.DarkModeScheduler.apply(this);
+        com.gh4a.utils.ThemeTrace.logState(this, "UPDATE_THEME_AFTER_SCHEDULER");
     }
 
     @Override
@@ -305,6 +335,12 @@ public class Gh4Application extends Application implements
             revokeTokenAsync(token);
         }
         clearWebViewData();
+        // SEC-6 + BUG-27: logout() delegates here, so there is no separate
+        // mere-logout path in this codebase — account removal clears the
+        // shared HTTP caches and this login's per-login caches, so a later
+        // account cannot be served the removed account's private data.
+        ServiceFactory.evictCaches();
+        clearPerLoginCaches(login);
 
         rescheduleWorkers();
         return newActiveLogin;
@@ -405,17 +441,36 @@ public class Gh4Application extends Application implements
     }
 
     private SharedPreferences mSecurePrefs;
+    /** True only while the current secure store is the plaintext fallback. */
+    private boolean mSecurePrefsPlainFallback;
+    /** SEC-5: plaintext fallback file — deliberately NOT "Gh4a-secure", so a
+     * later successful encrypted open can never read the fallback file as
+     * if it were the encrypted store (format clash in the old code). */
+    private static final String PLAIN_FALLBACK_PREFS = "Gh4a-secure-plain";
+    /** Device-state flag in Gh4a-pref: set when the fallback is in use,
+     * cleared once encrypted storage opens again. Never restored from a
+     * backup (not in the restore whitelist), so it always reflects this
+     * device. Login UI reads it via isSecurePrefsPlainFallback(). */
+    private static final String KEY_SECURE_PLAINTEXT_FALLBACK = "secure_prefs_plaintext_fallback";
+
+    /** True if tokens are currently held in the plaintext fallback file. */
+    public boolean isSecurePrefsPlainFallback() {
+        return mSecurePrefsPlainFallback;
+    }
 
     /**
      * Encrypted storage for GitHub OAuth tokens (H-1). Keys are AES-256-GCM
      * encrypted with a key kept in the AndroidKeyStore; the file on disk
      * never contains a plaintext token.
      * Falls back to plain prefs only if the keystore is unusable, so login
-     * never hard-fails on exotic devices.
+     * never hard-fails on exotic devices — but the fallback now uses a
+     * DIFFERENT file (Gh4a-secure-plain), is flagged visibly at login
+     * (Github4AndroidActivity.onLoginFinished), and is migrated away and
+     * deleted as soon as encrypted storage opens again (SEC-5).
      */
     private synchronized SharedPreferences getSecurePrefs() {
         if (mSecurePrefs == null) {
-            SharedPreferences fallback = getSharedPreferences("Gh4a-secure", MODE_PRIVATE);
+            SharedPreferences legacyPlain = getSharedPreferences("Gh4a-secure", MODE_PRIVATE);
             try {
                 MasterKey masterKey = new MasterKey.Builder(this)
                         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -424,13 +479,101 @@ public class Gh4Application extends Application implements
                         this, "Gh4a-secure", masterKey,
                         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM);
+                mSecurePrefsPlainFallback = false;
+                getPrefs().edit()
+                        .remove(KEY_SECURE_PLAINTEXT_FALLBACK)
+                        .apply();
             } catch (Exception e) {
                 android.util.Log.w(LOG_TAG, "Encrypted prefs unavailable, using plain fallback", e);
-                mSecurePrefs = fallback;
+                mSecurePrefs = getSharedPreferences(PLAIN_FALLBACK_PREFS, MODE_PRIVATE);
+                mSecurePrefsPlainFallback = true;
+                getPrefs().edit()
+                        .putBoolean(KEY_SECURE_PLAINTEXT_FALLBACK, true)
+                        .apply();
             }
-            migratePlaintextTokens(fallback);
+            migratePlaintextTokens(legacyPlain);
+            // Last, so its (newest) tokens win over any older legacy copy:
+            // migrate the new plaintext fallback file into the encrypted
+            // store and delete it. Skipped on the fallback path itself.
+            if (!mSecurePrefsPlainFallback) {
+                migratePlaintextTokensFromFallbackFile();
+            }
         }
         return mSecurePrefs;
+    }
+
+    /**
+     * SEC-5: when encrypted storage opens successfully, move any token_*
+     * keys out of the plaintext fallback file into the encrypted store,
+     * then delete the fallback file outright. Runs only on the encrypted
+     * path; the fallback path never calls it.
+     */
+    private void migratePlaintextTokensFromFallbackFile() {
+        SharedPreferences plain = getSharedPreferences(PLAIN_FALLBACK_PREFS, MODE_PRIVATE);
+        Set<String> logins = getPrefs().getStringSet(KEY_ALL_LOGINS, null);
+        if (logins != null && !logins.isEmpty()) {
+            SharedPreferences.Editor secureEditor = null;
+            for (String login : logins) {
+                String key = KEY_PREFIX_TOKEN + login;
+                if (plain.contains(key)) {
+                    if (secureEditor == null) {
+                        secureEditor = mSecurePrefs.edit();
+                    }
+                    secureEditor.putString(key, plain.getString(key, null));
+                }
+            }
+            if (secureEditor != null) {
+                secureEditor.apply();
+            }
+        }
+        plain.edit().clear().apply();
+        deletePrefsFile(PLAIN_FALLBACK_PREFS);
+    }
+
+    /** Deletes a SharedPreferences file (API 24+ API, file fallback below). */
+    private void deletePrefsFile(String name) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                deleteSharedPreferences(name);
+            } else {
+                java.io.File f = new java.io.File(
+                        getApplicationInfo().dataDir + "/shared_prefs/" + name + ".xml");
+                if (f.exists()) {
+                    f.delete();
+                }
+            }
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "Delete prefs file failed: " + name, e);
+        }
+    }
+
+    /**
+     * SEC-6/BUG-27: clears the removed login's per-login caches. Called
+     * from removeAccount() only (logout() delegates to it). The star-group
+     * file is per-login by name (star_groups_&lt;login&gt;); the other three
+     * files are shared but keyed per login, so only this login's keys go.
+     */
+    private void clearPerLoginCaches(String login) {
+        try {
+            getSharedPreferences("user_lists_cache", MODE_PRIVATE).edit()
+                    .remove("lists_" + login)
+                    .remove("time_" + login)
+                    .apply();
+            getSharedPreferences("radar_cache", MODE_PRIVATE).edit()
+                    .remove("items_" + login)
+                    .remove("time_" + login)
+                    .apply();
+            SharedPreferences readPrefs =
+                    getSharedPreferences("star_update_read", MODE_PRIVATE);
+            if (readPrefs.contains("read_" + login)) {
+                readPrefs.edit().remove("read_" + login).apply();
+            }
+            deletePrefsFile("star_groups_" + login);
+            // 0.1.20 F-32: 登出/删号同步清除该登录的我页头缓存。
+            com.gh4a.fragment.MeHeaderCache.clear(this, login);
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "Clear per-login caches failed", e);
+        }
     }
 
     /**
@@ -480,33 +623,204 @@ public class Gh4Application extends Application implements
      * Records uncaught crashes to a file so the user can report the stack trace.
      * The file is shown on next launch (see HomeActivity).
      */
+    /** Max bytes kept for a recorded crash trace (was 8000, which cut off
+     * CompositeException causal chains mid-chain). If the full trace is
+     * longer, the middle is dropped, never the causal-chain tail. */
+    private static final int CRASH_TRACE_CAP = 65536;
+
+    /**
+     * 0.1.23: tracks the lifecycle snapshots the crash header reports.
+     * DialogFragment visibility is read from the stopped activity's
+     * FragmentManager; plain AlertDialogs are covered only when they go
+     * through the central helpers that report to CrashBreadcrumb, so
+     * dialogShowing is a lower bound (see CrashBreadcrumb).
+     */
+    private void installCrashBreadcrumbs() {
+        registerActivityLifecycleCallbacks(new android.app.Application.ActivityLifecycleCallbacks() {
+            @Override
+            public void onActivityCreated(android.app.Activity activity, android.os.Bundle savedInstanceState) {
+            }
+
+            @Override
+            public void onActivityStarted(android.app.Activity activity) {
+            }
+
+            @Override
+            public void onActivityResumed(android.app.Activity activity) {
+                mLastResumedActivity = activity.getClass().getSimpleName();
+            }
+
+            @Override
+            public void onActivityPaused(android.app.Activity activity) {
+            }
+
+            @Override
+            public void onActivityStopped(android.app.Activity activity) {
+                mLastStoppedActivity = activity.getClass().getSimpleName();
+                mLastStoppedFinishing = activity.isFinishing();
+                mLastStoppedDialogShowing = com.gh4a.utils.CrashBreadcrumb.isAnyDialogShowing()
+                        || isAnyDialogFragmentShowing(activity);
+            }
+
+            @Override
+            public void onActivitySaveInstanceState(android.app.Activity activity, android.os.Bundle outState) {
+            }
+
+            @Override
+            public void onActivityDestroyed(android.app.Activity activity) {
+                mLastDestroyedActivity = activity.getClass().getSimpleName();
+                mLastDestroyedFinishing = activity.isFinishing();
+            }
+        });
+    }
+
+    private static boolean isAnyDialogFragmentShowing(android.app.Activity activity) {
+        if (!(activity instanceof androidx.fragment.app.FragmentActivity)) {
+            return false;
+        }
+        for (androidx.fragment.app.Fragment fragment
+                : ((androidx.fragment.app.FragmentActivity) activity).getSupportFragmentManager().getFragments()) {
+            if (fragment instanceof androidx.fragment.app.DialogFragment) {
+                android.app.Dialog dialog = ((androidx.fragment.app.DialogFragment) fragment).getDialog();
+                if (dialog != null && dialog.isShowing()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Header prepended to every recorded crash trace (never truncated away). */
+    private String buildCrashBreadcrumbHeader() {
+        return "[crash breadcrumb] lastStopped=" + mLastStoppedActivity
+                + " stoppingFinishing=" + mLastStoppedFinishing
+                + " lastDestroyed=" + mLastDestroyedActivity
+                + " destroyedFinishing=" + mLastDestroyedFinishing
+                + " lastResumed=" + mLastResumedActivity
+                + " dialogShowing=" + (com.gh4a.utils.CrashBreadcrumb.isAnyDialogShowing()
+                        || mLastStoppedDialogShowing)
+                // 0.1.24: 最近一次 App 内 finish() 调用点；"none" 且
+                // destroyingFinishing=true 时，finish 来自系统清栈侧。
+                + " lastFinish=" + com.gh4a.utils.CrashBreadcrumb.getLastFinish();
+    }
+
     private void installCrashRecorder() {
         final Thread.UncaughtExceptionHandler defaultHandler =
                 Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
             try {
-                StringBuilder sb = new StringBuilder();
-                sb.append(throwable.toString()).append("\n");
-                for (StackTraceElement e : throwable.getStackTrace()) {
-                    sb.append("    at ").append(e.toString()).append("\n");
-                    if (sb.length() > 8000) {
-                        break;
-                    }
-                }
-                Throwable cause = throwable.getCause();
-                if (cause != null && cause != throwable) {
-                    sb.append("Caused by: ").append(cause.toString()).append("\n");
+                // SEC-4: redact BEFORE writing — last_crash.txt is shown in a
+                // selectable dialog the user is invited to screenshot/share.
+                String full = redactCrashTrace(buildFullCrashTrace(throwable));
+                String text = full;
+                if (full.length() > CRASH_TRACE_CAP) {
+                    int half = CRASH_TRACE_CAP / 2;
+                    text = full.substring(0, half)
+                            + "\n... [trace truncated in the middle; head and causal-chain tail kept] ...\n"
+                            + full.substring(full.length() - half);
                 }
                 java.io.FileWriter w = new java.io.FileWriter(
                         new java.io.File(getCacheDir(), "last_crash.txt"));
-                w.write(sb.toString());
+                // 0.1.23: breadcrumb header first (after truncation, so it is
+                // never cut away); it holds only class names + booleans.
+                w.write(buildCrashBreadcrumbHeader() + "\n" + text);
                 w.close();
+                // 0.1.38：崩溃历史持久化——除了一次性 last_crash.txt（弹框用），
+                // 另存一份到私有文件目录 diagnostic/，最多留 3 条，读后不清。
+                com.gh4a.utils.DiagTrace.recordCrash(this,
+                        buildCrashBreadcrumbHeader(), text);
+                com.gh4a.utils.DiagTrace.log(this, "CRASH_RECORDED",
+                        throwable != null ? throwable.getClass().getSimpleName() : "?");
             } catch (Exception ignored) {
             }
             if (defaultHandler != null) {
                 defaultHandler.uncaughtException(thread, throwable);
             }
         });
+    }
+
+    /**
+     * SEC-4: strips credential-shaped material from a crash trace before it
+     * is persisted or shown: token/Authorization/access_token values,
+     * GitHub-style tokens, URL query strings (signed URLs carry tokens),
+     * and over-long URLs (truncated, query already removed). Stack frames
+     * and exception class/message structure are preserved; only values
+     * are replaced. Private repo names in paths/messages are NOT removed
+     * by construction — the dialog warns the user to check before sharing.
+     */
+    private static String redactCrashTrace(String trace) {
+        if (trace == null) {
+            return null;
+        }
+        String out = trace;
+        // GitHub-style tokens (values only, pattern-matched, never logged).
+        out = out.replaceAll("(?i)\\b(ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}"
+                + "|ghu_[A-Za-z0-9]{20,}|ghs_[A-Za-z0-9]{20,}|ghr_[A-Za-z0-9]{20,}"
+                + "|github_pat_[A-Za-z0-9_]{20,})\\b", "[redacted-token]");
+        // Authorization / token / secret / password assignments.
+        out = out.replaceAll("(?i)(authorization[\"'\\s:=]+)(Bearer\\s+|Token\\s+)?[^\\s\"'\\]]+",
+                "$1[redacted]");
+        out = out.replaceAll("(?i)(access_token|api[_-]?key|client_secret|secret|password|passwd|pwd)"
+                + "([\"'\\s:=]+)[^\\s\"'\\],]+", "$1$2[redacted]");
+        // Bare "token: <value>" / "token=<value>" leftovers.
+        out = out.replaceAll("(?i)(\\btoken[\"'\\s:=]+)[^\\s\"'\\],]{8,}", "$1[redacted]");
+        // URLs: drop the query string, then truncate what is left.
+        java.util.regex.Matcher m =
+                java.util.regex.Pattern.compile("https?://[^\\s\"'<>]+").matcher(out);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String url = m.group();
+            int q = url.indexOf('?');
+            if (q >= 0) {
+                url = url.substring(0, q) + "?[query-redacted]";
+            }
+            if (url.length() > 128) {
+                url = url.substring(0, 128) + "...[url-truncated]";
+            }
+            m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(url));
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
+    /** Walks the FULL throwable chain recursively (with a cycle guard) and,
+     * for RxJava CompositeExceptions, every exception inside getExceptions()
+     * with its own stack — the old code wrote only one cause line and no
+     * nested stacks, so a CompositeException's underlying errors were lost. */
+    private static String buildFullCrashTrace(Throwable throwable) {
+        StringBuilder sb = new StringBuilder();
+        java.util.Set<Throwable> seen =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        appendThrowable(sb, throwable, "", seen);
+        return sb.toString();
+    }
+
+    private static void appendThrowable(StringBuilder sb, Throwable t,
+            String header, java.util.Set<Throwable> seen) {
+        if (t == null || !seen.add(t)) {
+            if (t != null) {
+                sb.append(header).append("[circular reference: ")
+                        .append(t.toString()).append("]\n");
+            }
+            return;
+        }
+        sb.append(header).append(t.toString()).append("\n");
+        for (StackTraceElement e : t.getStackTrace()) {
+            sb.append("    at ").append(e.toString()).append("\n");
+        }
+        if (t instanceof io.reactivex.exceptions.CompositeException) {
+            java.util.List<Throwable> inner =
+                    ((io.reactivex.exceptions.CompositeException) t).getExceptions();
+            for (int i = 0; i < inner.size(); i++) {
+                sb.append("CompositeException exception [")
+                        .append(i).append("]:\n");
+                appendThrowable(sb, inner.get(i), "  ", seen);
+            }
+        }
+        Throwable cause = t.getCause();
+        if (cause != null && cause != t) {
+            appendThrowable(sb, cause, "Caused by: ", seen);
+        }
     }
 
     /**
@@ -524,11 +838,40 @@ public class Gh4Application extends Application implements
                 // Expected: flow was disposed (e.g., user switched pages). Ignore.
                 return;
             }
+            if (cause instanceof java.io.IOException && "Canceled".equals(cause.getMessage())) {
+                // 0.1.24: OkHttp 取消信号——在途 GraphQL 调用被 dispose 取消
+                // （如 Star 页加载中途切走）后，无主错误经此到达。只吞字面
+                // "Canceled"：它只会在下游已 dispose 时经插件处理器到达此处，
+                // 下游存活时的正常 onError 根本不走这里；其他 IOException
+                // （超时、HTTP 错等）仍按原样转发，行为不变。之所以不在
+                // GraphQLClient 里转义：该异常到达崩溃记录的唯一路径就是
+                // 这里的转发，客户端改写异常类型会误导所有同步调用方。
+                android.util.Log.w("Gh4Application",
+                        "Undeliverable RxJava Canceled error, ignored", cause);
+                return;
+            }
             if (cause instanceof io.reactivex.exceptions.UndeliverableException) {
                 // Other undeliverables (e.g., network error after dispose): log, don't crash.
                 android.util.Log.w("Gh4Application",
                         "Undeliverable RxJava error", cause);
                 return;
+            }
+            if (cause instanceof io.reactivex.exceptions.CompositeException
+                    || e instanceof io.reactivex.exceptions.CompositeException) {
+                // Unwrap CompositeExceptions (bare or inside Undeliverable):
+                // the old code forwarded the whole composite to the uncaught
+                // handler, so a disposed request erroring again after a page
+                // switch showed up as a crash dialog. Only forward when at
+                // least one leaf is NOT a benign dispose-related error;
+                // real bugs (NPE, Resources$NotFound, IllegalState, ...) are
+                // never swallowed.
+                Throwable composite = cause instanceof io.reactivex.exceptions.CompositeException
+                        ? cause : e;
+                if (isAllBenignDisposeErrors(composite)) {
+                    android.util.Log.w("Gh4Application",
+                            "Benign disposed CompositeException, not crashing", composite);
+                    return;
+                }
             }
             Thread t = Thread.currentThread();
             Thread.UncaughtExceptionHandler h = t.getUncaughtExceptionHandler();
@@ -536,6 +879,36 @@ public class Gh4Application extends Application implements
                 h.uncaughtException(t, cause != null ? cause : e);
             }
         });
+    }
+
+    /** True only if EVERY leaf of t (recursively flattening nested
+     * CompositeExceptions, and unwrapping UndeliverableException) is a
+     * benign dispose-related error: an interruption, or an IOException
+     * from a call that was cancelled/disposed. Any other leaf — including
+     * an empty composite, which proves nothing — makes this false. */
+    private static boolean isAllBenignDisposeErrors(Throwable t) {
+        if (t == null) {
+            return false;
+        }
+        if (t instanceof io.reactivex.exceptions.UndeliverableException) {
+            return isAllBenignDisposeErrors(t.getCause());
+        }
+        if (t instanceof io.reactivex.exceptions.CompositeException) {
+            java.util.List<Throwable> inner =
+                    ((io.reactivex.exceptions.CompositeException) t).getExceptions();
+            if (inner.isEmpty()) {
+                return false;
+            }
+            for (Throwable leaf : inner) {
+                if (!isAllBenignDisposeErrors(leaf)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return t instanceof InterruptedException
+                || t instanceof java.io.InterruptedIOException
+                || t instanceof java.io.IOException;
     }
 
     /** Returns the recorded crash trace, or null if none. Clears it after reading. */
@@ -562,8 +935,22 @@ public class Gh4Application extends Application implements
 
     @Override
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+        // 0.1.36：诊断追踪。
+        com.gh4a.utils.ThemeTrace.logState(this, "LISTENER key=" + key);
         if (key.equals(SettingsFragment.KEY_THEME)) {
             updateTheme(sharedPreferences);
+        }
+        // 0.1.35：模式变了也要重算开关——此前只看主题键，跟随系统→浅色
+        // （主题 1→1 不变）时监听全程静默，开关滞留跟随系统。updateTheme
+        // 先按主题定开关、再按模式覆盖（系统档覆盖为跟随系统，手动档不覆盖），
+        // 所以模式监听走同一入口是安全的。
+        if (key.equals(com.gh4a.utils.DarkModeScheduler.KEY_DARK_MODE)) {
+            updateTheme(sharedPreferences);
+        }
+        // 0.1.12：主题色一改（我页/设置页均写同一偏好），桌面图标别名跟着切。
+        if (key.equals(SettingsFragment.KEY_ACCENT_COLOR)) {
+            com.gh4a.utils.LauncherIcon.apply(this,
+                    sharedPreferences.getString(SettingsFragment.KEY_ACCENT_COLOR, "green"));
         }
     }
 

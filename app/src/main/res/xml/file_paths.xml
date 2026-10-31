@@ -3,4 +3,8 @@
     <external-path
         name="download"
         path="Download/" />
+    <!-- 0.1.36：深色模式诊断日志导出（临时，定论后连同追踪一并删掉） -->
+    <cache-path
+        name="trace"
+        path="." />
 </paths>

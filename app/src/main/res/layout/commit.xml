@@ -21,66 +21,6 @@
                 android:orientation="vertical"
                 android:padding="@dimen/content_padding">
 
-                <RelativeLayout
-                    android:id="@+id/author"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-
-                    <com.gh4a.widget.FixedSizeImageView
-                        android:id="@+id/iv_gravatar"
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
-                        android:layout_marginRight="16dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        tools:src="@drawable/default_avatar" />
-
-                    <com.gh4a.widget.LinkHandlingTextView
-                        android:id="@+id/tv_author"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_toRightOf="@id/iv_gravatar"
-                        android:textAppearance="?android:attr/textAppearanceSmall"
-                        android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="16sp"
-                        tools:text="Username" />
-
-                    <com.gh4a.widget.LinkHandlingTextView
-                        android:id="@+id/tv_timestamp"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_below="@id/tv_author"
-                        android:layout_marginTop="2dp"
-                        android:layout_toRightOf="@id/iv_gravatar"
-                        android:textAppearance="@style/TextAppearance.VerySmall"
-                        tools:text="yesterday" />
-
-                </RelativeLayout>
-
-                <LinearLayout
-                    android:id="@+id/committer"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal">
-
-                    <com.gh4a.widget.FixedSizeImageView
-                        android:id="@+id/iv_commit_gravatar"
-                        android:layout_width="24dp"
-                        android:layout_height="24dp"
-                        android:layout_marginRight="8dp"
-                        tools:src="@drawable/default_avatar" />
-
-                    <com.gh4a.widget.LinkHandlingTextView
-                        android:id="@+id/tv_commit_extra"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="center_vertical"
-                        android:textAppearance="?android:attr/textAppearanceSmall"
-                        android:textColor="?android:attr/textColorPrimary"
-                        tools:text="Committed by username2 yesterday" />
-
-                </LinearLayout>
-
                 <com.gh4a.widget.LinkHandlingTextView
                     android:id="@+id/tv_title"
                     android:layout_width="wrap_content"
@@ -109,6 +49,69 @@
                     android:textAppearance="?android:attr/textAppearanceSmall"
                     android:textStyle="italic"
                     tools:text="10 files added with 42 additions and 32 deletions." />
+
+
+                <RelativeLayout
+                    android:id="@+id/author"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <com.gh4a.widget.FixedSizeImageView
+                        android:id="@+id/iv_gravatar"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_marginRight="12dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        tools:src="@drawable/default_avatar" />
+
+                    <com.gh4a.widget.LinkHandlingTextView
+                        android:id="@+id/tv_author"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_toRightOf="@id/iv_gravatar"
+                        android:textAppearance="?android:attr/textAppearanceSmall"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="16sp"
+                        tools:text="Username" />
+
+                    <com.gh4a.widget.LinkHandlingTextView
+                        android:id="@+id/tv_timestamp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_below="@id/tv_author"
+                        android:layout_marginTop="2dp"
+                        android:layout_toRightOf="@id/iv_gravatar"
+                        android:textAppearance="@style/TextAppearance.VerySmall"
+                        tools:text="yesterday"
+        android:fontFamily="monospace" />
+
+                </RelativeLayout>
+
+                <LinearLayout
+                    android:id="@+id/committer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <com.gh4a.widget.FixedSizeImageView
+                        android:id="@+id/iv_commit_gravatar"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_marginRight="8dp"
+                        tools:src="@drawable/default_avatar" />
+
+                    <com.gh4a.widget.LinkHandlingTextView
+                        android:id="@+id/tv_commit_extra"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_vertical"
+                        android:textAppearance="?android:attr/textAppearanceSmall"
+                        android:textColor="?android:attr/textColorPrimary"
+                        tools:text="Committed by username2 yesterday" />
+
+                </LinearLayout>
+
 
             </LinearLayout>
 

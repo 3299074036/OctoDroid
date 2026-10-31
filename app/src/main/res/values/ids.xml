@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <item name="search_match_index" type="id" />
+    <!-- View 全量改造：HomeActivity 工具栏“新建”菜单项 -->
+    <item name="create_new" type="id" />
+    <item name="my_public_events" type="id" />
+    <item name="my_recent_history" type="id" />
     <item name="review_comment_id" type="id" />
     <item name="detach" type="id" />
 

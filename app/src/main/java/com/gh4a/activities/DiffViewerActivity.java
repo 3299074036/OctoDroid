@@ -208,6 +208,11 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
         super.onDestroy();
     }
 
+    // BUG-13: Intent extras may be missing/short; never substring blindly.
+    protected static String shortSha(String sha) {
+        return sha == null ? "" : sha.substring(0, Math.min(7, sha.length()));
+    }
+
     @Override
     protected void onInitExtras(Bundle extras) {
         super.onInitExtras(extras);
@@ -242,7 +247,7 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.file_viewer_menu, menu);
 
-        String viewAtTitle = getString(R.string.object_view_file_at, mSha.substring(0, 7));
+        String viewAtTitle = getString(R.string.object_view_file_at, shortSha(mSha));
         menu.add(0, MENU_ITEM_VIEW, Menu.NONE, viewAtTitle)
                 .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER);
         menu.removeItem(R.id.download);
@@ -410,7 +415,7 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
     @Override
     protected String getDocumentTitle() {
         return getString(R.string.diff_print_document_title,
-                FileUtils.getFileName(mPath), mSha.substring(0, 7), mRepoOwner, mRepoName);
+                FileUtils.getFileName(mPath), shortSha(mSha), mRepoOwner, mRepoName);
     }
 
     @Override
@@ -423,7 +428,7 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
                 return true;
             case R.id.share:
                 IntentUtils.share(this, getString(R.string.share_commit_subject,
-                        mSha.substring(0, 7), mRepoOwner + "/" + mRepoName), url);
+                        shortSha(mSha), mRepoOwner + "/" + mRepoName), url);
                 return true;
             case MENU_ITEM_VIEW:
                 startActivity(FileViewerActivity.makeIntent(this, mRepoOwner, mRepoName, mSha, mPath));
@@ -609,7 +614,7 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
                 case R.id.share:
                     Uri url = createUrl(createLineLinkId(mIsRightLine ? mRightLine : mLeftLine,
                             mIsRightLine), mId);
-                    String subject = getString(R.string.share_commit_subject, mSha.substring(0, 7),
+                    String subject = getString(R.string.share_commit_subject, shortSha(mSha),
                             mRepoOwner + "/" + mRepoName);
                     IntentUtils.share(DiffViewerActivity.this, subject, url);
                     break;

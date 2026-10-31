@@ -48,6 +48,21 @@ public class UserAdapter extends RootAdapter<User, UserAdapter.ViewHolder> {
         holder.ivGravatar.setTag(user);
 
         holder.tvTitle.setText(StringUtils.formatName(user.login(), user.name()));
+        // 0.4.0 像素重排：人物行副标题。名称与 login 不同时显示 @login，否则显示类型。
+        String subtitle;
+        if (user.name() != null && !user.name().equals(user.login())) {
+            subtitle = "@" + user.login();
+        } else if (user.type() != null) {
+            subtitle = user.type().name();
+        } else {
+            subtitle = null;
+        }
+        if (subtitle != null) {
+            holder.tvSubtitle.setVisibility(View.VISIBLE);
+            holder.tvSubtitle.setText(subtitle);
+        } else {
+            holder.tvSubtitle.setVisibility(View.GONE);
+        }
     }
 
     @Override
@@ -65,9 +80,11 @@ public class UserAdapter extends RootAdapter<User, UserAdapter.ViewHolder> {
             super(view);
             ivGravatar = view.findViewById(R.id.iv_gravatar);
             tvTitle = view.findViewById(R.id.tv_title);
+            tvSubtitle = view.findViewById(R.id.tv_subtitle);
         }
 
         private final TextView tvTitle;
+        private final TextView tvSubtitle;
         private final ImageView ivGravatar;
     }
 }

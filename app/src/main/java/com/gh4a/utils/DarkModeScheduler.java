@@ -44,6 +44,24 @@ public class DarkModeScheduler {
         return prefs(context).getString(KEY_DARK_MODE, MODE_MANUAL);
     }
 
+    /**
+     * BUG-20 (migration side, chosen over keeping scheduled behaviour):
+     * the UI has no schedule entry any more, so a stored "scheduled"
+     * mode is rewritten once to "system" and any scheduled alarms are
+     * cancelled. Idempotent; a no-op unless the stored mode is scheduled.
+     * Called from apply() (so process startup via Gh4Application and
+     * the alarm receiver migrate) and from MeFragment's first read.
+     */
+    public static void migrateScheduledToSystem(Context context) {
+        if (context == null) {
+            return;
+        }
+        if (MODE_SCHEDULED.equals(prefs(context).getString(KEY_DARK_MODE, MODE_MANUAL))) {
+            prefs(context).edit().putString(KEY_DARK_MODE, MODE_SYSTEM).apply();
+            cancelAlarms(context);
+        }
+    }
+
     public static boolean isScheduled(Context context) {
         return MODE_SCHEDULED.equals(getMode(context));
     }
@@ -74,10 +92,20 @@ public class DarkModeScheduler {
      * where the new value is not yet persisted when the callback runs.
      */
     public static void apply(Context context, String mode) {
+        // 0.1.36：诊断追踪。
+        ThemeTrace.logState(context, "SCHEDULER_APPLY in mode=" + mode);
+        // BUG-20: never (re-)enter scheduled mode — an explicit scheduled
+        // value (e.g. restored from a backup, or the old schedule dialog)
+        // is migrated to system before the switch below runs.
+        if (MODE_SCHEDULED.equals(mode)) {
+            migrateScheduledToSystem(context);
+            mode = MODE_SYSTEM;
+        }
         switch (mode) {
             case MODE_SYSTEM:
                 cancelAlarms(context);
                 AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM);
+                ThemeTrace.logState(context, "SCHEDULER_APPLY out system");
                 break;
             case MODE_SCHEDULED: {
                 int now = minutesSinceMidnight();
@@ -91,6 +119,7 @@ public class DarkModeScheduler {
             default:
                 // manual: Gh4Application.updateTheme() handles KEY_THEME
                 cancelAlarms(context);
+                ThemeTrace.logState(context, "SCHEDULER_APPLY out manual");
                 break;
         }
     }

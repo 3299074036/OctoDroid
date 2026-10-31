@@ -38,7 +38,7 @@
                     android:id="@+id/iv_labels"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginRight="16dp"
+                    android:layout_marginRight="12dp"
                     android:src="@drawable/labels" />
 
                 <com.gh4a.widget.LinkHandlingTextView
@@ -73,7 +73,7 @@
                     android:id="@+id/iv_assignee"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginRight="16dp"
+                    android:layout_marginRight="12dp"
                     android:src="@drawable/assignee" />
 
                 <com.gh4a.widget.LinkHandlingTextView
@@ -107,7 +107,7 @@
                     android:id="@+id/iv_milestone"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginRight="16dp"
+                    android:layout_marginRight="12dp"
                     android:src="@drawable/milestone" />
 
                 <com.gh4a.widget.LinkHandlingTextView

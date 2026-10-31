@@ -513,17 +513,8 @@ public class HttpImageGetter {
     }
 
     private boolean canLoadGif() {
-        SharedPreferences prefs = mContext.getSharedPreferences(SettingsFragment.PREF_NAME,
-                Context.MODE_PRIVATE);
-        int mode = prefs.getInt(SettingsFragment.KEY_GIF_LOADING, 1);
-        switch (mode) {
-            case 1: // load via Wifi
-                return !DownloadUtils.downloadNeedsWarning(mContext);
-            case 2: // always load
-                return true;
-            default:
-                return false;
-        }
+        // 0.1.1：动态页 GIF 始终加载，GIF 加载设置已下架，不再按模式/网络判断。
+        return true;
     }
 
     private Bitmap getBitmap(final byte[] image) {

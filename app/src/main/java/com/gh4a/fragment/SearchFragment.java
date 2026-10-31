@@ -10,13 +10,15 @@ import android.database.MergeCursor;
 import android.net.Uri;
 import android.os.Bundle;
 import androidx.annotation.LayoutRes;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
+import androidx.core.content.ContextCompat;
 import androidx.cursoradapter.widget.CursorAdapter;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.SearchView;
 import android.text.TextUtils;
-import android.util.SparseArray;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -24,12 +26,10 @@ import android.view.MenuItem;
 import android.view.SubMenu;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.BaseAdapter;
 import android.widget.FilterQueryProvider;
 import android.widget.ImageView;
-import android.widget.Spinner;
-import android.widget.SpinnerAdapter;
+import android.widget.LinearLayout;
+import android.widget.RadioButton;
 import android.widget.TextView;
 
 import com.gh4a.R;
@@ -42,6 +42,7 @@ import com.gh4a.adapter.RootAdapter;
 import com.gh4a.adapter.SearchAdapter;
 import com.gh4a.db.SuggestionsProvider;
 import com.gh4a.utils.ApiHelpers;
+import com.gh4a.utils.UiUtils;
 import com.gh4a.utils.RxUtils;
 import com.gh4a.utils.StringUtils;
 import com.meisolsson.githubsdk.model.Page;
@@ -53,12 +54,14 @@ import com.meisolsson.githubsdk.service.search.SearchService;
 import com.meisolsson.githubsdk.service.repositories.RepositoryService;
 
 import io.reactivex.Single;
+import io.reactivex.disposables.Disposable;
+import java.util.HashMap;
+
 import retrofit2.Response;
 
 public class SearchFragment extends PagedDataBaseFragment<Object> implements
         SearchView.OnQueryTextListener, SearchView.OnCloseListener,
-        SearchView.OnSuggestionListener, FilterQueryProvider,
-        AdapterView.OnItemSelectedListener, SearchAdapter.Callback {
+        SearchView.OnSuggestionListener, FilterQueryProvider, SearchAdapter.Callback {
     public static SearchFragment newInstance(int initialType, String initialQuery,
             boolean startSearchImmediately) {
         SearchFragment f = new SearchFragment();
@@ -99,36 +102,32 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         R.menu.search_sort_code
     };
 
-    // Maps sort menu item id -> { sort, order }; { null, null } means best match (default)
-    private static final SparseArray<String[]> SORT_LOOKUP = new SparseArray<>();
-    static {
-        SORT_LOOKUP.put(R.id.search_sort_best_match, new String[] { null, null });
-
-        SORT_LOOKUP.put(R.id.search_sort_repo_stars_desc, new String[] { "stars", "desc" });
-        SORT_LOOKUP.put(R.id.search_sort_repo_stars_asc, new String[] { "stars", "asc" });
-        SORT_LOOKUP.put(R.id.search_sort_repo_forks_desc, new String[] { "forks", "desc" });
-        SORT_LOOKUP.put(R.id.search_sort_repo_forks_asc, new String[] { "forks", "asc" });
-        SORT_LOOKUP.put(R.id.search_sort_repo_updated_desc, new String[] { "updated", "desc" });
-        SORT_LOOKUP.put(R.id.search_sort_repo_updated_asc, new String[] { "updated", "asc" });
-
-        SORT_LOOKUP.put(R.id.search_sort_user_followers_desc, new String[] { "followers", "desc" });
-        SORT_LOOKUP.put(R.id.search_sort_user_followers_asc, new String[] { "followers", "asc" });
-        SORT_LOOKUP.put(R.id.search_sort_user_repositories_desc, new String[] { "repositories", "desc" });
-        SORT_LOOKUP.put(R.id.search_sort_user_repositories_asc, new String[] { "repositories", "asc" });
-        SORT_LOOKUP.put(R.id.search_sort_user_joined_desc, new String[] { "joined", "desc" });
-        SORT_LOOKUP.put(R.id.search_sort_user_joined_asc, new String[] { "joined", "asc" });
-
-        // Code search only supports sort=indexed
-        SORT_LOOKUP.put(R.id.search_sort_code_indexed_desc, new String[] { "indexed", "desc" });
-        SORT_LOOKUP.put(R.id.search_sort_code_indexed_asc, new String[] { "indexed", "asc" });
-    }
+    // 0.1.20 D-06: 排序选项表见 SearchSortOption（菜单 id → 字段/方向/
+    // 标题资源/适用类型，一张表替代此前的 SORT_LOOKUP + sortTitleRes switch）。
 
     private SearchAdapter mAdapter;
 
-    private Spinner mSearchType;
     private SearchView mSearch;
-    private Menu mOptionsMenu;
+    // 0.1.16：搜索顶栏贴边用的工具栏原始内边距（退出搜索页时恢复，
+    // 避免影响趋势等其他共用同一工具栏的页面）。
+    private int mToolbarInsetStart;
+    private int mToolbarInsetEnd;
+    private int mToolbarInsetStartWithNav;
+    private boolean mToolbarInsetsSaved;
+    // 0.1.20 F-06: capSearchBoxWidth() also zeroes these paddings, so they
+    // must be snapshotted and restored together with the content insets.
+    private int mToolbarPadLeft, mToolbarPadTop, mToolbarPadRight, mToolbarPadBottom;
+    private int mMenuPadLeft, mMenuPadTop, mMenuPadRight, mMenuPadBottom;
+    private boolean mToolbarPaddingSaved;
     private int mSelectedSearchType;
+    private View mDefaultHeader;
+    private java.util.List<com.meisolsson.githubsdk.model.Repository> mHotRepos;
+    private Disposable mHotDisposable;
+    // 0.1.10：下拉刷新时强制走网络（不先显示缓存），否则 BUG-25 的
+    // “刷新真的刷新”会被缓存显示盖掉。
+    private boolean mHotForceRefresh;
+    // 0.1.10：App 启动预取用的静态订阅（与 Fragment 生命周期无关）。
+    private static Disposable sPrefetchDisposable;
     private String mQuery;
     private String mSort;
     private String mOrder;
@@ -142,8 +141,15 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             mSelectedSearchType = savedInstanceState.getInt(STATE_KEY_SEARCH_TYPE, SEARCH_TYPE_REPO);
         } else {
             Bundle args = getArguments();
-            mSelectedSearchType = args.getInt("search_type", SEARCH_TYPE_REPO);
-            mQuery = args.getString("initial_search");
+            if (args != null) {
+                mSelectedSearchType = args.getInt("search_type", SEARCH_TYPE_REPO);
+                mQuery = args.getString("initial_search");
+            }
+        }
+        // 0.1.20 F-07: 恢复的空查询即无查询（"" 与 null 等价），否则旋转后
+        // shouldDoInitialLoad 会把空查询当作“恢复上次加载”而误出个人仓库。
+        if (TextUtils.isEmpty(mQuery)) {
+            mQuery = null;
         }
         restoreSortSelection(mSelectedSearchType);
     }
@@ -152,19 +158,23 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
         inflater.inflate(R.menu.search, menu);
 
-        mSearchType = (Spinner) menu.findItem(R.id.type).getActionView();
-        mSearchType.setAdapter(new SearchTypeAdapter(mSearchType.getContext(), getActivity()));
-        mSearchType.setOnItemSelectedListener(this);
-        mSearchType.setSelection(mSelectedSearchType);
-
         SuggestionAdapter adapter = new SuggestionAdapter(getActivity());
         adapter.setFilterQueryProvider(this);
 
         mSearch = (SearchView) menu.findItem(R.id.search).getActionView();
         mSearch.setIconifiedByDefault(true);
-        mSearch.requestFocus();
+        // 0.1.1：搜索框展开显示，但不自动聚焦、不弹输入法（此前 requestFocus
+        // 会在进搜索页时立刻弹出键盘）。
         mSearch.onActionViewExpanded();
         mSearch.setIconified(false);
+        mSearch.clearFocus();
+        // 0.1.19：搜索框不再跟菜单区格子排布较劲。0.1.17（铺满菜单区 +
+        // 48dp 定宽 + 顶栏宽 − 96dp）与 0.1.18（实测量宽 + 逐步缩 +
+        // 可见校验）两套事后算宽都在真机上把排序挤没了。现改为最简单
+        // 的做法：搜索框最大宽直接定为顶栏宽的 60%，类型与排序自然
+        // 量宽——搜索框永远挤不到排序，排序按构造可见；类型贴左只靠
+        // 顶栏内边距清零。退出搜索页时 onDestroyView 恢复原始内边距。
+        capSearchBoxWidth();
         mSearch.setOnQueryTextListener(this);
         mSearch.setOnCloseListener(this);
         mSearch.setOnSuggestionListener(this);
@@ -174,9 +184,7 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         }
 
         updateSearchViewHint();
-
-        mOptionsMenu = menu;
-        updateSortSubMenu();
+        updateTypeMenuItem(menu);
 
         super.onCreateOptionsMenu(menu, inflater);
     }
@@ -184,14 +192,214 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     @Override
     public void onPrepareOptionsMenu(Menu menu) {
         super.onPrepareOptionsMenu(menu);
-        updateSortSubMenu();
+        updateTypeMenuItem(menu);
+        capSearchBoxWidth();
+    }
+
+    /**
+     * 0.1.19：搜索顶栏简单做法。搜索框最大宽 = 顶栏宽的 60%，类型与
+     * 排序自然量宽，不铺满菜单区、不定宽、不做多轮缩宽校验——搜索框
+     * 按构造挤不到排序，排序一定可见。类型贴左靠顶栏内边距清零与
+     * 菜单区 padding 清零。幂等：可由 onCreateOptionsMenu 与
+     * onPrepareOptionsMenu 重复调用。
+     */
+    private void capSearchBoxWidth() {
+        if (!isAdded() || mSearch == null || getActivity() == null) return;
+        final androidx.appcompat.widget.Toolbar toolbar =
+                getActivity().findViewById(R.id.toolbar);
+        if (toolbar == null) return;
+        final int[] attempts = new int[1];
+        toolbar.post(new Runnable() {
+            @Override
+            public void run() {
+                if (!isAdded() || mSearch == null) return;
+                if (!mToolbarInsetsSaved) {
+                    mToolbarInsetStart = toolbar.getContentInsetStart();
+                    mToolbarInsetEnd = toolbar.getContentInsetEnd();
+                    mToolbarInsetStartWithNav = toolbar.getContentInsetStartWithNavigation();
+                    mToolbarInsetsSaved = true;
+                }
+                if (!mToolbarPaddingSaved) {
+                    mToolbarPadLeft = toolbar.getPaddingLeft();
+                    mToolbarPadTop = toolbar.getPaddingTop();
+                    mToolbarPadRight = toolbar.getPaddingRight();
+                    mToolbarPadBottom = toolbar.getPaddingBottom();
+                    View menuParent = (View) mSearch.getParent();
+                    if (menuParent instanceof androidx.appcompat.widget.ActionMenuView) {
+                        mMenuPadLeft = menuParent.getPaddingLeft();
+                        mMenuPadTop = menuParent.getPaddingTop();
+                        mMenuPadRight = menuParent.getPaddingRight();
+                        mMenuPadBottom = menuParent.getPaddingBottom();
+                    }
+                    mToolbarPaddingSaved = true;
+                }
+                if (toolbar.getWidth() == 0) {
+                    if (attempts[0]++ < 20) toolbar.post(this);
+                    return;
+                }
+                // 0.1.41：只清零右侧内边距（给搜索框与排序让宽），左侧内边距
+                // 恢复为保存的原始值——搜索页顶栏标题“搜索”的左边距与趋势页
+                // “趋势”同款（同一工具栏的 contentInsetStart），不再贴边。
+                // 之前左右全清零会把标题也拖到 0，导致搜索标题比趋势标题贴边。
+                toolbar.setContentInsetsRelative(mToolbarInsetStart, 0);
+                toolbar.setContentInsetsAbsolute(mToolbarInsetStart, 0);
+                toolbar.setContentInsetStartWithNavigation(mToolbarInsetStartWithNav);
+                toolbar.setPadding(mToolbarPadLeft, mToolbarPadTop, 0, mToolbarPadBottom);
+                // 0.1.43：四段间距一次统一为趋势页同款值（= 标题左内边距
+                // mToolbarInsetStart，标准 16dp），排序距右沿不动：
+                // ① 左边栏→搜索标题 = 内容内边距（0.1.41 已恢复）；
+                // ② 搜索标题→类型图标 = 菜单区左内边距 + 类型图标在项内
+                // 的居中余量，实测项宽与图标宽算出所需菜单左内边距补齐；
+                // ③ 类型图标→搜索框 = 类型项右余 + 搜索框内放大镜左偏，
+                // 搜索框内板左右内边距清零、放大镜按钮缩到图标宽贴左，
+                // 放大镜左偏归零；④ 搜索框→排序图标 = 内板右内边距
+                // （已清零）+ 排序图标居中余量。菜单左内边距把整排菜单
+                // 右推多少，搜索框上限就减多少，排序位置与距右沿不变。
+                float density = toolbar.getResources().getDisplayMetrics().density;
+                int menuPadLeft = 0;
+                View parent = (View) mSearch.getParent();
+                if (parent instanceof androidx.appcompat.widget.ActionMenuView) {
+                    ViewGroup menu = (ViewGroup) parent;
+                    int[] typeIcons = new int[] {
+                        R.drawable.menu_search_repos,
+                        R.drawable.menu_search_users,
+                        R.drawable.menu_search_code
+                    };
+                    int typeIdx = (mSelectedSearchType >= 0
+                            && mSelectedSearchType < typeIcons.length)
+                            ? mSelectedSearchType : 0;
+                    for (int i = 0; i < menu.getChildCount(); i++) {
+                        View child = menu.getChildAt(i);
+                        if (child instanceof androidx.appcompat.view.menu.ActionMenuItemView) {
+                            int w = child.getWidth();
+                            android.graphics.drawable.Drawable d =
+                                    ContextCompat.getDrawable(toolbar.getContext(), typeIcons[typeIdx]);
+                            int iconW = (d != null) ? d.getIntrinsicWidth() : 0;
+                            if (w > 0 && iconW > 0) {
+                                int offset = child.getPaddingLeft()
+                                        + (w - child.getPaddingLeft()
+                                        - child.getPaddingRight() - iconW) / 2;
+                                menuPadLeft = Math.max(0, mToolbarInsetStart - offset);
+                            }
+                            break;
+                        }
+                    }
+                    parent.setPadding(menuPadLeft, 0, 0, 0);
+                }
+                View plate = mSearch.findViewById(androidx.appcompat.R.id.search_plate);
+                if (plate != null) {
+                    plate.setPadding(0, plate.getPaddingTop(), 0, plate.getPaddingBottom());
+                }
+                View searchBtn = mSearch.findViewById(androidx.appcompat.R.id.search_button);
+                if (searchBtn != null) {
+                    searchBtn.setPadding(0, 0, 0, 0);
+                    ViewGroup.LayoutParams lp = searchBtn.getLayoutParams();
+                    if (lp instanceof LinearLayout.LayoutParams) {
+                        int iconPx = (int) (24 * density + 0.5f);
+                        LinearLayout.LayoutParams llp = (LinearLayout.LayoutParams) lp;
+                        llp.width = iconPx;
+                        llp.height = iconPx;
+                        llp.setMargins(0, 0, 0, 0);
+                        searchBtn.setLayoutParams(llp);
+                    }
+                }
+                // 0.1.44 修正 0.1.43 的靶点错误：实测 AppCompat 1.7.1 的
+                // abc_search_view.xml，展开态的放大镜不是 search_button
+                // （收起态才用），而是 search_edit_frame 里的 search_mag_icon，
+                // 且 edit_frame 自带左右各 8dp 外边距——这才是类型→搜索框、
+                // 搜索框→排序两段间距多出来的部分。内板清零够不着它们。
+                // 改法：edit_frame 左右外边距清零，mag_icon 缩到图标宽贴左，
+                // 放大镜左偏与右外边距归零；0.1.43 的内板与按钮处理保留
+                // （覆盖 search_button 为放大镜的情况，改动无害）。
+                View editFrame = mSearch.findViewById(androidx.appcompat.R.id.search_edit_frame);
+                if (editFrame != null) {
+                    ViewGroup.LayoutParams elp = editFrame.getLayoutParams();
+                    if (elp instanceof LinearLayout.LayoutParams) {
+                        LinearLayout.LayoutParams lelp = (LinearLayout.LayoutParams) elp;
+                        lelp.leftMargin = 0;
+                        lelp.rightMargin = 0;
+                        editFrame.setLayoutParams(lelp);
+                    }
+                }
+                View magIcon = mSearch.findViewById(androidx.appcompat.R.id.search_mag_icon);
+                if (magIcon != null) {
+                    magIcon.setPadding(0, 0, 0, 0);
+                    ViewGroup.LayoutParams mlp = magIcon.getLayoutParams();
+                    if (mlp instanceof LinearLayout.LayoutParams) {
+                        int iconPx = (int) (24 * density + 0.5f);
+                        LinearLayout.LayoutParams mllp = (LinearLayout.LayoutParams) mlp;
+                        mllp.width = iconPx;
+                        mllp.setMargins(0, 0, 0, 0);
+                        magIcon.setLayoutParams(mllp);
+                    }
+                }
+                // 0.1.42 的预留取宽保留，另减菜单左内边距（见上），排序
+                // 位置与距右沿因此不变；25% 下限保搜索框可用，排序挤占
+                // 时仍有 verifySortVisible 继续缩。
+                int reserve = (int) (200 * density + 0.5f);
+                int floor = (int) (toolbar.getWidth() * 0.25f);
+                int max = Math.max(floor, Math.min(
+                        (int) (toolbar.getWidth() * 0.50f),
+                        toolbar.getWidth() - reserve - menuPadLeft));
+                if (max > 0) {
+                    mSearch.setMaxWidth(max);
+                    // 0.1.20 F-31: 60% 是固定比例，窄屏/大字体下仍可能挤掉排序——
+                    // 布局完成后做一次底线校验（见 verifySortVisible）。
+                    verifySortVisible(toolbar, max, 0);
+                }
+            }
+        });
+    }
+
+    /**
+     * 0.1.20 F-31: 搜索框 60% 上限的底线校验（只做校验，不恢复 0.1.17/0.1.18
+     * 的复杂算式）。菜单只有类型/搜索/排序三项且均为 always：正常时菜单区
+     * 只有这三项子视图；一旦出现溢出按钮（非 ActionMenuItemView 子视图）
+     * 或有菜单项不可见，即排序已被挤出。此时把搜索框上限每次缩 24dp
+     * （下限为顶栏宽 25%），最多 4 步，直至溢出消失。窄屏/大字体下排序
+     * 因此仍可见；宽屏下校验直接通过，不改 60% 上限。
+     */
+    private void verifySortVisible(final androidx.appcompat.widget.Toolbar toolbar,
+            final int currentMax, final int attempt) {
+        if (!isAdded() || mSearch == null) return;
+        toolbar.post(() -> {
+            if (!isAdded() || mSearch == null) return;
+            View parent = (View) mSearch.getParent();
+            if (!(parent instanceof androidx.appcompat.widget.ActionMenuView)) return;
+            androidx.appcompat.widget.ActionMenuView menuView =
+                    (androidx.appcompat.widget.ActionMenuView) parent;
+            boolean squeezed = false;
+            for (int i = 0; i < menuView.getChildCount(); i++) {
+                View child = menuView.getChildAt(i);
+                if (child == mSearch) continue;
+                if (!(child instanceof androidx.appcompat.view.menu.ActionMenuItemView)
+                        || child.getVisibility() != View.VISIBLE) {
+                    squeezed = true;
+                    break;
+                }
+            }
+            if (!squeezed) return;
+            int floor = (int) (toolbar.getWidth() * 0.25f);
+            float density = toolbar.getResources().getDisplayMetrics().density;
+            int next = currentMax - (int) (24 * density + 0.5f);
+            if (next < floor || attempt >= 4) {
+                android.util.Log.w("SearchFragment",
+                        "Sort squeezed out even at floor, keeping max=" + currentMax);
+                return;
+            }
+            mSearch.setMaxWidth(next);
+            verifySortVisible(toolbar, next, attempt + 1);
+        });
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        String[] sortAndOrder = SORT_LOOKUP.get(item.getItemId());
-        if (sortAndOrder != null) {
-            setSortSelection(sortAndOrder[0], sortAndOrder[1]);
+        if (item.getItemId() == R.id.type) {
+            showTypeSheet();
+            return true;
+        }
+        if (item.getItemId() == R.id.sort) {
+            showSortSheet();
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -205,6 +413,158 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     }
 
     @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        // 默认页：空查询且不做初始加载时（Home 搜索 Tab），挂最近搜索在上、
+        // 热门建议在下的默认头；有初始查询或初始加载时不挂。
+        if (TextUtils.isEmpty(mQuery) && !shouldDoInitialLoad(savedInstanceState)) {
+            loadDefaultPage();
+        }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        // 0.1.6：切回搜索页签时默认头若不在（例如之前输过查询又被清掉），
+        // 直接补上默认页加载，不用下拉才出内容。只针对 Home 搜索页签
+        // （do_initial_load=false）；独立搜索页（初始加载）不走这条路。
+        if (TextUtils.isEmpty(mQuery) && mDefaultHeader == null && mAdapter != null
+                && getArguments() != null
+                && !getArguments().getBoolean("do_initial_load", true)) {
+            loadDefaultPage();
+        }
+    }
+
+    @Override
+    public void onDestroyView() {
+        // 0.1.19：退出搜索页时恢复工具栏原始内边距，避免影响其他共用页面。
+        // 0.1.20 F-06: 同样恢复 capSearchBoxWidth() 清零的顶栏 padding 与
+        // 菜单区 padding，否则切到趋势/Star/我页时顶栏仍保持零 padding。
+        if (getActivity() != null) {
+            androidx.appcompat.widget.Toolbar toolbar =
+                    getActivity().findViewById(R.id.toolbar);
+            if (toolbar != null) {
+                if (mToolbarInsetsSaved) {
+                    toolbar.setContentInsetsRelative(mToolbarInsetStart, mToolbarInsetEnd);
+                    toolbar.setContentInsetStartWithNavigation(mToolbarInsetStartWithNav);
+                    mToolbarInsetsSaved = false;
+                }
+                if (mToolbarPaddingSaved) {
+                    toolbar.setPadding(mToolbarPadLeft, mToolbarPadTop,
+                            mToolbarPadRight, mToolbarPadBottom);
+                    if (mSearch != null) {
+                        View parent = (View) mSearch.getParent();
+                        if (parent instanceof androidx.appcompat.widget.ActionMenuView) {
+                            parent.setPadding(mMenuPadLeft, mMenuPadTop,
+                                    mMenuPadRight, mMenuPadBottom);
+                        }
+                    }
+                    mToolbarPaddingSaved = false;
+                }
+            }
+        }
+        // BUG-11: hot-suggestion subscription must not outlive the view.
+        if (mHotDisposable != null && !mHotDisposable.isDisposed()) {
+            mHotDisposable.dispose();
+        }
+        mHotDisposable = null;
+        mSearch = null;
+        mDefaultHeader = null;
+        mAdapter = null;
+        super.onDestroyView();
+    }
+
+    /**
+     * 0.1.10：App 启动时后台预取热门建议（仅当缓存缺失或已过 24 小时有效期，
+     * 且已有登录授权时才发请求）。静默写盘，不碰任何界面；进搜索页时
+     * 多数情况下缓存已就绪，可直接秒出。
+     */
+    public static void prefetchHotSuggestions(android.content.Context context) {
+        if (context == null || HotReposCache.isFresh(context)) {
+            return;
+        }
+        if (sPrefetchDisposable != null && !sPrefetchDisposable.isDisposed()) {
+            return;
+        }
+        android.content.Context appContext = context.getApplicationContext();
+        SearchService service = ServiceFactory.get(SearchService.class, false);
+        sPrefetchDisposable = service.searchRepositories("stars:>100000", "stars", "desc", 1)
+                .compose(result -> RxUtils.<Repository, Object>searchPageAdapter(result, item -> item))
+                .map(ApiHelpers::throwOnFailure)
+                .compose(RxUtils::doInBackground)
+                .subscribe(page -> {
+                    java.util.List<HotReposCache.HotRepo> repos = new java.util.ArrayList<>();
+                    if (page != null && page.items() != null) {
+                        for (Object o : page.items()) {
+                            if (o instanceof Repository && repos.size() < 10) {
+                                Repository r = (Repository) o;
+                                Integer sc = r.stargazersCount();
+                                repos.add(new HotReposCache.HotRepo(
+                                        r.fullName(), sc != null ? sc : 0));
+                            }
+                        }
+                    }
+                    if (!repos.isEmpty()) {
+                        HotReposCache.save(appContext, repos);
+                    }
+                }, error -> {
+                    // 预取失败静默丢弃：进搜索页时再正常加载，不打扰用户。
+                });
+    }
+
+    @Override
+    public void onRefresh() {
+        // BUG-25: pull-to-refresh must actually refresh hot suggestions,
+        // not keep the fragment-lifetime cache.
+        mHotRepos = null;
+        mHotForceRefresh = true;
+        super.onRefresh();
+        if (mDefaultHeader != null) {
+            refreshDefaultHeader();
+        }
+    }
+
+    /**
+     * 0.1.6 默认页加载：只加载默认头（最近搜索 + 热门建议），不走列表加载，
+     * 进搜索页签即调用，不需要下拉刷新才显示。
+     */
+    private void loadDefaultPage() {
+        if (mDefaultHeader == null) {
+            attachDefaultHeader();
+        } else {
+            refreshDefaultHeader();
+        }
+        // 0.1.8：默认头挂上后必须立刻纠正空态，否则头会被藏起来。
+        // 基类在 onRecyclerViewInflated 里先按“列表 0 项”把 RecyclerView
+        // 设成 GONE；0.1.6 又让默认页的 loadPage 返回空页，之后的
+        // updateEmptyState 也会再藏一次。默认头在 RecyclerView 里，
+        // 藏列表就等于藏了最近搜索 + 热门建议。
+        updateEmptyState();
+    }
+
+    /**
+     * 0.1.8 回归修复：只针对搜索页，不动基类对其他列表页的行为。
+     * 默认头已挂上时，本页不算空——哪怕列表项数为 0，也要保持
+     * RecyclerView 可见、空态容器隐藏，否则最近搜索 + 热门建议
+     * 会被基类的空态逻辑连着空列表一起藏掉（0.1.6/0.1.7 的症状）。
+     * 没有默认头时（输入关键词搜出 0 条）仍走基类逻辑，正常显示空态。
+     */
+    @Override
+    protected void updateEmptyState() {
+        super.updateEmptyState();
+        if (mDefaultHeader != null && getView() != null) {
+            View list = getView().findViewById(R.id.list);
+            View emptyContainer = getView().findViewById(R.id.empty_view_container);
+            if (list != null) {
+                list.setVisibility(View.VISIBLE);
+            }
+            if (emptyContainer != null) {
+                emptyContainer.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    @Override
     protected RootAdapter<Object, ? extends RecyclerView.ViewHolder> onCreateAdapter() {
         mAdapter = new SearchAdapter(getActivity(), this);
         mAdapter.setMode(mSelectedSearchType);
@@ -213,13 +573,20 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
 
     @Override
     protected boolean shouldDoInitialLoad(Bundle savedInstanceState) {
-        return (savedInstanceState != null && mQuery != null) // always restore previous load results
-                || getArguments().getBoolean("do_initial_load", true);
+        // 0.1.20 F-07/F-16: 空查询不算“恢复上次加载”；arguments 可能为空。
+        Bundle args = getArguments();
+        return (savedInstanceState != null && !TextUtils.isEmpty(mQuery)) // always restore previous load results
+                || (args == null || args.getBoolean("do_initial_load", true));
     }
 
     @Override
     protected Single<Response<Page<Object>>> loadPage(int page, boolean bypassCache) {
         if (TextUtils.isEmpty(mQuery)) {
+            // 0.1.6：默认页（默认头已挂上）不再显示个人仓库，头下列表保持为空；
+            // 独立搜索页（无默认头）仍走原来的默认仓库路径。
+            if (mDefaultHeader != null) {
+                return Single.just(Response.success(new ApiHelpers.DummyPage<>()));
+            }
             // Show user's own repositories by default when searching repos with empty query
             if (mSelectedSearchType == SEARCH_TYPE_REPO) {
                 return makeDefaultRepoSingle(page, bypassCache);
@@ -244,7 +611,7 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         }
         // Page<Repository> is safely readable as Page<Object>
         return (Single<Response<Page<Object>>>) (Single<?>)
-                service.getUserRepositories(login, null, page);
+                service.getUserRepositories(login, new HashMap<>(), page);
     }
 
     @Override
@@ -289,6 +656,13 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     @Override
     public boolean onQueryTextChange(String newText) {
         mQuery = newText;
+        if (!TextUtils.isEmpty(newText)) {
+            removeDefaultHeader();
+        } else if (mDefaultHeader == null) {
+            // BUG-7: clearing back to empty must restore the default page,
+            // not leave a blank list.
+            loadDefaultPage();
+        }
         return true;
     }
 
@@ -298,6 +672,11 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             mAdapter.clear();
         }
         mQuery = null;
+        attachDefaultHeader();
+        // BUG-7: the 0.1.8 override forces the list visible when the header
+        // is attached; without this a 0-result search leaves the list GONE
+        // and the newly attached header hidden behind the empty container.
+        updateEmptyState();
         return true;
     }
 
@@ -330,16 +709,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     }
 
     @Override
-    public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-        updateSelectedSearchType();
-    }
-
-    @Override
-    public void onNothingSelected(AdapterView<?> parent) {
-        updateSelectedSearchType();
-    }
-
-    @Override
     public void onSearchFragmentClick(SearchCode result, int matchIndex) {
         openFileViewer(result, matchIndex);
     }
@@ -365,6 +734,7 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     }
 
     private void loadResults() {
+        removeDefaultHeader();
         mSearch.clearFocus();
         onRefresh();
     }
@@ -375,22 +745,41 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         updateEmptyText(hintAndEmptyTextResIds[1]);
     }
 
-    private void updateSelectedSearchType() {
-        int newType = mSearchType.getSelectedItemPosition();
+    private void applySearchType(int newType) {
         if (newType == mSelectedSearchType) {
             return;
         }
         mSelectedSearchType = newType;
         mAdapter.setMode(newType);
         restoreSortSelection(newType);
-        updateSortSubMenu();
 
         updateSearchViewHint();
         updateEmptyState();
         resetSubject();
 
-        // force re-filtering of the view
-        mSearch.setQuery(mQuery, true);
+        if (TextUtils.isEmpty(mQuery)) {
+            // 0.1.20 F-23(a): 空查询路径不走 submit/onRefresh，旧订阅须在此释放，
+            // 否则飞行中的默认仓库加载会在模式切换后投递旧类型数据。
+            disposeCurrentSubscription();
+            // 默认页仍在：按新类型刷新最近搜索（热门建议只在仓库类型显示）
+            refreshDefaultHeader();
+        } else {
+            // force re-filtering of the view
+            mSearch.setQuery(mQuery, true);
+        }
+    }
+
+    private void updateTypeMenuItem(Menu menu) {
+        MenuItem typeItem = menu.findItem(R.id.type);
+        if (typeItem == null) return;
+        int[][] resources = new int[][] {
+            { R.string.search_type_repo, R.drawable.menu_search_repos },
+            { R.string.search_type_user, R.drawable.menu_search_users },
+            { R.string.search_type_code, R.drawable.menu_search_code }
+        };
+        int[] res = resources[mSelectedSearchType];
+        typeItem.setTitle(res[0]);
+        typeItem.setIcon(res[1]);
     }
 
     private void updateEmptyText(@StringRes int emptyTextResId) {
@@ -405,7 +794,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         mSort = sort;
         mOrder = order;
         saveSortSelection(mSelectedSearchType);
-        checkCurrentSortItem();
         loadResults();
     }
 
@@ -424,34 +812,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
                 .apply();
     }
 
-    private void updateSortSubMenu() {
-        if (mOptionsMenu == null) {
-            return;
-        }
-        SubMenu subMenu = mOptionsMenu.findItem(R.id.sort).getSubMenu();
-        subMenu.clear();
-        getActivity().getMenuInflater().inflate(SORT_MENU_RES_IDS[mSelectedSearchType], subMenu);
-        checkCurrentSortItem();
-    }
-
-    private void checkCurrentSortItem() {
-        if (mOptionsMenu == null) {
-            return;
-        }
-        int itemId = findSortMenuItemId(mSort, mOrder);
-        if (itemId != 0) {
-            mOptionsMenu.findItem(R.id.sort).getSubMenu().findItem(itemId).setChecked(true);
-        }
-    }
-
     private static int findSortMenuItemId(String sort, String order) {
-        for (int i = 0; i < SORT_LOOKUP.size(); i++) {
-            String[] value = SORT_LOOKUP.valueAt(i);
-            if (TextUtils.equals(value[0], sort) && TextUtils.equals(value[1], order)) {
-                return SORT_LOOKUP.keyAt(i);
-            }
-        }
-        return 0;
+        // 0.1.20 D-06: 反查走选项表（无匹配返回 0，即无单选选中，与原先一致）。
+        SearchSortOption option = SearchSortOption.fromSortOrder(sort, order);
+        return option != null ? option.menuId : 0;
     }
 
     private Single<Response<Page<Object>>> makeRepoSearchSingle(long page, boolean bypassCache) {
@@ -480,64 +844,379 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
                 .compose(result -> RxUtils.searchPageAdapter(result, item -> item));
     }
 
-    private static class SearchTypeAdapter extends BaseAdapter implements SpinnerAdapter {
-        private final Context mContext;
-        private final LayoutInflater mInflater;
-        private final LayoutInflater mPopupInflater;
+    // ---------- 0.1.1 底部动作表：类型 / 排序 ----------
 
-        private final int[][] mResources = new int[][] {
-            { R.string.search_type_repo, R.drawable.menu_search_repos, R.drawable.icon_repositories },
-            { R.string.search_type_user, R.drawable.menu_search_users, R.drawable.search_users },
-            { R.string.search_type_code, R.drawable.menu_search_code, R.drawable.search_code }
+    private void showTypeSheet() {
+        if (getActivity() == null) return;
+        int[][] res = new int[][] {
+            { R.string.search_type_repo, R.drawable.icon_repositories, R.string.search_type_repo_desc },
+            { R.string.search_type_user, R.drawable.search_users, R.string.search_type_user_desc },
+            { R.string.search_type_code, R.drawable.search_code, R.string.search_type_code_desc }
         };
-
-        private SearchTypeAdapter(Context context, Context popupContext) {
-            mContext = context;
-            mInflater = LayoutInflater.from(context);
-            mPopupInflater = LayoutInflater.from(popupContext);
-        }
-
-        @Override
-        public int getCount() {
-            return mResources.length;
-        }
-
-        @Override
-        public CharSequence getItem(int position) {
-            return mContext.getString(mResources[position][0]);
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return 0;
-        }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            if (convertView == null) {
-                convertView = mInflater.inflate(R.layout.search_type_small, null);
+        // 0.1.20 D-05: 骨架走 BottomSheetListBuilder；富行构造与原来一致。
+        com.gh4a.utils.BottomSheetListBuilder builder =
+                new com.gh4a.utils.BottomSheetListBuilder(requireContext(),
+                        getString(R.string.search_type));
+        int pad = builder.pad();
+        for (int i = 0; i < res.length; i++) {
+            final int type = i;
+            LinearLayout row = new LinearLayout(requireContext());
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setPadding(0, pad / 2, 0, pad / 2);
+            UiUtils.setSelectableBackground(row);
+            ImageView icon = new ImageView(requireContext());
+            icon.setImageResource(res[i][1]);
+            LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(
+                    (int) (24 * getResources().getDisplayMetrics().density),
+                    (int) (24 * getResources().getDisplayMetrics().density));
+            iconLp.setMarginEnd(pad / 2);
+            row.addView(icon, iconLp);
+            LinearLayout texts = new LinearLayout(requireContext());
+            texts.setOrientation(LinearLayout.VERTICAL);
+            texts.setLayoutParams(new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            TextView main = new TextView(requireContext());
+            main.setText(res[i][0]);
+            main.setTextSize(15);
+            TextView sub = new TextView(requireContext());
+            sub.setText(res[i][2]);
+            sub.setTextSize(13);
+            sub.setTextColor(ContextCompat.getColor(requireContext(),
+                    android.R.color.secondary_text_light));
+            texts.addView(main);
+            texts.addView(sub);
+            row.addView(texts);
+            if (i == mSelectedSearchType) {
+                TextView check = new TextView(requireContext());
+                check.setText("\u2713");
+                check.setTextSize(18);
+                check.setTextColor(UiUtils.resolveColor(requireContext(), androidx.appcompat.R.attr.colorPrimary));
+                row.addView(check);
             }
-
-            ImageView icon = convertView.findViewById(R.id.icon);
-            icon.setImageResource(mResources[position][1]);
-
-            return convertView;
+            builder.addRow(row, v -> applySearchType(type));
         }
+        builder.addCancel();
+        builder.show();
+    }
 
-        @Override
-        public View getDropDownView(int position, View convertView, ViewGroup parent) {
-            if (convertView == null) {
-                convertView = mPopupInflater.inflate(R.layout.search_type_popup, null);
+    private void showSortSheet() {
+        if (getActivity() == null) return;
+        // 0.1.20 D-06: 分类型选项直接取自选项表（顺序与原先数组一致）。
+        java.util.List<SearchSortOption> options =
+                SearchSortOption.forSearchType(mSelectedSearchType);
+        int currentId = findSortMenuItemId(mSort, mOrder);
+        // 0.1.20 D-05: 骨架走 BottomSheetListBuilder；富行构造与原来一致。
+        com.gh4a.utils.BottomSheetListBuilder builder =
+                new com.gh4a.utils.BottomSheetListBuilder(requireContext(),
+                        getString(R.string.search_sort_title));
+        int pad = builder.pad();
+        for (SearchSortOption option : options) {
+            final int itemId = option.menuId;
+            final String sort = option.sort;
+            final String order = option.order;
+            LinearLayout row = new LinearLayout(requireContext());
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setPadding(0, pad / 2, 0, pad / 2);
+            UiUtils.setSelectableBackground(row);
+            RadioButton radio = new RadioButton(requireContext());
+            radio.setChecked(itemId == currentId);
+            radio.setClickable(false);
+            radio.setFocusable(false);
+            row.addView(radio);
+            TextView label = new TextView(requireContext());
+            label.setText(getString(option.titleRes));
+            label.setTextSize(15);
+            if (itemId == currentId) {
+                label.setTypeface(null, android.graphics.Typeface.BOLD);
             }
-
-            ImageView icon = convertView.findViewById(R.id.icon);
-            icon.setImageResource(mResources[position][2]);
-
-            TextView label = convertView.findViewById(R.id.label);
-            label.setText(mResources[position][0]);
-
-            return convertView;
+            row.addView(label);
+            builder.addRow(row, v -> setSortSelection(sort, order));
         }
+        builder.addCancel();
+        builder.show();
+    }
+
+
+    // ---------- 0.1.1 默认页：最近搜索在上、热门建议在下 ----------
+
+    private void attachDefaultHeader() {
+        if (mAdapter == null || getActivity() == null || mDefaultHeader != null) return;
+        mDefaultHeader = getLayoutInflater().inflate(R.layout.search_default_header, null);
+        // 0.1.6：默认头明确满宽，避免量成窄栏导致文案被截。
+        mDefaultHeader.setLayoutParams(new RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        mAdapter.setHeaderView(mDefaultHeader);
+        refreshDefaultHeader();
+    }
+
+    private void removeDefaultHeader() {
+        if (mDefaultHeader != null && mAdapter != null) {
+            mAdapter.setHeaderView(null);
+            mDefaultHeader = null;
+        }
+    }
+
+    private void refreshDefaultHeader() {
+        if (mDefaultHeader == null || getActivity() == null) return;
+        LinearLayout recentContainer =
+                mDefaultHeader.findViewById(R.id.search_default_recent_container);
+        recentContainer.removeAllViews();
+        java.util.List<String> recents = loadRecentSearches();
+        // 0.1.38：搜索默认页埋点（只记条数，不记搜索词）。
+        com.gh4a.utils.DiagTrace.log(getActivity(), "SEARCH",
+                "default recent=" + recents.size());
+        // 0.1.6：动态加的 TextView 明确给满宽参数，否则量成窄栏会把
+        // “暂无最近搜索”截成“暂无最”，热门仓库名也会挤成窄栏。
+        LinearLayout.LayoutParams fullWidth = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        if (recents.isEmpty()) {
+            TextView empty = new TextView(requireContext());
+            empty.setText(R.string.search_no_recent_searches);
+            empty.setTextSize(14);
+            empty.setTextColor(ContextCompat.getColor(requireContext(),
+                    android.R.color.secondary_text_light));
+            recentContainer.addView(empty, fullWidth);
+        } else {
+            for (String suggestion : recents) {
+                TextView chip = new TextView(requireContext());
+                chip.setText(suggestion);
+                chip.setTextSize(15);
+                int pad = (int) (8 * getResources().getDisplayMetrics().density);
+                chip.setPadding(0, pad, 0, pad);
+                UiUtils.setSelectableBackground(chip);
+                chip.setOnClickListener(v -> {
+                    if (mSearch != null) mSearch.setQuery(suggestion, true);
+                });
+                // 0.1.11：长按单条最近搜索 → 小确认框，确认后只删这一条
+                // （当前搜索类型下、按词精确匹配），其他条目不动；点按仍是搜索。
+                chip.setOnLongClickListener(v -> {
+                    if (getActivity() == null) return true;
+                    final String term = suggestion;
+                    final int type = mSelectedSearchType;
+                    new AlertDialog.Builder(requireContext())
+                            .setTitle(term)
+                            .setMessage(R.string.search_delete_recent_confirm)
+                            .setPositiveButton(R.string.delete, (dialog, which) -> {
+                                final ContentResolver cr =
+                                        requireContext().getContentResolver();
+                                new Thread() {
+                                    @Override
+                                    public void run() {
+                                        cr.delete(SuggestionsProvider.Columns.CONTENT_URI,
+                                                SuggestionsProvider.Columns.TYPE + " = ? AND "
+                                                        + SuggestionsProvider.Columns.SUGGESTION
+                                                        + " = ?",
+                                                new String[] { String.valueOf(type), term });
+                                        if (getActivity() != null) {
+                                            getActivity().runOnUiThread(() -> {
+                                                if (isAdded()) refreshDefaultHeader();
+                                            });
+                                        }
+                                    }
+                                }.start();
+                            })
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show();
+                    return true;
+                });
+                recentContainer.addView(chip, fullWidth);
+            }
+        }
+        // 热门建议只在仓库类型显示（按 Star 数取真实热门仓库，非占位数据）
+        View hotTitle = mDefaultHeader.findViewById(R.id.search_default_hot_title);
+        LinearLayout hotContainer =
+                mDefaultHeader.findViewById(R.id.search_default_hot_container);
+        boolean showHot = mSelectedSearchType == SEARCH_TYPE_REPO;
+        hotTitle.setVisibility(showHot ? View.VISIBLE : View.GONE);
+        hotContainer.setVisibility(showHot ? View.VISIBLE : View.GONE);
+        if (showHot) {
+            if (mHotRepos != null) {
+                fillHotContainer(hotContainer);
+            } else if (!mHotForceRefresh) {
+                // 0.1.10：先显示磁盘缓存（秒出），再后台静默刷新替换；
+                // 无缓存时先出骨架屏，首个网络结果到货后替换。
+                java.util.List<HotReposCache.HotRepo> cached =
+                        HotReposCache.load(requireContext());
+                if (cached != null) {
+                    fillHotContainerFromCache(hotContainer, cached);
+                    loadHotRepos(hotContainer);
+                } else {
+                    showHotSkeleton(hotContainer);
+                    loadHotRepos(hotContainer);
+                }
+            } else {
+                showHotSkeleton(hotContainer);
+                loadHotRepos(hotContainer);
+            }
+        }
+    }
+
+    private java.util.List<String> loadRecentSearches() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        try {
+            Cursor cursor = getContext().getContentResolver().query(
+                    SuggestionsProvider.Columns.CONTENT_URI, SUGGESTION_PROJECTION,
+                    SuggestionsProvider.Columns.TYPE + " = ?",
+                    new String[] { String.valueOf(mSelectedSearchType) }, SUGGESTION_ORDER);
+            if (cursor != null) {
+                int col = cursor.getColumnIndexOrThrow(SuggestionsProvider.Columns.SUGGESTION);
+                while (cursor.moveToNext() && out.size() < 6) {
+                    String s = cursor.getString(col);
+                    if (!TextUtils.isEmpty(s) && !out.contains(s)) out.add(s);
+                }
+                cursor.close();
+            }
+        } catch (Exception ignored) {
+        }
+        return out;
+    }
+
+    private void loadHotRepos(final LinearLayout hotContainer) {
+        if (mHotDisposable != null && !mHotDisposable.isDisposed()) {
+            mHotDisposable.dispose();
+        }
+        SearchService service = ServiceFactory.get(SearchService.class, false);
+        mHotDisposable = service.searchRepositories("stars:>100000", "stars", "desc", 1)
+                .compose(result -> RxUtils.<Repository, Object>searchPageAdapter(result, item -> item))
+                .map(ApiHelpers::throwOnFailure)
+                .compose(RxUtils::doInBackground)
+                .subscribe(page -> {
+                    if (!isAdded() || mDefaultHeader == null) return;
+                    java.util.List<Repository> repos = new java.util.ArrayList<>();
+                    if (page != null && page.items() != null) {
+                        for (Object o : page.items()) {
+                            // 0.1.6：热门建议从 5 条加到 10 条。
+                            if (o instanceof Repository && repos.size() < 10) {
+                                repos.add((Repository) o);
+                            }
+                        }
+                    }
+                    // 0.1.38：热门建议埋点（只记条数，不记仓库名）。
+                    com.gh4a.utils.DiagTrace.log(getActivity(), "SEARCH",
+                            "hot ok count=" + repos.size());
+                    mHotRepos = repos;
+                    mHotForceRefresh = false;
+                    if (getActivity() != null) {
+                        java.util.List<HotReposCache.HotRepo> toSave =
+                                new java.util.ArrayList<>();
+                        for (Repository r : repos) {
+                            Integer sc = r.stargazersCount();
+                            toSave.add(new HotReposCache.HotRepo(
+                                    r.fullName(), sc != null ? sc : 0));
+                        }
+                        // 0.1.20 F-25: 仅非空时存（HotReposCache.save 本身亦守卫）。
+                        if (!toSave.isEmpty()) {
+                            HotReposCache.save(getActivity(), toSave);
+                        }
+                    }
+                    fillHotContainer(hotContainer);
+                }, error -> {
+                    // 0.1.38：热门建议失败埋点（只记异常类名）。
+                    com.gh4a.utils.DiagTrace.log(getActivity(), "SEARCH",
+                            "hot error "
+                                    + (error != null ? error.getClass().getSimpleName() : "?"));
+                    // 热门建议加载失败时不显示假数据；但若已在显示缓存，
+                    // 后台刷新失败不得把缓存清空（0.1.10）。
+                    if (isAdded() && mDefaultHeader != null
+                            && mHotRepos == null
+                            && HotReposCache.load(getActivity()) == null) {
+                        hotContainer.removeAllViews();
+                    }
+                });
+    }
+
+    /** 0.1.10：热门加载中的骨架占位（灰条），避免首次进页长时间空白。 */
+    private void showHotSkeleton(LinearLayout hotContainer) {
+        if (hotContainer == null) return;
+        hotContainer.removeAllViews();
+        float density = getResources().getDisplayMetrics().density;
+        int barHeight = (int) (16 * density + 0.5f);
+        int gap = (int) (12 * density + 0.5f);
+        for (int i = 0; i < 5; i++) {
+            View bar = new View(requireContext());
+            bar.setBackgroundColor(0xFFE0E0E0);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, barHeight);
+            params.topMargin = gap;
+            params.bottomMargin = gap;
+            hotContainer.addView(bar, params);
+        }
+    }
+
+    /** 0.1.10：用磁盘缓存的（全名，星数）渲染热门行，点击按 owner/name 打开仓库页。 */
+    private void fillHotContainerFromCache(LinearLayout hotContainer,
+            java.util.List<HotReposCache.HotRepo> cached) {
+        if (hotContainer == null || cached == null) return;
+        hotContainer.removeAllViews();
+        for (HotReposCache.HotRepo repo : cached) {
+            hotContainer.addView(makeHotRow(repo.fullName, repo.stars,
+                    v -> {
+                        if (getActivity() != null) {
+                            int slash = repo.fullName.indexOf('/');
+                            if (slash > 0) {
+                                startActivity(RepositoryActivity.makeIntent(getActivity(),
+                                        repo.fullName.substring(0, slash),
+                                        repo.fullName.substring(slash + 1)));
+                            }
+                        }
+                    }),
+                    new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+    }
+
+    private void fillHotContainer(LinearLayout hotContainer) {
+        if (mHotRepos == null || hotContainer == null) return;
+        hotContainer.removeAllViews();
+        for (Repository repo : mHotRepos) {
+            Integer sc = repo.stargazersCount();
+            hotContainer.addView(makeHotRow(repo.fullName(), sc != null ? sc : 0,
+                    v -> {
+                        if (getActivity() != null) {
+                            startActivity(RepositoryActivity.makeIntent(getActivity(), repo));
+                        }
+                    }),
+                    new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+    }
+
+    /**
+     * 0.1.10：热门行改趋势页同款——标题用 TextAppearance.ItemTitle
+     * （sans-serif-condensed、主色、单行省略），星数单独一行等宽小字
+     * （TextAppearance.VerySmall + monospace），★ 与数字永不拆行，
+     * 长仓库名只截断标题，不再把数字挤到下一行。
+     */
+    private LinearLayout makeHotRow(String fullName, int stars,
+            View.OnClickListener clickListener) {
+        float density = getResources().getDisplayMetrics().density;
+        int pad = (int) (8 * density + 0.5f);
+        LinearLayout row = new LinearLayout(requireContext());
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(0, pad, 0, pad);
+        UiUtils.setSelectableBackground(row);
+        row.setOnClickListener(clickListener);
+        TextView title = new TextView(requireContext());
+        title.setText(fullName);
+        title.setTextAppearance(R.style.TextAppearance_ItemTitle);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        title.setMaxLines(1);
+        row.addView(title, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        TextView meta = new TextView(requireContext());
+        meta.setText("\u2605 " + stars);
+        meta.setTextAppearance(R.style.TextAppearance_VerySmall);
+        meta.setTypeface(android.graphics.Typeface.MONOSPACE);
+        meta.setMaxLines(1);
+        LinearLayout.LayoutParams metaParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        metaParams.topMargin = (int) (2 * density + 0.5f);
+        row.addView(meta, metaParams);
+        return row;
     }
 
     private class SuggestionAdapter extends CursorAdapter {

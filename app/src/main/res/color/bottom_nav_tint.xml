@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- View 全量改造：底部导航选中用现行主色（夜色自动取 values-night 的 primary），未选中用图标前景色。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="?attr/colorPrimary" android:state_checked="true" />
+    <item android:color="@color/icon_foreground" />
+</selector>

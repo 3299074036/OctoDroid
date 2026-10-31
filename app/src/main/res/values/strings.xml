@@ -32,7 +32,7 @@
     <string name="about">About</string>
     <string name="retry">Retry</string>
     <string name="open_source_components">Open source components</string>
-    <string name="my_profile">My profile</string>
+    <string name="my_profile">Me</string>
     <string name="user_context">Account</string>
     <string name="add_account">Add account</string>
     <string name="my_email">zolayuren@gmail.com</string>
@@ -61,6 +61,9 @@
     <string name="settings_category_network">Network acceleration</string>
     <string name="settings_category_updates">Updates</string>
     <string name="settings_category_translation">Translation</string>
+    <string name="settings_section_browsing_account_network">Browsing, account &amp; network</string>
+    <string name="settings_section_updates_translation">Updates &amp; translation</string>
+    <string name="settings_category_about_updates">About &amp; Updates</string>
     <string name="settings_category_about">About</string>
     <string name="check_update">Check for updates</string>
     <string name="check_update_summary">Check if a newer version is available on GitHub</string>
@@ -109,7 +112,7 @@
     <string name="prs_tab">Pull requests</string>
     <string name="issues_filter">Filter</string>
     <string name="star_hub">Star</string>
-    <string name="discover_hub">Discover</string>
+    <string name="discover_hub">Trending</string>
     <string name="trend_range">Time range</string>
     <string name="load_failure_explanation">Loading the data from GitHub failed. Please verify you have a working network connection and try again.</string>
     <string name="load_failure_explanation_dmca">This repository was taken down for legal reasons.\nPlease see %1$s for details.</string>
@@ -178,7 +181,6 @@
     <string name="my_repositories">My repositories</string>
     <string name="my_issues">My issues</string>
     <string name="my_pull_requests">My pull requests</string>
-    <string name="my_gists">My gists</string>
     <string name="start_page">Start page</string>
     <string name="start_page_last_selected">Last selected</string>
     <string name="comment_editor_locked_hint">Comments are only available to collaborators</string>
@@ -771,6 +773,21 @@
     <string name="star_group_assign_title">Add to group</string>
     <string name="star_group_remove_confirm">Remove %1$s from this group?</string>
     <string name="star_group_delete_confirm">Delete group \u201c%1$s\u201d? Repositories stay starred.</string>
+    <!-- Official GitHub lists, merged into the starred page -->
+    <string name="star_tab_groups">Groups</string>
+    <string name="star_tab_list">List</string>
+    <string name="star_tab_updates">Updates</string>
+    <string name="mark_all_read">Mark all as read</string>
+    <string name="my_lists">My lists</string>
+    <string name="my_lists_loading">Loading official lists\u2026</string>
+    <string name="my_lists_failed">Official lists could not be loaded. Local groups are shown instead.</string>
+    <string name="my_lists_empty">No official lists yet. Long-press a starred repository to create one.</string>
+    <string name="local_groups">Local groups</string>
+    <string name="starred_all">All starred</string>
+    <string name="assign_official_title">Add to official lists</string>
+    <string name="assign_official_create_new">New official list\u2026</string>
+    <string name="assign_official_success">List membership updated</string>
+    <string name="assign_official_failed">Could not update lists. Check network and account permissions.</string>
     <string name="rename">Rename</string>
     <string name="remove">Remove</string>
     <string name="mirror_enabled">Enable mirror acceleration</string>
@@ -833,6 +850,61 @@
     <string name="dark_mode_schedule_summary">Dark from %1$s to %2$s</string>
     <string name="dark_mode_switched_manual">Switched to manual mode</string>
 
+    <!-- View 全量改造：HomeActivity 新建入口 -->
+    <string name="bottom_nav_create">Create</string>
+    <string name="create_pr_web">PR (open in browser)</string>
+    <string name="create_repo_hint">owner/repo, e.g. 3299074036/OctoDroid</string>
+    <string name="create_repo_invalid">Enter a repository as owner/repo</string>
+    <string name="create_pr_web_note">This app has no in-app PR form. It will open the GitHub compare page in the browser.</string>
+
     <string name="dark_mode_start">Start</string>
     <string name="dark_mode_end">End</string>
+
+    <string name="me_section_functions">Functions</string>
+    <string name="me_section_browsing_network">Browsing &amp; network</string>
+    <string name="me_section_translation_about">Translation &amp; about</string>
+    <string name="me_activity_hint">Open activity stream ›</string>
+
+    <string name="switch_account">Switch account</string>
+
+    <string name="loading">Loading\u2026</string>
+
+    <string name="dark_mode_light">Light</string>
+    <string name="dark_mode_dark">Dark</string>
+    <string name="start_page_saved">Start page saved</string>
+    <string name="search_recent_searches">Recent searches</string>
+    <string name="search_hot_suggestions">Hot suggestions</string>
+    <string name="search_no_recent_searches">No recent searches yet</string>
+    <string name="search_delete_recent_confirm">Delete this recent search?</string>
+    <string name="search_type_repo_desc">Search repos by name and description</string>
+    <string name="search_type_user_desc">Search users and organizations</string>
+    <string name="search_type_code_desc">Search code content</string>
+    <string name="me_star_badge_note">Star tab badge, on by default</string>
+    <string name="me_mirror_speed_test">Test speed</string>
+    <string name="me_mirror_add">Add mirror</string>
+    <string name="me_mirror_edit">Edit</string>
+    <string name="me_mirror_delete">Delete</string>
+    <string name="me_account_switch_hint">Tap this row to switch accounts</string>
+    <string name="me_star_update_reminder">Star repo update reminder</string>
+    <string name="diagnostic_log">Diagnostic log</string>
+    <string name="diagnostic_log_empty">No diagnostic logs yet</string>
+    <string name="diagnostic_log_live">Collecting live · auto-scroll</string>
+    <string name="diagnostic_log_paused">Paused · auto-scroll off</string>
+    <string name="diagnostic_log_pause">Pause</string>
+    <string name="diagnostic_log_resume">Resume</string>
+    <string name="diagnostic_log_clear">Clear</string>
+    <string name="diagnostic_log_export">Export file</string>
+    <string name="diagnostic_log_filter_all">All</string>
+    <string name="diagnostic_log_filter_trace">Trace</string>
+    <string name="diagnostic_log_filter_crash">Crash</string>
+    <string name="diagnostic_log_note">Only traces and crashes are recorded. No accounts, credentials, or content.</string>
+    <string name="diagnostic_log_clear_confirm">Clear all diagnostic logs? This cannot be undone; crash records will be cleared too.</string>
+    <string name="diagnostic_log_cleared">Logs cleared</string>
+    <string name="diagnostic_log_export_share">Share via system</string>
+    <string name="diagnostic_log_export_download">Save to Downloads folder</string>
+    <string name="diagnostic_log_export_copy">Copy all log text</string>
+    <string name="diagnostic_log_saved">Saved to Downloads: diag-export.txt</string>
+    <string name="diagnostic_log_copied">Log text copied</string>
+    <string name="diagnostic_log_export_failed">Export failed</string>
+    <string name="diagnostic_log_download_unsupported">This system version does not support direct save. Please use system share.</string>
 </resources>

@@ -195,6 +195,11 @@ public class MarkdownPreviewWebView extends WebView implements NestedScrollingCh
         s.setJavaScriptEnabled(true);
         s.setUseWideViewPort(false);
         s.setAllowFileAccess(false);
+        // SEC-13: explicit hardening, same as WebViewerActivity (no DOM
+        // storage / content:// use in this preview path either).
+        s.setDomStorageEnabled(false);
+        s.setAllowContentAccess(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     }
 
     private void setContent(String content) {
@@ -221,7 +226,28 @@ public class MarkdownPreviewWebView extends WebView implements NestedScrollingCh
         content.append("var converter = new showdown.Converter();\n");
         content.append("converter.setFlavor('github');\n");
         content.append("var html = converter.makeHtml(text);\n");
-        content.append("document.getElementById('content').innerHTML = html;");
+        // SEC-13: same sanitizer as WebViewerActivity — user-typed markdown
+        // in the editor preview reaches innerHTML too.
+        content.append("function sanitizeHtml(html) {"
+                + "var tpl = document.createElement('template');"
+                + "tpl.innerHTML = html;"
+                + "var bad = ['script','style','iframe','object','embed','form',"
+                + "'base','link','meta','title'];"
+                + "var els = tpl.content.querySelectorAll('*');"
+                + "for (var i = 0; i < els.length; i++) {"
+                + "var el = els[i];"
+                + "if (bad.indexOf(el.tagName.toLowerCase()) >= 0) {"
+                + "if (el.parentNode) el.parentNode.removeChild(el);"
+                + "continue; }"
+                + "var attrs = el.attributes;"
+                + "for (var j = attrs.length - 1; j >= 0; j--) {"
+                + "var n = attrs[j].name.toLowerCase();"
+                + "var v = (attrs[j].value || '').replace(/[\\s\\u0000-\\u0020]+/g, '').toLowerCase();"
+                + "if (n.indexOf('on') === 0 || v.indexOf('javascript:') === 0"
+                + "|| v.indexOf('vbscript:') === 0 || v.indexOf('data:text/html') === 0) {"
+                + "el.removeAttribute(attrs[j].name); } } }"
+                + "return tpl.innerHTML; }\n");
+        content.append("document.getElementById('content').innerHTML = sanitizeHtml(html);");
         content.append("</script>");
 
         content.append("</body></html>");

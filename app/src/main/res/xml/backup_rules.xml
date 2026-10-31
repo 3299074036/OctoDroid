@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SEC-7 (Android 12+): 本应用 targetSdk 35，Android 12+ 设备上系统
+     只认 dataExtractionRules，不认 fullBackupContent；没有本文件时
+     12+ 设备会按默认规则备份全部数据（含两个数据库），光改
+     backup_descriptor.xml 等于没改。因此这里与 backup_descriptor.xml
+     用同一排除清单。只写 <exclude>，其余域保持默认备份状态不变
+     （shared_prefs 不新增也不删除）。 -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="database" path="gh4adb.db" />
+        <exclude domain="database" path="suggestions.db" />
+        <!-- 0.1.20 F-04: Android 12+ 未排除即备份。默认偏好（翻译密钥在内）
+             与加密偏好及其明文回退文件一律不随系统自动备份上传。
+             默认偏好文件名随 applicationId 而变，debug/release 两名都排除。 -->
+        <exclude domain="sharedpref" path="com.gh4a_preferences.xml" />
+        <exclude domain="sharedpref" path="com.gh4a.debug_preferences.xml" />
+        <exclude domain="sharedpref" path="Gh4a-secure.xml" />
+        <exclude domain="sharedpref" path="Gh4a-secure-plain.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="database" path="gh4adb.db" />
+        <exclude domain="database" path="suggestions.db" />
+        <exclude domain="sharedpref" path="com.gh4a_preferences.xml" />
+        <exclude domain="sharedpref" path="com.gh4a.debug_preferences.xml" />
+        <exclude domain="sharedpref" path="Gh4a-secure.xml" />
+        <exclude domain="sharedpref" path="Gh4a-secure-plain.xml" />
+    </device-transfer>
+</data-extraction-rules>

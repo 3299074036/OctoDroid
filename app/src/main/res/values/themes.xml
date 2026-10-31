@@ -47,34 +47,45 @@
 
     <!-- Accent color variants -->
     <style name="AppTheme.Blue" parent="AppTheme">
+        <item name="android:textColorLink">@color/accent_blue</item>
         <item name="colorPrimary">@color/accent_blue</item>
         <item name="colorPrimaryDark">@color/accent_blue_dark</item>
         <item name="colorAccent">@color/accent_blue</item>
         <item name="colorSecondary">@color/accent_blue</item>
+        <!-- 0.1.21 Item 3: 面包屑条跟主题色（深色下同名颜色自动解析 values-night 值） -->
+        <item name="colorBreadcrumbBackground">@color/breadcrumb_background_blue</item>
     </style>
     <style name="AppTheme.Red" parent="AppTheme">
+        <item name="android:textColorLink">@color/accent_red</item>
         <item name="colorPrimary">@color/accent_red</item>
         <item name="colorPrimaryDark">@color/accent_red_dark</item>
         <item name="colorAccent">@color/accent_red</item>
         <item name="colorSecondary">@color/accent_red</item>
+        <item name="colorBreadcrumbBackground">@color/breadcrumb_background_red</item>
     </style>
     <style name="AppTheme.Orange" parent="AppTheme">
+        <item name="android:textColorLink">@color/accent_orange</item>
         <item name="colorPrimary">@color/accent_orange</item>
         <item name="colorPrimaryDark">@color/accent_orange_dark</item>
         <item name="colorAccent">@color/accent_orange</item>
         <item name="colorSecondary">@color/accent_orange</item>
+        <item name="colorBreadcrumbBackground">@color/breadcrumb_background_orange</item>
     </style>
     <style name="AppTheme.Purple" parent="AppTheme">
+        <item name="android:textColorLink">@color/accent_purple</item>
         <item name="colorPrimary">@color/accent_purple</item>
         <item name="colorPrimaryDark">@color/accent_purple_dark</item>
         <item name="colorAccent">@color/accent_purple</item>
         <item name="colorSecondary">@color/accent_purple</item>
+        <item name="colorBreadcrumbBackground">@color/breadcrumb_background_purple</item>
     </style>
     <style name="AppTheme.Teal" parent="AppTheme">
+        <item name="android:textColorLink">@color/accent_teal</item>
         <item name="colorPrimary">@color/accent_teal</item>
         <item name="colorPrimaryDark">@color/accent_teal_dark</item>
         <item name="colorAccent">@color/accent_teal</item>
         <item name="colorSecondary">@color/accent_teal</item>
+        <item name="colorBreadcrumbBackground">@color/breadcrumb_background_teal</item>
     </style>
 
     <style name="TransparentTheme" parent="AppTheme">        <item name="android:windowBackground">@android:color/transparent</item>

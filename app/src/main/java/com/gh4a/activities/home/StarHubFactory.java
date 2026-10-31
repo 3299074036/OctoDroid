@@ -1,40 +1,35 @@
 package com.gh4a.activities.home;
 
 import android.content.SharedPreferences;
-import android.view.MenuItem;
 
 import androidx.annotation.StringRes;
 import androidx.fragment.app.Fragment;
 
 import com.gh4a.R;
-import com.gh4a.fragment.ReleaseRadarFragment;
-import com.gh4a.fragment.StarGroupFragment;
-import com.gh4a.fragment.StarredRepositoryListFragment;
+import com.gh4a.fragment.StarMergedFragment;
 
 /**
- * Star 聚合页：抽屉「Star」入口，下设「星标」「分组」「Release 动态」三 Tab。
- * 星标页的排序菜单逻辑沿用原 BookmarkFactory（排序偏好持久化）。
+ * 0.1.1 Star 分段 3 页：分段控件切换我的列表 / 已加星标 / STAR 更新独立页。
+ * 单 Tab（TabLayout 在只有 1 页时自动隐藏，见 BasePagerActivity），
+ * 内容为 StarMergedFragment：我的列表 / 已加星标（全部）/ STAR 更新
+ * 三区单页滚动，页内 chips 跳转。排序菜单与长按归属逻辑由合并页
+ * 内部处理（与 0.5.0 的星标页一致），数据接口未改。
+ * 旧的 StarredRepositoryListFragment / ReleaseRadarFragment 保留在树里，
+ * 不再由 Home 引用（其他入口若有引用不受影响）。
  */
 public class StarHubFactory extends FragmentFactory {
-    private static final int TAB_STARRED = 0;
-    private static final int TAB_GROUPS = 1;
-    public static final int TAB_RADAR = 2;
-
-    private static final int[] TAB_TITLES = new int[] {
-            R.string.starred, R.string.star_groups, R.string.release_radar
-    };
-
-    private static final String PREF_KEY_SORT_ORDER = "home_starred_list_sort_order";
-    private static final String PREF_KEY_SORT_DIR = "home_starred_list_sort_dir";
+    /**
+     * 0.1.0：Star 已是单页，不再有 Tab；此常量仅保留给 ReleaseRadarWorker
+     * 编译引用（通知深链仍带 initial_tab=1，HomeActivity 会将其钳制到
+     * 单页范围内，不再切 Tab）。
+     */
+    public static final int TAB_RADAR = 1;
 
     private final String mUserLogin;
-    private final SharedPreferences mPrefs;
-    private StarredRepositoryListFragment mStarredRepoFragment;
 
     public StarHubFactory(HomeActivity activity, String userLogin, SharedPreferences prefs) {
         super(activity);
         mUserLogin = userLogin;
-        mPrefs = prefs;
     }
 
     @Override
@@ -44,65 +39,11 @@ public class StarHubFactory extends FragmentFactory {
 
     @Override
     protected int[] getTabTitleResIds() {
-        return TAB_TITLES;
+        return new int[] { R.string.star_hub };
     }
 
     @Override
     protected Fragment makeFragment(int position) {
-        switch (position) {
-            case TAB_GROUPS:
-                return StarGroupFragment.newInstance();
-            case TAB_RADAR:
-                return ReleaseRadarFragment.newInstance(mUserLogin);
-            default:
-                return StarredRepositoryListFragment.newInstance(mUserLogin);
-        }
-    }
-
-    @Override
-    protected void onFragmentInstantiated(Fragment f, int position) {
-        if (position == TAB_STARRED) {
-            mStarredRepoFragment = (StarredRepositoryListFragment) f;
-            loadLastSortOrder();
-        }
-        super.onFragmentInstantiated(f, position);
-    }
-
-    @Override
-    protected void onFragmentDestroyed(Fragment f) {
-        if (f == mStarredRepoFragment) {
-            mStarredRepoFragment = null;
-        }
-        super.onFragmentDestroyed(f);
-    }
-
-    @Override
-    protected boolean onOptionsItemSelected(MenuItem item) {
-        // 星标页的排序菜单，只在星标 Tab 处理
-        if (mActivity.getCurrentTabPosition() == TAB_STARRED
-                && mStarredRepoFragment != null
-                && mStarredRepoFragment.onOptionsItemSelected(item)) {
-            saveLastSortOrder();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
-    }
-
-    private void loadLastSortOrder() {
-        String order = mPrefs.getString(PREF_KEY_SORT_ORDER, null);
-        String dir = mPrefs.getString(PREF_KEY_SORT_DIR, null);
-        if (order != null && dir != null && mStarredRepoFragment != null) {
-            mStarredRepoFragment.setSortOrderAndDirection(order, dir);
-        }
-    }
-
-    private void saveLastSortOrder() {
-        if (mStarredRepoFragment == null) {
-            return;
-        }
-        mPrefs.edit()
-                .putString(PREF_KEY_SORT_ORDER, mStarredRepoFragment.getSortOrder())
-                .putString(PREF_KEY_SORT_DIR, mStarredRepoFragment.getSortDirection())
-                .apply();
+        return StarMergedFragment.newInstance(mUserLogin);
     }
 }

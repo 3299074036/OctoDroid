@@ -30,13 +30,14 @@ public class BrowseFilter extends AppCompatActivity {
             finish();
             return;
         }
-        // M-6 纵深防御：manifest 的 intent-filter 只声明了 http/https，
-        // 但显式 intent 可绕过 filter 约束，这里再卡一次 scheme 和 host。
+        // M-6 纵深防御：manifest 的 intent-filter 已是 https-only（SEC-11），
+        // 0.1.20 F-13: 代码内关卡同步收紧为 https-only，显式 intent 的
+        // 明文 http://github.com 链接不再在应用内处理。
         // 经确认所有 deep link 触发的后台任务均为只读 GET（UrlLoadTask 子类），
         // 不存在外部网页可触发的写操作；此处收紧入口即可。
         String scheme = uri.getScheme();
         String host = uri.getHost();
-        if (!("http".equals(scheme) || "https".equals(scheme))
+        if (!("https".equals(scheme))
                 || !("github.com".equals(host) || "gist.github.com".equals(host)
                         || "blog.github.com".equals(host))) {
             finish();

@@ -1,36 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 
+<!-- 0.1.0：趋势行左侧加等宽排名号（位置+1，前 3 名主色加粗、其余灰色）；其余版式与 0.4.0/0.5.0 一致。 -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/selectableItemBackground"
-    android:minHeight="72dp"
-    android:orientation="vertical"
+    android:minHeight="64dp"
+    android:orientation="horizontal"
     android:padding="@dimen/content_padding">
 
     <TextView
-        android:id="@+id/tv_title"
-        android:layout_width="match_parent"
+        android:id="@+id/tv_rank"
+        android:layout_width="32dp"
         android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:fontFamily="monospace"
+        android:gravity="center_horizontal"
         android:textAppearance="@style/TextAppearance.ItemTitle"
-        tools:text="username/repository" />
+        tools:text="1" />
 
-    <TextView
-        android:id="@+id/tv_desc"
-        android:layout_width="match_parent"
+    <LinearLayout
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:maxLines="2"
-        android:textAppearance="?android:attr/textAppearanceSmall"
-        tools:text="Repository description" />
+        android:layout_weight="1"
+        android:orientation="vertical">
 
-    <HorizontalScrollView
-        android:clickable="false"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        <TextView
+            android:id="@+id/tv_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.ItemTitle"
+            tools:text="username/repository" />
 
+        <TextView
+            android:id="@+id/tv_desc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:maxLines="2"
+            android:textAppearance="?android:attr/textAppearanceSmall"
+            tools:text="Repository description" />
+
+        <!-- 0.4.0 像素重排：删横向滚动属性栏，语言/星/Fork 改为行尾单行 meta 行（原型趋势行版式）。 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -39,19 +52,21 @@
 
             <TextView
                 android:id="@+id/tv_lang"
+                android:fontFamily="monospace"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:drawableLeft="@drawable/language_small"
                 android:drawablePadding="4dp"
-                android:layout_marginRight="16dp"
+                android:layout_marginRight="12dp"
                 android:textAppearance="@style/TextAppearance.VerySmall"
                 tools:text="Language" />
 
             <TextView
                 android:id="@+id/tv_stars"
+                android:fontFamily="monospace"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginRight="16dp"
+                android:layout_marginRight="12dp"
                 android:drawableLeft="@drawable/star_small"
                 android:drawablePadding="4dp"
                 android:textAppearance="@style/TextAppearance.VerySmall"
@@ -59,6 +74,7 @@
 
             <TextView
                 android:id="@+id/tv_forks"
+                android:fontFamily="monospace"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:drawableLeft="@drawable/fork_small"
@@ -68,6 +84,6 @@
 
         </LinearLayout>
 
-    </HorizontalScrollView>
+    </LinearLayout>
 
 </LinearLayout>

@@ -207,6 +207,25 @@ public class UiUtils {
                 .create();
     }
 
+    /**
+     * 0.1.2 crash fix: android.R.attr.selectableItemBackground (0x101030e) is an
+     * ATTRIBUTE id, not a drawable resource. Passing it straight to
+     * View.setBackgroundResource() throws Resources$NotFoundException on devices
+     * that resolve it strictly (reported on account switcher, search hot list and
+     * mirror dialog). Resolve the attribute to its drawable first; if the theme
+     * provides none, leave the background untouched instead of crashing.
+     */
+    public static void setSelectableBackground(View view) {
+        if (view == null) return;
+        TypedArray a = view.getContext().obtainStyledAttributes(
+                new int[] { android.R.attr.selectableItemBackground });
+        int resId = a.getResourceId(0, 0);
+        a.recycle();
+        if (resId != 0) {
+            view.setBackgroundResource(resId);
+        }
+    }
+
     public static @ColorInt int resolveColor(Context context, @AttrRes int styledAttributeId) {
         TypedArray a = context.obtainStyledAttributes(new int[] {
             styledAttributeId
@@ -214,6 +233,17 @@ public class UiUtils {
         int color = a.getColor(0, 0);
         a.recycle();
         return color;
+    }
+
+    /**
+     * 0.1.20 D-09: 排名/选中颜色助手。TrendAdapter（前 3 名）与
+     * TrendingFragment（选中范围）原先各写一遍同款三元式：选中或前 3 名
+     * 取 colorPrimary，否则取 icon_foreground。现收敛到这里。
+     */
+    public static @ColorInt int rankOrSelectedColor(Context context, boolean highlighted) {
+        return highlighted
+                ? resolveColor(context, androidx.appcompat.R.attr.colorPrimary)
+                : ContextCompat.getColor(context, R.color.icon_foreground);
     }
 
     public static abstract class EmptinessWatchingTextWatcher implements TextWatcher {

@@ -64,14 +64,20 @@ public abstract class LoadingListFragmentBase extends LoadingFragmentBase implem
         mFastScroller.attachRecyclerView(mRecyclerView);
         mFastScroller.setVisibility(View.VISIBLE);
         mFastScroller.setOnHandleTouchListener((v, event) -> {
+            // 0.1.20 F-20: detach 后 getBaseActivity() 可能为 null。
+            BaseActivity baseActivity = getBaseActivity();
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    getBaseActivity().setRightDrawerLockedClosed(true);
+                    if (baseActivity != null) {
+                        baseActivity.setRightDrawerLockedClosed(true);
+                    }
                     break;
 
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
-                    getBaseActivity().setRightDrawerLockedClosed(false);
+                    if (baseActivity != null) {
+                        baseActivity.setRightDrawerLockedClosed(false);
+                    }
                     break;
             }
 
@@ -89,8 +95,11 @@ public abstract class LoadingListFragmentBase extends LoadingFragmentBase implem
             int argsHash = args != null ? args.hashCode() : 0;
             int oldArgsHash = savedInstanceState.getInt(STATE_KEY_ARGS_HASH);
             if (argsHash != oldArgsHash) {
-                RecyclerView.Adapter<?> adapter = mRecyclerView.getAdapter();
+            RecyclerView.Adapter<?> adapter = mRecyclerView.getAdapter();
+            // 0.1.20 F-23(b): adapter 可能尚未设置，判空再设恢复策略。
+            if (adapter != null) {
                 adapter.setStateRestorationPolicy(RecyclerView.Adapter.StateRestorationPolicy.PREVENT);
+            }
             }
         }
         if (getActivity() instanceof OnRecyclerViewCreatedListener) {
@@ -132,7 +141,11 @@ public abstract class LoadingListFragmentBase extends LoadingFragmentBase implem
     }
 
     protected void scrollToAndHighlightPosition(final int position) {
-        getBaseActivity().collapseAppBar();
+        // 0.1.20 F-20: detach 后不调用宿主。
+        BaseActivity baseActivity = getBaseActivity();
+        if (baseActivity != null) {
+            baseActivity.collapseAppBar();
+        }
         mLayoutManager.scrollToPositionWithOffset(position, 0);
         final RecyclerView.Adapter<?> adapter = mRecyclerView.getAdapter();
         if (adapter instanceof RootAdapter) {

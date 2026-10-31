@@ -20,6 +20,10 @@
             android:title="@string/discover_hub"
             android:icon="@drawable/icon_trending"/>
         <item
+            android:id="@+id/topic_discovery"
+            android:title="@string/topic_discovery"
+            android:icon="@drawable/icon_search"/>
+        <item
             android:id="@+id/my_repos"
             android:title="@string/my_repositories"
             android:icon="@drawable/icon_repositories"/>
@@ -31,10 +35,6 @@
             android:id="@+id/issues_prs"
             android:title="@string/my_items"
             android:icon="@drawable/icon_issues"/>
-        <item
-            android:id="@+id/my_gists"
-            android:title="@string/my_gists"
-            android:icon="@drawable/icon_gists"/>
     </group>
     <!-- 一级：工具 -->
     <group
@@ -45,17 +45,21 @@
             android:title="@string/search"
             android:icon="@drawable/icon_search"/>
     </group>
-    <!-- 设置和深色模式开关（菜单形式） -->
+    <!-- 设置和深色模式开关（菜单形式）：orderInCategory 必须大于抽屉自定义项重加时的
+         order（HomeActivity.applyDrawerCustomization 里从 0 开始编号），否则 NavigationView
+         按 order 排序会把它们顶到抽屉顶部。置底后它们始终排在全部功能项之后。 -->
     <group android:id="@+id/settings_group">
         <item
             android:id="@+id/settings"
             android:title="@string/settings"
-            android:icon="@drawable/icon_settings"/>
+            android:icon="@drawable/icon_settings"
+            android:orderInCategory="1000"/>
         <item
             android:id="@+id/theme_toggle"
             android:title="@string/theme_toggle"
             android:icon="@drawable/icon_theme"
             android:checkable="false"
+            android:orderInCategory="1001"
             app:actionLayout="@layout/theme_toggle" />
     </group>
     <group android:id="@+id/account"

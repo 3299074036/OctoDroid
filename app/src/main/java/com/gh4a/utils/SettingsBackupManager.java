@@ -160,7 +160,12 @@ public class SettingsBackupManager {
             "theme", "version", "active_login", "logins",
             "dark_mode_start", "dark_mode_end",
             "search_type",
-            "mirror_list",
+            // SEC-9: "mirror_list" deliberately NOT whitelisted — a forged
+            // backup could otherwise silently rewrite the mirror list and
+            // redirect unauthenticated traffic. Legitimate restores lose
+            // only the custom mirror list (re-add after restore); every
+            // other setting still restores. "mirror_preset" stays: it is a
+            // single preset value, not an attacker-controlled list.
             "last_notification_check", "last_notification_seen",
             "last_notification_repo_ids"));
 
@@ -190,9 +195,12 @@ public class SettingsBackupManager {
         if (TRANSLATION_KEYS.contains(key)) {
             return true;
         }
+        // SEC-9: translation_url_* deliberately NOT whitelisted — a forged
+        // backup could otherwise point translated issue/comment text at an
+        // attacker-controlled endpoint. Provider, keys/secrets and region
+        // still restore (export itself is untouched, SEC-2 excluded).
         return key.startsWith("translation_api_key")
                 || key.startsWith("translation_api_secret")
-                || key.startsWith("translation_url")
                 || key.startsWith("translation_region");
     }
 
@@ -379,8 +387,9 @@ public class SettingsBackupManager {
                         DRAWER_CONFIG_KEYS::contains);
             }
             if (prefs.has("default")) {
-                // 翻译区只接受白名单内的 translation_ 键（含 API key/secret/endpoint，
-                // 用户要求手动备份携带翻译凭据）；未知形状的键拒绝，防止恶意备份
+                // 翻译区只接受白名单内的 translation_ 键（含 API key/secret，
+                // 用户要求手动备份携带翻译凭据；translation_url_* 已移出白名单，
+                // 见 SEC-9）；未知形状的键拒绝，防止恶意备份
                 // 注入翻译 endpoint 劫持翻译流量 (N-4)
                 jsonToPrefs(prefs.getJSONObject("default"),
                         PreferenceManager.getDefaultSharedPreferences(context),

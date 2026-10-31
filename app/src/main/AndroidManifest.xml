@@ -41,18 +41,16 @@
         android:icon="@drawable/launcher_icon"
         android:label="@string/app_name"
         android:theme="@style/AppTheme"
-        android:fullBackupContent="@xml/backup_descriptor">
+        android:fullBackupContent="@xml/backup_descriptor"
+        android:dataExtractionRules="@xml/backup_rules">
         <activity
             android:name=".activities.Github4AndroidActivity"
             android:launchMode="singleTop"
             android:exported="true"
             android:configChanges="orientation|screenSize" >
-            <intent-filter>
-                <action
-                    android:name="android.intent.action.MAIN" />
-                <category
-                    android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+            <!-- 0.1.12：桌面图标改走 activity-alias（见下方 6 个 Launcher* 别名）：
+                 主 Activity 不再直接挂 LAUNCHER 入口，只保留 gh4a://oauth 深链，
+                 故换主题色改图标时深链始终解析到主 Activity，不受别名开关影响。 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <data android:scheme="gh4a" android:host="oauth" />
@@ -61,11 +59,84 @@
             </intent-filter>
         </activity>
 
+        <!-- 0.1.12：green 主题桌面图标（与主 Activity 同入口，图标背景为该主题色） -->
         <activity-alias
-            android:name=".Github4AndroidActivity"
-            android:exported="false"
+            android:name=".LauncherGreen"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@drawable/launcher_theme_green"
             android:label="@string/app_name"
-            android:targetActivity=".activities.Github4AndroidActivity"/>
+            android:targetActivity=".activities.Github4AndroidActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <!-- 0.1.12：blue 主题桌面图标（与主 Activity 同入口，图标背景为该主题色） -->
+        <activity-alias
+            android:name=".LauncherBlue"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/launcher_theme_blue"
+            android:label="@string/app_name"
+            android:targetActivity=".activities.Github4AndroidActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <!-- 0.1.12：red 主题桌面图标（与主 Activity 同入口，图标背景为该主题色） -->
+        <activity-alias
+            android:name=".LauncherRed"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/launcher_theme_red"
+            android:label="@string/app_name"
+            android:targetActivity=".activities.Github4AndroidActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <!-- 0.1.12：orange 主题桌面图标（与主 Activity 同入口，图标背景为该主题色） -->
+        <activity-alias
+            android:name=".LauncherOrange"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/launcher_theme_orange"
+            android:label="@string/app_name"
+            android:targetActivity=".activities.Github4AndroidActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <!-- 0.1.12：purple 主题桌面图标（与主 Activity 同入口，图标背景为该主题色） -->
+        <activity-alias
+            android:name=".LauncherPurple"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/launcher_theme_purple"
+            android:label="@string/app_name"
+            android:targetActivity=".activities.Github4AndroidActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <!-- 0.1.12：teal 主题桌面图标（与主 Activity 同入口，图标背景为该主题色） -->
+        <activity-alias
+            android:name=".LauncherTeal"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/launcher_theme_teal"
+            android:label="@string/app_name"
+            android:targetActivity=".activities.Github4AndroidActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <activity android:name=".activities.DownloadListActivity" android:exported="false" />
         <activity android:name=".activities.CollaboratorListActivity" android:exported="false" />
@@ -168,6 +239,11 @@
             android:title="@string/account_manage"
             tools:ignore="ManifestResource" />
 
+        <activity
+            android:name=".activities.DiagnosticLogActivity"
+            android:title="@string/diagnostic_log"
+            tools:ignore="ManifestResource" />
+
         <activity android:name=".resolver.BrowseFilter"
             android:excludeFromRecents="true"
             android:taskAffinity=""
@@ -189,19 +265,17 @@
                 <data
                     android:host="blog.github.com"
                     android:scheme="https" />
-                <data
-                    android:host="github.com"
-                    android:scheme="http" />
-				<data
-                    android:host="gist.github.com"
-                    android:scheme="http" />
-                <data
-                    android:host="blog.github.com"
-                    android:scheme="http" />
+                <!-- SEC-11: http entries removed — http://github.com links
+                     no longer resolve to this app (browser handles them).
+                     BrowseFilter.java still re-validates scheme+host for
+                     explicit internal intents; that gate is unchanged. -->
             </intent-filter>
         </activity>
 
-        <service android:name=".worker.NotificationHandlingService" />
+        <!-- SEC-12: explicit exported=false (was implicit default; a future
+             intent-filter would otherwise silently flip it to exported). -->
+        <service android:name=".worker.NotificationHandlingService"
+            android:exported="false" />
 
         <provider
             android:name="androidx.startup.InitializationProvider"
@@ -230,9 +304,11 @@
             android:exported="false" />
 
         <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
+        <!-- SEC-10: exported=false — only the system (BOOT_COMPLETED) and
+             the app's own FLAG_IMMUTABLE alarm PendingIntents can reach it. -->
         <receiver
             android:name="com.gh4a.utils.DarkModeAlarmReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

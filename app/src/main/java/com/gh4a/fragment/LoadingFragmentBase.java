@@ -75,7 +75,10 @@ public abstract class LoadingFragmentBase extends Fragment implements
     }
 
     protected BaseActivity getBaseActivity() {
-        return (BaseActivity) getActivity();
+        // 0.1.20 F-20: 宿主非 BaseActivity 或已 detach 时返回 null 而非强转崩溃；
+        // handleLoadFailure/handleActionFailure 本已判空，其余调用点各判空。
+        android.app.Activity activity = getActivity();
+        return activity instanceof BaseActivity ? (BaseActivity) activity : null;
     }
 
     protected <T> SingleTransformer<T, T> makeLoaderSingle(int id, boolean force) {

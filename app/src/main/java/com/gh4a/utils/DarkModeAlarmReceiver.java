@@ -17,6 +17,13 @@ public class DarkModeAlarmReceiver extends BroadcastReceiver {
             }
             return;
         }
+        // SEC-10 action whitelist: the only other legitimate delivery is
+        // the app's own alarm PendingIntent, which carries NO action
+        // (explicit intent, DarkModeScheduler.alarmIntent). Any non-null,
+        // non-BOOT action is ignored instead of re-applying the theme.
+        if (intent.getAction() != null) {
+            return;
+        }
         DarkModeScheduler.apply(context.getApplicationContext());
     }
 }

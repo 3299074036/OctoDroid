@@ -25,6 +25,20 @@ public class PublicEventListFragment extends EventListFragment {
         return f;
     }
 
+    /**
+     * 0.5.0 “我”内嵌页用：只给 login（Home 页面创建时还没有完整 User）。
+     * 本人账号按用户动态接口拉取；组织账号登录的极少数情况与 UserActivity
+     * 的组织分支不同，见跟踪表说明。
+     */
+    public static PublicEventListFragment newInstance(String login) {
+        PublicEventListFragment f = new PublicEventListFragment();
+        Bundle args = new Bundle();
+        args.putString("login", login);
+        args.putBoolean("org", false);
+        f.setArguments(args);
+        return f;
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
