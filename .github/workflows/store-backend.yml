@@ -1,5 +1,4 @@
-# OctoDroid 商店后端：约 6 小时预计算一次静态 JSON，推到 gh-pages 分支。
-# 对齐 Komi 离线镜像刷新节奏（约 6 小时一次）。
+# OctoDroid 商店后端：每小时预计算一次静态 JSON，推到 gh-pages 分支。
 # App 取 https://3299074036.github.io/OctoDroid/store/ 下的现成文件，
 # 不再走实时全量搜索。API 调用走 GITHUB_TOKEN（每小时 1000 次，
 # 完整跑约 300 次）；不需要用户自建 PAT。
@@ -9,7 +8,7 @@ name: store-backend
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 permissions:
