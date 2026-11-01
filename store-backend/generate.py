@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """OctoDroid 商店后端生成器：Komi 式预计算 + 静态 JSON。
 
-每小时由 GitHub Actions 跑一遍，把结果推到 gh-pages 分支，App 直接取
-现成 JSON（feed 3 小时缓存、榜单 24 小时缓存），不再走实时全量搜索。
+约 6 小时由 GitHub Actions 跑一遍（对齐 Komi 离线镜像刷新节奏），把结果
+推到 gh-pages 分支，App 直接取现成 JSON（feed 3 小时缓存、榜单 24 小时
+缓存），不再走实时全量搜索。
 
 数据口径（对标 Komi 的 GitHub 回退查询，2026-11-01 沙箱实测可用）：
   trending     近 30 天有提交、星标 50 以上，按星标排
@@ -46,6 +47,9 @@ import urllib.request
 API = "https://api.github.com"
 
 PLATFORMS = ["all", "android", "macos", "windows", "linux", "ios"]
+
+# 发现页每页条数：Komi 的 BackendApiClient.getFeed limit 默认值。
+PAGE_SIZE = 20
 
 # 附件后缀 -> 平台（与 StoreClassifier.platformsForAsset 同表）。
 SUFFIX_PLATFORM = [
@@ -172,6 +176,7 @@ def build_item(api, repo):
     return {
         "fullName": full,
         "owner": owner.get("login", ""),
+        "name": repo.get("name", ""),
         "avatarUrl": owner.get("avatar_url", ""),
         "description": repo.get("description") or "",
         "stars": repo.get("stargazers_count") or 0,
@@ -264,8 +269,23 @@ def main():
                        {"generatedAt": generated_at,
                         "items": platform_items(items, platform)})
 
+    # 发现分页（Komi 同款：每页 20 条，hasMore 翻页）：App 按页取。
+    # 整包文件保留（旧版 App 与 Komi 离线镜像快照同款，不打破 0.1.53）。
+    feed_pages = {}
+    for platform in PLATFORMS:
+        pfeed = platform_items(feed, platform)
+        pages = [pfeed[i:i + PAGE_SIZE]
+                 for i in range(0, len(pfeed), PAGE_SIZE)] or [[]]
+        feed_pages[platform] = len(pages)
+        for n, chunk in enumerate(pages, start=1):
+            write_json(os.path.join(args.out, "feed", platform,
+                                    "page%d.json" % n),
+                       {"generatedAt": generated_at, "page": n,
+                        "hasMore": n < len(pages), "items": chunk})
+
     meta = {"generatedAt": generated_at,
             "feed": len(feed),
+            "feedPages": feed_pages,
             "charts": {c: len(v) for c, v in charts.items()},
             "apiCalls": api.calls}
     write_json(os.path.join(args.out, "meta.json"), meta)
