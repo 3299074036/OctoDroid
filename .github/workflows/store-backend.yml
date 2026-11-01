@@ -1,0 +1,50 @@
+# OctoDroid 商店后端：每小时预计算一次静态 JSON，推到 gh-pages 分支。
+# App 取 https://3299074036.github.io/OctoDroid/store/ 下的现成文件，
+# 不再走实时全量搜索。API 调用走 GITHUB_TOKEN（每小时 1000 次，
+# 完整跑约 300 次）；不需要用户自建 PAT。
+# 快照（App 内置离线兜底）不由本工作流更新：只在出 App 包前本地跑
+# 一次生成器、随代码提交，避免每小时往主分支写提交。
+name: store-backend
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate store JSON
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 store-backend/generate.py \
+            --max-candidates 100 --max-items 100 \
+            --out store-output --snapshot-dir /dev/null
+      - name: Publish to gh-pages
+        run: |
+          set -e
+          git config user.name "octodroid-store-bot"
+          git config user.email "octodroid-store-bot@users.noreply.github.com"
+          git fetch origin gh-pages 2>/dev/null || true
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git worktree add /tmp/gh-pages gh-pages
+          else
+            git worktree add /tmp/gh-pages -b gh-pages
+          fi
+          mkdir -p /tmp/gh-pages/store
+          cp -r store-output/* /tmp/gh-pages/store/
+          touch /tmp/gh-pages/.nojekyll
+          cd /tmp/gh-pages
+          git add store .nojekyll
+          if git diff --cached --quiet; then
+            echo "no changes, skip push"
+          else
+            git commit -m "store data $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push origin gh-pages
+          fi
