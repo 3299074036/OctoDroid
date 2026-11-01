@@ -107,7 +107,13 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
 
     private SearchAdapter mAdapter;
 
+    // 商店视图：搜索页签 + 仓库类型 + 空查询时挂出，替代最近搜索/热门头。
+    private StoreView mStoreView;
+
     private SearchView mSearch;
+    // 0.1.50：商店平台按钮（顶栏菜单项，自定义动作视图；只在商店可见时出现）。
+    private MenuItem mPlatformItem;
+    private View mPlatformActionView;
     // 0.1.16：搜索顶栏贴边用的工具栏原始内边距（退出搜索页时恢复，
     // 避免影响趋势等其他共用同一工具栏的页面）。
     private int mToolbarInsetStart;
@@ -186,6 +192,15 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         updateSearchViewHint();
         updateTypeMenuItem(menu);
 
+        // 0.1.50：平台按钮做到顶栏最右（白底青绿字，原型同款）。初始先隐藏，
+        // 由 onPrepareOptionsMenu 按商店是否可见同步；点开即商店的平台抽屉。
+        mPlatformItem = menu.findItem(R.id.store_platform);
+        if (mPlatformItem != null && getActivity() != null) {
+            mPlatformActionView = buildPlatformActionView();
+            mPlatformItem.setActionView(mPlatformActionView);
+            mPlatformItem.setVisible(false);
+        }
+
         super.onCreateOptionsMenu(menu, inflater);
     }
 
@@ -193,7 +208,61 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     public void onPrepareOptionsMenu(Menu menu) {
         super.onPrepareOptionsMenu(menu);
         updateTypeMenuItem(menu);
+        syncPlatformMenuItem(menu);
         capSearchBoxWidth();
+    }
+
+    /** 0.1.50：顶栏平台按钮的动作视图（白底青绿字圆角，原型同款）。 */
+    private View buildPlatformActionView() {
+        android.widget.TextView tv = new android.widget.TextView(getActivity());
+        android.graphics.drawable.GradientDrawable bg =
+                new android.graphics.drawable.GradientDrawable();
+        bg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        float density = getResources().getDisplayMetrics().density;
+        bg.setColor(0xFFFFFFFF);
+        bg.setCornerRadius(6 * density);
+        tv.setBackground(bg);
+        tv.setTextColor(StoreViews.primaryColor(getActivity()));
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14);
+        tv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        int padH = (int) (10 * density + 0.5f);
+        int padV = (int) (7 * density + 0.5f);
+        tv.setPadding(padH, padV, padH, padV);
+        tv.setText(R.string.store_platform_all);
+        tv.setOnClickListener(v -> {
+            if (mStoreView != null) {
+                mStoreView.showPlatformSheet();
+            }
+        });
+        return tv;
+    }
+
+    /**
+     * 0.1.50：商店可见时顶栏最右显示平台按钮、排序图标让位（商店不参与排序）；
+     * 商店隐藏时平台按钮消失、排序恢复。按钮文案跟当前平台走。
+     * 0.1.51：商店可见时搜索框前面的类型图标也去掉（原型顶栏没有它，
+     * 商店本身就是仓库维度）；出结果／独立搜索页时类型图标恢复，
+     * 切用户／代码搜索还靠它。
+     */
+    private void syncPlatformMenuItem(Menu menu) {
+        boolean storeVisible = mStoreView != null
+                && mStoreView.getVisibility() == View.VISIBLE;
+        if (mPlatformItem != null) {
+            mPlatformItem.setVisible(storeVisible);
+            if (storeVisible && mStoreView != null
+                    && mPlatformActionView instanceof android.widget.TextView) {
+                ((android.widget.TextView) mPlatformActionView)
+                        .setText(mStoreView.getPlatformLabel() + " ∨");
+            }
+        }
+        MenuItem sortItem = menu.findItem(R.id.sort);
+        if (sortItem != null) {
+            sortItem.setVisible(!storeVisible);
+        }
+        MenuItem typeItem = menu.findItem(R.id.type);
+        if (typeItem != null) {
+            typeItem.setVisible(!storeVisible);
+        }
     }
 
     /**
@@ -372,6 +441,9 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             for (int i = 0; i < menuView.getChildCount(); i++) {
                 View child = menuView.getChildAt(i);
                 if (child == mSearch) continue;
+                // 0.1.50：平台按钮是自定义动作视图（不是 ActionMenuItemView），
+                // 不是被挤出，跳过，否则会误判为排序被挤而白白缩搜索框。
+                if (child == mPlatformActionView) continue;
                 if (!(child instanceof androidx.appcompat.view.menu.ActionMenuItemView)
                         || child.getVisibility() != View.VISIBLE) {
                     squeezed = true;
@@ -469,8 +541,18 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         }
         mHotDisposable = null;
         mSearch = null;
+        mPlatformItem = null;
+        mPlatformActionView = null;
         mDefaultHeader = null;
         mAdapter = null;
+        if (mStoreView != null) {
+            mStoreView.onDestroy();
+            ViewGroup parent = (ViewGroup) mStoreView.getParent();
+            if (parent != null) {
+                parent.removeView(mStoreView);
+            }
+            mStoreView = null;
+        }
         super.onDestroyView();
     }
 
@@ -514,6 +596,12 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
 
     @Override
     public void onRefresh() {
+        if (mStoreView != null && mStoreView.getVisibility() == View.VISIBLE) {
+            // 商店可见时只重载当前页签（下拉手势被商店盖住时不可达，
+            // 页签重选同样走这条重载路）。
+            mStoreView.reloadCurrentTab();
+            return;
+        }
         // BUG-25: pull-to-refresh must actually refresh hot suggestions,
         // not keep the fragment-lifetime cache.
         mHotRepos = null;
@@ -524,11 +612,70 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         }
     }
 
+    // ---------- 软件商店：搜索页签的默认页 ----------
+
+    /** 搜索页签（Home 搜索 Tab，do_initial_load=false）才挂商店；独立搜索页走老路。 */
+    private boolean isStoreTab() {
+        Bundle args = getArguments();
+        return args != null && !args.getBoolean("do_initial_load", true);
+    }
+
+    private void showStore() {
+        if (getView() == null || getActivity() == null) {
+            return;
+        }
+        if (mStoreView == null) {
+            mStoreView = new StoreView(getActivity());
+            mStoreView.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            ((ViewGroup) getView()).addView(mStoreView);
+            // 0.1.50：平台切换后刷新顶栏按钮文案。
+            mStoreView.setOnPlatformChangedListener(() -> {
+                if (getActivity() != null) {
+                    getActivity().invalidateOptionsMenu();
+                }
+            });
+        }
+        mStoreView.setVisibility(View.VISIBLE);
+        mStoreView.onShown();
+        if (getActivity() != null) {
+            getActivity().invalidateOptionsMenu();
+        }
+        View list = getView().findViewById(R.id.list);
+        if (list != null) {
+            list.setVisibility(View.GONE);
+        }
+        View emptyContainer = getView().findViewById(R.id.empty_view_container);
+        if (emptyContainer != null) {
+            emptyContainer.setVisibility(View.GONE);
+        }
+    }
+
+    private void hideStore() {
+        if (mStoreView != null) {
+            mStoreView.setVisibility(View.GONE);
+        }
+        if (getActivity() != null) {
+            getActivity().invalidateOptionsMenu();
+        }
+        if (getView() != null) {
+            View list = getView().findViewById(R.id.list);
+            if (list != null) {
+                list.setVisibility(View.VISIBLE);
+            }
+        }
+    }
+
     /**
      * 0.1.6 默认页加载：只加载默认头（最近搜索 + 热门建议），不走列表加载，
      * 进搜索页签即调用，不需要下拉刷新才显示。
      */
     private void loadDefaultPage() {
+        // 商店页：搜索页签 + 仓库类型时默认页就是商店，不挂最近搜索/热门头。
+        if (isStoreTab() && mSelectedSearchType == SEARCH_TYPE_REPO) {
+            showStore();
+            return;
+        }
         if (mDefaultHeader == null) {
             attachDefaultHeader();
         } else {
@@ -557,6 +704,18 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             View emptyContainer = getView().findViewById(R.id.empty_view_container);
             if (list != null) {
                 list.setVisibility(View.VISIBLE);
+            }
+            if (emptyContainer != null) {
+                emptyContainer.setVisibility(View.GONE);
+            }
+        }
+        if (mStoreView != null && mStoreView.getVisibility() == View.VISIBLE
+                && getView() != null) {
+            // 商店可见时基类的空态逻辑不得把列表/空态容器翻出来盖住商店。
+            View list = getView().findViewById(R.id.list);
+            View emptyContainer = getView().findViewById(R.id.empty_view_container);
+            if (list != null) {
+                list.setVisibility(View.GONE);
             }
             if (emptyContainer != null) {
                 emptyContainer.setVisibility(View.GONE);
@@ -657,11 +816,25 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     public boolean onQueryTextChange(String newText) {
         mQuery = newText;
         if (!TextUtils.isEmpty(newText)) {
-            removeDefaultHeader();
-        } else if (mDefaultHeader == null) {
-            // BUG-7: clearing back to empty must restore the default page,
-            // not leave a blank list.
-            loadDefaultPage();
+            if (isStoreTab() && mSelectedSearchType == SEARCH_TYPE_REPO) {
+                // 商店内搜索框：输入时 live 筛当前页签列表，不切走；
+                // 回车提交才走全局仓库搜索（loadResults 里 hideStore）。
+                showStore();
+                if (mStoreView != null) {
+                    mStoreView.setFilter(newText);
+                }
+            } else {
+                removeDefaultHeader();
+            }
+        } else {
+            if (mStoreView != null) {
+                mStoreView.setFilter(null);
+            }
+            if (mDefaultHeader == null) {
+                // BUG-7: clearing back to empty must restore the default page,
+                // not leave a blank list.
+                loadDefaultPage();
+            }
         }
         return true;
     }
@@ -672,6 +845,9 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             mAdapter.clear();
         }
         mQuery = null;
+        if (mStoreView != null) {
+            mStoreView.setFilter(null);
+        }
         attachDefaultHeader();
         // BUG-7: the 0.1.8 override forces the list visible when the header
         // is attached; without this a 0-result search leaves the list GONE
@@ -734,6 +910,8 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     }
 
     private void loadResults() {
+        // 提交搜索：先藏商店，否则 onRefresh 会看到商店可见而只重载页签。
+        hideStore();
         removeDefaultHeader();
         mSearch.clearFocus();
         onRefresh();
@@ -761,8 +939,12 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             // 0.1.20 F-23(a): 空查询路径不走 submit/onRefresh，旧订阅须在此释放，
             // 否则飞行中的默认仓库加载会在模式切换后投递旧类型数据。
             disposeCurrentSubscription();
-            // 默认页仍在：按新类型刷新最近搜索（热门建议只在仓库类型显示）
-            refreshDefaultHeader();
+            if (isStoreTab() && mSelectedSearchType == SEARCH_TYPE_REPO) {
+                showStore();
+            } else {
+                hideStore();
+                loadDefaultPage();
+            }
         } else {
             // force re-filtering of the view
             mSearch.setQuery(mQuery, true);
@@ -940,6 +1122,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     // ---------- 0.1.1 默认页：最近搜索在上、热门建议在下 ----------
 
     private void attachDefaultHeader() {
+        if (isStoreTab() && mSelectedSearchType == SEARCH_TYPE_REPO) {
+            showStore();
+            return;
+        }
         if (mAdapter == null || getActivity() == null || mDefaultHeader != null) return;
         mDefaultHeader = getLayoutInflater().inflate(R.layout.search_default_header, null);
         // 0.1.6：默认头明确满宽，避免量成窄栏导致文案被截。
