@@ -12,3 +12,6 @@ signing.properties
 # Crashlytics generated files
 assets/crashlytics-build.properties
 res/values/com_crashlytics_export_strings.xml
+
+# 商店后端本地试跑产物（Actions 每次现算，不入库）
+store-backend/output/
