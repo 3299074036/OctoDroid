@@ -1,7 +1,12 @@
 # OctoDroid 商店后端：每小时预计算一次静态 JSON，推到 gh-pages 分支。
 # App 取 https://3299074036.github.io/OctoDroid/store/ 下的现成文件，
-# 不再走实时全量搜索。API 调用走 GITHUB_TOKEN（每小时 1000 次，
-# 完整跑约 300 次）；不需要用户自建 PAT。
+# 不再走实时全量搜索。API 调用走仓库 secret STORE_PAT（细粒度 PAT，
+# 仅公开仓库只读；每小时 5000 次），三榜各取前 1000 候选，完整跑约
+# 2112 次（实测 2026-11-08：并集 1745 条，约 hiwiki 可安装池 71%）。
+# GITHUB_TOKEN 只留给推 gh-pages 用（已有 contents: write 权限）。
+# 历史快照：每轮把输出仓库的星标数写成 store/history/<日期>.json 推到
+# gh-pages，下轮读 7 天前的快照算近 7 日均涨星（零新增 API 调用，
+# 攒够 7 天后生成器热门条目切到真·近期日均）。
 # 快照（App 内置离线兜底）不由本工作流更新：只在出 App 包前本地跑
 # 一次生成器、随代码提交，避免每小时往主分支写提交。
 name: store-backend
@@ -11,6 +16,10 @@ on:
     - cron: "0 * * * *"
   workflow_dispatch:
 
+concurrency:
+  group: store-backend
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -19,13 +28,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch history snapshots
+        run: |
+          set -e
+          mkdir -p store-history
+          git fetch origin gh-pages 2>/dev/null || true
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git worktree add /tmp/gh-pages-history gh-pages
+            cp /tmp/gh-pages-history/store/history/*.json store-history/ 2>/dev/null || true
+          fi
       - name: Generate store JSON
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.STORE_PAT }}
         run: |
+          set -e
+          if [ -z "$GITHUB_TOKEN" ]; then echo "STORE_PAT secret is missing or empty"; exit 1; fi
           python3 store-backend/generate.py \
-            --max-candidates 100 --max-items 100 \
+            --max-candidates 1000 --max-items 1000 \
+            --history-dir store-history \
             --out store-output --snapshot-dir /dev/null
+      - name: Verify output
+        run: |
+          python3 -c "import json; m=json.load(open('store-output/meta.json')); assert m['feed'] >= 1500 and m['apiCalls'] >= 1000, m; print('ok feed=%s apiCalls=%s' % (m['feed'], m['apiCalls']))"
       - name: Publish to gh-pages
         run: |
           set -e
@@ -39,6 +63,8 @@ jobs:
           fi
           mkdir -p /tmp/gh-pages/store
           cp -r store-output/* /tmp/gh-pages/store/
+          mkdir -p /tmp/gh-pages/store/history
+          cp store-history/*.json /tmp/gh-pages/store/history/ 2>/dev/null || true
           touch /tmp/gh-pages/.nojekyll
           cd /tmp/gh-pages
           git add store .nojekyll
