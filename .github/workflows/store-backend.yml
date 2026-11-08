@@ -1,9 +1,12 @@
 # OctoDroid 商店后端：每天 0 点、12 点（北京时间，即 UTC 4 点、16 点）
 # 预计算一次静态 JSON，推到 gh-pages 分支。
 # App 取 https://3299074036.github.io/OctoDroid/store/ 下的现成文件，
-# 不再走实时全量搜索。API 调用走仓库 secret STORE_PAT（细粒度 PAT，
-# 仅公开仓库只读；每小时 5000 次），三榜各取前 1000 候选，完整跑约
-# 2112 次（实测 2026-11-08：并集 1745 条，约 hiwiki 可安装池 71%）。
+# 不再走实时全量搜索。严格版（2026-11-08，用户定：全对上）：feed 池子
+# = hiwiki 当次重抓的可安装池，我方独有的 1,408 条已删；榜单归属 =
+# hiwiki subgroup（条目带 ranks 字段）；榜内排序由 App 按纯星标排；
+# 搜索管线与 Komi 镜像整段已删。API 调用走仓库 secret STORE_PAT
+# （细粒度 PAT，仅公开仓库只读；每小时 5000 次），每轮只补新入池仓库
+# 的 forks/topics/created_at（首轮约 2457 次，稳态约 0–30 次）。
 # GITHUB_TOKEN 只留给推 gh-pages 用（已有 contents: write 权限）。
 # 历史快照：每轮把输出仓库的星标数写成 store/history/<日期>.json 推到
 # gh-pages，下轮读 7 天前的快照算近 7 日均涨星（零新增 API 调用，
@@ -29,29 +32,105 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch history snapshots
+      - name: Fetch history snapshots and previous outputs
         run: |
           set -e
-          mkdir -p store-history
+          mkdir -p store-history prev-hiwiki
           git fetch origin gh-pages 2>/dev/null || true
           if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
             git worktree add /tmp/gh-pages-history gh-pages
             cp /tmp/gh-pages-history/store/history/*.json store-history/ 2>/dev/null || true
+            cp /tmp/gh-pages-history/store/feed/all.json prev-feed.json 2>/dev/null || true
+            cp /tmp/gh-pages-history/store/hiwiki/hiwiki-pool.json prev-hiwiki/ 2>/dev/null || true
+            cp /tmp/gh-pages-history/store/hiwiki/hiwiki-ranks.json prev-hiwiki/ 2>/dev/null || true
+            cp /tmp/gh-pages-history/store/hiwiki/harvest-log.json prev-hiwiki/ 2>/dev/null || true
             git worktree remove --force /tmp/gh-pages-history
+          fi
+          ls prev-feed.json 2>/dev/null; ls prev-hiwiki/ 2>/dev/null; true
+      - name: Harvest hiwiki
+        id: harvest
+        run: |
+          set +e
+          mkdir -p hiwiki-data
+          python3 store-backend/harvest-hiwiki.py --out-dir hiwiki-data
+          HARVEST_RC=$?
+          set -e
+          if [ "$HARVEST_RC" -eq 0 ]; then
+            echo "harvestStatus=ok" >> "$GITHUB_OUTPUT"
+            echo "harvest ok"
+          else
+            echo "harvest failed (rc=$HARVEST_RC), falling back"
+            if [ -f prev-hiwiki/hiwiki-pool.json ] && [ -f prev-hiwiki/hiwiki-ranks.json ]; then
+              cp prev-hiwiki/hiwiki-pool.json prev-hiwiki/hiwiki-ranks.json hiwiki-data/
+              echo "fallback: previous round artifacts (level 2)"
+            else
+              cp store-backend/hiwiki-ranks.json hiwiki-data/hiwiki-ranks.json
+              echo "fallback: committed hiwiki-ranks.json (level 3, no pool file; Generate reuses previous feed hiwiki items)"
+            fi
+            python3 -c "import json; json.dump({'harvestStatus': 'fallback', 'reason': 'harvest rc=$HARVEST_RC'}, open('hiwiki-data/harvest-log.json', 'w'), ensure_ascii=False)"
+            echo "harvestStatus=fallback" >> "$GITHUB_OUTPUT"
           fi
       - name: Generate store JSON
         env:
           GITHUB_TOKEN: ${{ secrets.STORE_PAT }}
+          HARVEST_STATUS: ${{ steps.harvest.outputs.harvestStatus }}
         run: |
           set -e
           if [ -z "$GITHUB_TOKEN" ]; then echo "STORE_PAT secret is missing or empty"; exit 1; fi
           python3 store-backend/generate.py \
-            --max-candidates 1000 --max-items 1000 \
+            --hiwiki-pool hiwiki-data/hiwiki-pool.json \
+            --hiwiki-ranks hiwiki-data/hiwiki-ranks.json \
+            --prev-feed prev-feed.json \
+            --metadata-cap 4500 \
+            --harvest-status "$HARVEST_STATUS" \
             --history-dir store-history \
             --out store-output --snapshot-dir /dev/null
       - name: Verify output
         run: |
-          python3 -c "import json; m=json.load(open('store-output/meta.json')); assert m['feed'] >= 1500 and m['apiCalls'] >= 1000, m; print('ok feed=%s apiCalls=%s' % (m['feed'], m['apiCalls']))"
+          python3 - <<'PYEOF'
+          import json
+
+          meta = json.load(open("store-output/meta.json"))
+          feed = json.load(open("store-output/feed/all.json"))["items"]
+          mapping = json.load(open("hiwiki-data/hiwiki-ranks.json"))
+
+          # Effective pool for this run: fresh/previous harvest pool if
+          # present (levels 1-2), else previous feed hiwiki items (level 3).
+          pool_records = None
+          try:
+              pool_records = json.load(open("hiwiki-data/hiwiki-pool.json"))["records"]
+          except Exception:
+              pool_records = None
+          if pool_records is None:
+              prev = json.load(open("prev-feed.json"))["items"]
+              pool_names = {i["fullName"].lower() for i in prev
+                            if i.get("source") == "hiwiki"}
+          else:
+              pool_names = {r["fullName"].lower() for r in pool_records}
+          feed_names = {i["fullName"].lower() for i in feed}
+          dropped_names = pool_names - feed_names
+          expected_ranked = (
+              sum(1 for n in pool_names if n in mapping)
+              - sum(1 for n in pool_names if n in mapping and n not in feed_names))
+          expected_unranked = len(feed) - expected_ranked
+          ranked = sum(1 for i in feed if i.get("ranks"))
+          unranked = len(feed) - ranked
+          nonempty = len({r for i in feed for r in (i.get("ranks") or [])})
+
+          assert meta["poolSize"] > 0, meta
+          assert len(feed) + meta.get("droppedNoInstallable", 0) == meta["poolSize"], meta
+          assert ranked + unranked == len(feed), meta
+          assert ranked == expected_ranked, (ranked, expected_ranked, meta)
+          assert unranked == expected_unranked, (unranked, expected_unranked, meta)
+          assert all(isinstance(i.get("ranks"), list) for i in feed), "ranks field missing"
+          assert all(i.get("source") == "hiwiki" for i in feed), "non-hiwiki source in feed"
+          assert all(r in set(mapping.values()) for i in feed for r in (i.get("ranks") or [])), "rank outside mapping"
+          assert meta.get("apiCalls", 0) <= 5000, meta
+          print("ok poolSize=%s feed=%s ranked=%s unranked=%s nonemptyRanks=%s harvestStatus=%s apiCalls=%s droppedNoInstallable=%s metadataDegraded=%s"
+                % (meta["poolSize"], len(feed), ranked, unranked, nonempty,
+                   meta.get("harvestStatus"), meta.get("apiCalls"),
+                   meta.get("droppedNoInstallable"), meta.get("metadataDegraded")))
+          PYEOF
       - name: Publish to gh-pages
         run: |
           set -e
@@ -67,6 +146,8 @@ jobs:
           cp -r store-output/* /tmp/gh-pages/store/
           mkdir -p /tmp/gh-pages/store/history
           cp store-history/*.json /tmp/gh-pages/store/history/ 2>/dev/null || true
+          mkdir -p /tmp/gh-pages/store/hiwiki
+          cp hiwiki-data/*.json /tmp/gh-pages/store/hiwiki/ 2>/dev/null || true
           touch /tmp/gh-pages/.nojekyll
           cd /tmp/gh-pages
           git add store .nojekyll
