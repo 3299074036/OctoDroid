@@ -21,6 +21,15 @@
         android:minHeight="40dp"
         android:orientation="horizontal">
 
+    <CheckBox
+        android:id="@+id/cb_select"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="10dp"
+        android:clickable="false"
+        android:focusable="false"
+        android:visibility="gone" />
+
     <View
         android:id="@+id/v_color_bar"
         android:layout_width="5dp"
@@ -43,7 +52,8 @@
         android:id="@+id/iv_icon"
         android:layout_width="24dp"
         android:layout_height="24dp"
-        android:layout_marginEnd="12dp" />
+        android:layout_marginEnd="12dp"
+        android:contentDescription="@null" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -92,6 +102,30 @@
         android:text="\u203A"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="20sp"
+        android:visibility="gone" />
+
+    <!-- 0.1.64：组头 ⋮ 菜单（修改分组名 / 删除分组），仅组头显示。 -->
+    <TextView
+        android:id="@+id/tv_more"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:focusable="false"
+        android:text="@string/star_list_more"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="20sp"
+        android:visibility="gone" />
+
+    <!-- 0.1.64：排序模式拖动柄（≡），仅排序行显示。 -->
+    <TextView
+        android:id="@+id/tv_drag"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:focusable="false"
+        android:text="@string/star_list_drag"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="22sp"
         android:visibility="gone" />
 
     </LinearLayout>
