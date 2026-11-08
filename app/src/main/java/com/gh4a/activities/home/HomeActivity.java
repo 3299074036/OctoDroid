@@ -505,7 +505,27 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
             LoginModeChooserFragment.newInstance()
                     .show(getSupportFragmentManager(), "loginmode");
         });
+        // 0.1.57：退出登录行（红色，字号／边距与“添加账号”一致）；点后先弹确认框。
+        builder.addTextRow(getString(R.string.logout),
+                ContextCompat.getColor(this, R.color.accent_red),
+                v -> showLogoutConfirm());
         builder.show();
+    }
+
+    /** 退出登录确认：确认后只清当前账号凭证（现有 logout() 路子），回登录页；取消留在原地。 */
+    private void showLogoutConfirm() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.logout_confirm_title)
+                .setMessage(R.string.logout_confirm_message)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.logout, (dialog, which) -> {
+                    Gh4Application.get().logout();
+                    // 清掉内存里的当前用户状态（抽屉退出同款再加 finish()，不留旧账号信息）。
+                    mUserLogin = null;
+                    goToToplevelActivity();
+                    finish();
+                })
+                .show();
     }
 
     /** 0.1.2：底栏 Star 角标 = 未读更新数（Star 提醒行已删，角标本身保留）。
