@@ -111,9 +111,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     private StoreView mStoreView;
 
     private SearchView mSearch;
-    // 0.1.50：商店平台按钮（顶栏菜单项，自定义动作视图；只在商店可见时出现）。
-    private MenuItem mPlatformItem;
-    private View mPlatformActionView;
     // 0.1.16：搜索顶栏贴边用的工具栏原始内边距（退出搜索页时恢复，
     // 避免影响趋势等其他共用同一工具栏的页面）。
     private int mToolbarInsetStart;
@@ -192,15 +189,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         updateSearchViewHint();
         updateTypeMenuItem(menu);
 
-        // 0.1.50：平台按钮做到顶栏最右（白底青绿字，原型同款）。初始先隐藏，
-        // 由 onPrepareOptionsMenu 按商店是否可见同步；点开即商店的平台抽屉。
-        mPlatformItem = menu.findItem(R.id.store_platform);
-        if (mPlatformItem != null && getActivity() != null) {
-            mPlatformActionView = buildPlatformActionView();
-            mPlatformItem.setActionView(mPlatformActionView);
-            mPlatformItem.setVisible(false);
-        }
-
         super.onCreateOptionsMenu(menu, inflater);
     }
 
@@ -212,34 +200,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         capSearchBoxWidth();
     }
 
-    /** 0.1.50：顶栏平台按钮的动作视图（白底青绿字圆角，原型同款）。 */
-    private View buildPlatformActionView() {
-        android.widget.TextView tv = new android.widget.TextView(getActivity());
-        android.graphics.drawable.GradientDrawable bg =
-                new android.graphics.drawable.GradientDrawable();
-        bg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
-        float density = getResources().getDisplayMetrics().density;
-        bg.setColor(0xFFFFFFFF);
-        bg.setCornerRadius(6 * density);
-        tv.setBackground(bg);
-        tv.setTextColor(StoreViews.primaryColor(getActivity()));
-        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14);
-        tv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        int padH = (int) (10 * density + 0.5f);
-        int padV = (int) (7 * density + 0.5f);
-        tv.setPadding(padH, padV, padH, padV);
-        tv.setText(R.string.store_platform_all);
-        tv.setOnClickListener(v -> {
-            if (mStoreView != null) {
-                mStoreView.showPlatformSheet();
-            }
-        });
-        return tv;
-    }
-
     /**
-     * 0.1.50：商店可见时顶栏最右显示平台按钮、排序图标让位（商店不参与排序）；
-     * 商店隐藏时平台按钮消失、排序恢复。按钮文案跟当前平台走。
+     * 0.1.58：平台按钮已删除（平台改由各页的系统/平台网格切换），这里只同步
+     * 排序与类型图标：商店可见时两者隐藏（商店不参与排序、本身就是仓库维度）；
+     * 商店隐藏时两者恢复。
      * 0.1.51：商店可见时搜索框前面的类型图标也去掉（原型顶栏没有它，
      * 商店本身就是仓库维度）；出结果／独立搜索页时类型图标恢复，
      * 切用户／代码搜索还靠它。
@@ -247,14 +211,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     private void syncPlatformMenuItem(Menu menu) {
         boolean storeVisible = mStoreView != null
                 && mStoreView.getVisibility() == View.VISIBLE;
-        if (mPlatformItem != null) {
-            mPlatformItem.setVisible(storeVisible);
-            if (storeVisible && mStoreView != null
-                    && mPlatformActionView instanceof android.widget.TextView) {
-                ((android.widget.TextView) mPlatformActionView)
-                        .setText(mStoreView.getPlatformLabel() + " ∨");
-            }
-        }
         MenuItem sortItem = menu.findItem(R.id.sort);
         if (sortItem != null) {
             sortItem.setVisible(!storeVisible);
@@ -314,6 +270,7 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
                 toolbar.setContentInsetsAbsolute(mToolbarInsetStart, 0);
                 toolbar.setContentInsetStartWithNavigation(mToolbarInsetStartWithNav);
                 toolbar.setPadding(mToolbarPadLeft, mToolbarPadTop, 0, mToolbarPadBottom);
+                // 0.1.61：② 改成紧贴标题（见下），其余三段不变；排序位置与距右沿不变。
                 // 0.1.43：四段间距一次统一为趋势页同款值（= 标题左内边距
                 // mToolbarInsetStart，标准 16dp），排序距右沿不动：
                 // ① 左边栏→搜索标题 = 内容内边距（0.1.41 已恢复）；
@@ -324,6 +281,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
                 // 放大镜左偏归零；④ 搜索框→排序图标 = 内板右内边距
                 // （已清零）+ 排序图标居中余量。菜单左内边距把整排菜单
                 // 右推多少，搜索框上限就减多少，排序位置与距右沿不变。
+                // 0.1.61：类型图标紧贴“搜索”标题（0.1.43 是等距排布，
+                // 标题→图标 16dp + 图标在项内居中余量，吃掉搜索框的宽）。
+                // 改法：菜单左内边距清零 + 类型项收窄到图标宽 + 两侧各 4dp，
+                // 标题→图标只剩 4dp；搜索框上限相应放宽（见下）。
                 float density = toolbar.getResources().getDisplayMetrics().density;
                 int menuPadLeft = 0;
                 View parent = (View) mSearch.getParent();
@@ -337,18 +298,25 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
                     int typeIdx = (mSelectedSearchType >= 0
                             && mSelectedSearchType < typeIcons.length)
                             ? mSelectedSearchType : 0;
+                    android.graphics.drawable.Drawable typeDrawable =
+                            ContextCompat.getDrawable(toolbar.getContext(), typeIcons[typeIdx]);
+                    int iconW = (typeDrawable != null)
+                            ? typeDrawable.getIntrinsicWidth() : 0;
                     for (int i = 0; i < menu.getChildCount(); i++) {
                         View child = menu.getChildAt(i);
                         if (child instanceof androidx.appcompat.view.menu.ActionMenuItemView) {
-                            int w = child.getWidth();
-                            android.graphics.drawable.Drawable d =
-                                    ContextCompat.getDrawable(toolbar.getContext(), typeIcons[typeIdx]);
-                            int iconW = (d != null) ? d.getIntrinsicWidth() : 0;
-                            if (w > 0 && iconW > 0) {
-                                int offset = child.getPaddingLeft()
-                                        + (w - child.getPaddingLeft()
-                                        - child.getPaddingRight() - iconW) / 2;
-                                menuPadLeft = Math.max(0, mToolbarInsetStart - offset);
+                            // 第一个菜单项就是类型项（orderInCategory 10 < 搜索 20
+                            // < 排序 30；搜索框是 SearchView 不是菜单项视图）。
+                            // 类型项定宽为图标宽 + 两侧各 4dp（默认最小宽 48dp，
+                            // 定宽绕过它；排序项不动）。
+                            if (iconW > 0) {
+                                ViewGroup.LayoutParams lp = child.getLayoutParams();
+                                if (lp != null) {
+                                    lp.width = iconW + (int) (8 * density + 0.5f);
+                                    child.setLayoutParams(lp);
+                                }
+                                child.setPadding(0, child.getPaddingTop(),
+                                        0, child.getPaddingBottom());
                             }
                             break;
                         }
@@ -402,19 +370,33 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
                         magIcon.setLayoutParams(mllp);
                     }
                 }
-                // 0.1.42 的预留取宽保留，另减菜单左内边距（见上），排序
-                // 位置与距右沿因此不变；25% 下限保搜索框可用，排序挤占
-                // 时仍有 verifySortVisible 继续缩。
-                int reserve = (int) (200 * density + 0.5f);
-                int floor = (int) (toolbar.getWidth() * 0.25f);
-                int max = Math.max(floor, Math.min(
-                        (int) (toolbar.getWidth() * 0.50f),
-                        toolbar.getWidth() - reserve - menuPadLeft));
-                if (max > 0) {
-                    mSearch.setMaxWidth(max);
-                    // 0.1.20 F-31: 60% 是固定比例，窄屏/大字体下仍可能挤掉排序——
-                    // 布局完成后做一次底线校验（见 verifySortVisible）。
-                    verifySortVisible(toolbar, max, 0);
+                // 0.1.58：商店可见时排序／类型图标均隐藏、平台按钮已删除，
+                // 搜索框占满剩余整行（上限放顶栏宽，ActionMenuView 会收住）；
+                // 商店不可见时仍按老路取宽并做底线校验（排序须可见）。
+                if (mStoreView != null
+                        && mStoreView.getVisibility() == View.VISIBLE) {
+                    int max = toolbar.getWidth();
+                    if (max > 0) {
+                        mSearch.setMaxWidth(max);
+                    }
+                } else {
+                    // 0.1.61：类型项收窄（48dp→图标宽 + 8dp）+ 菜单左内边距
+                    // 清零，预留从 200dp 降到 150dp（标题约 40 + 左内边距
+                    // 16 + 类型约 32 + 排序 48 + 余量约 14）；上限从 50%
+                    // 放到 70%（只是松上限，真正起作用的是预留算式；排序
+                    // 挤占时仍有 verifySortVisible 继续缩）。25% 下限保搜
+                    // 索框可用。
+                    int reserve = (int) (150 * density + 0.5f);
+                    int floor = (int) (toolbar.getWidth() * 0.25f);
+                    int max = Math.max(floor, Math.min(
+                            (int) (toolbar.getWidth() * 0.70f),
+                            toolbar.getWidth() - reserve - menuPadLeft));
+                    if (max > 0) {
+                        mSearch.setMaxWidth(max);
+                        // 0.1.20 F-31: 60% 是固定比例，窄屏/大字体下仍可能挤掉排序——
+                        // 布局完成后做一次底线校验（见 verifySortVisible）。
+                        verifySortVisible(toolbar, max, 0);
+                    }
                 }
             }
         });
@@ -441,9 +423,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             for (int i = 0; i < menuView.getChildCount(); i++) {
                 View child = menuView.getChildAt(i);
                 if (child == mSearch) continue;
-                // 0.1.50：平台按钮是自定义动作视图（不是 ActionMenuItemView），
-                // 不是被挤出，跳过，否则会误判为排序被挤而白白缩搜索框。
-                if (child == mPlatformActionView) continue;
                 if (!(child instanceof androidx.appcompat.view.menu.ActionMenuItemView)
                         || child.getVisibility() != View.VISIBLE) {
                     squeezed = true;
@@ -541,8 +520,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         }
         mHotDisposable = null;
         mSearch = null;
-        mPlatformItem = null;
-        mPlatformActionView = null;
         mDefaultHeader = null;
         mAdapter = null;
         if (mStoreView != null) {
@@ -597,8 +574,8 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     @Override
     public void onRefresh() {
         if (mStoreView != null && mStoreView.getVisibility() == View.VISIBLE) {
-            // 商店可见时只重载当前页签（下拉手势被商店盖住时不可达，
-            // 页签重选同样走这条重载路）。
+            // 商店可见时只重载当前页签；商店顶部的下拉刷新由此触发
+            // （canChildScrollUp 覆盖后，商店中部下拉不再被拦截成刷新）。
             mStoreView.reloadCurrentTab();
             return;
         }
@@ -610,6 +587,19 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         if (mDefaultHeader != null) {
             refreshDefaultHeader();
         }
+    }
+
+    /**
+     * 0.1.60：下拉刷新问商店当前 ScrollView 是否能上滑——商店可见时以它为准，
+     * 否则走基类（问结果列表 RecyclerView）。不覆盖时刷新布局问的是已 GONE
+     * 的结果列表，恒报不能上滑，商店中部任何一下拉都被拦截成刷新重载。
+     */
+    @Override
+    public boolean canChildScrollUp() {
+        if (mStoreView != null && mStoreView.getVisibility() == View.VISIBLE) {
+            return mStoreView.canScrollUp();
+        }
+        return super.canChildScrollUp();
     }
 
     // ---------- 软件商店：搜索页签的默认页 ----------
@@ -629,12 +619,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             mStoreView.setLayoutParams(new ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             ((ViewGroup) getView()).addView(mStoreView);
-            // 0.1.50：平台切换后刷新顶栏按钮文案。
-            mStoreView.setOnPlatformChangedListener(() -> {
-                if (getActivity() != null) {
-                    getActivity().invalidateOptionsMenu();
-                }
-            });
         }
         mStoreView.setVisibility(View.VISIBLE);
         mStoreView.onShown();
@@ -816,20 +800,14 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     public boolean onQueryTextChange(String newText) {
         mQuery = newText;
         if (!TextUtils.isEmpty(newText)) {
-            if (isStoreTab() && mSelectedSearchType == SEARCH_TYPE_REPO) {
-                // 商店内搜索框：输入时 live 筛当前页签列表，不切走；
-                // 回车提交才走全局仓库搜索（loadResults 里 hideStore）。
-                showStore();
-                if (mStoreView != null) {
-                    mStoreView.setFilter(newText);
-                }
-            } else {
+            // 0.1.60：输入时商店原样不动，不再 live 筛商店列表；回车提交才
+            // 走全局仓库搜索（loadResults 里 hideStore）。最近搜索联想
+            // （runQuery）不受影响，仍由 SearchView 自己调。
+            if (!(isStoreTab() && mSelectedSearchType == SEARCH_TYPE_REPO)) {
                 removeDefaultHeader();
             }
         } else {
-            if (mStoreView != null) {
-                mStoreView.setFilter(null);
-            }
+            // 清空立即恢复商店默认页。
             if (mDefaultHeader == null) {
                 // BUG-7: clearing back to empty must restore the default page,
                 // not leave a blank list.
@@ -846,7 +824,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         }
         mQuery = null;
         if (mStoreView != null) {
-            mStoreView.setFilter(null);
+            // 关闭搜索框：回商店默认页（首页）。
+            if (mStoreView.getVisibility() == View.VISIBLE) {
+                mStoreView.resetToHome();
+            }
         }
         attachDefaultHeader();
         // BUG-7: the 0.1.8 override forces the list visible when the header

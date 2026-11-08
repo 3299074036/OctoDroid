@@ -59,6 +59,7 @@ import com.gh4a.utils.IntentUtils;
 import com.gh4a.utils.RxUtils;
 import com.gh4a.utils.StringUtils;
 import com.gh4a.utils.UiUtils;
+import com.gh4a.utils.UserListDialogHelper;
 import com.gh4a.widget.IntentSpan;
 import com.meisolsson.githubsdk.model.Permissions;
 import com.meisolsson.githubsdk.model.Repository;
@@ -73,11 +74,17 @@ import com.gh4a.widget.OverviewRow;
 import com.vdurmont.emoji.EmojiParser;
 
 import java.net.HttpURLConnection;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 import io.reactivex.Single;
+import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.disposables.CompositeDisposable;
+import io.reactivex.schedulers.Schedulers;
 import retrofit2.Response;
 
 public class RepositoryFragment extends LoadingFragmentBase implements
@@ -116,6 +123,8 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     // star/watch 请求在途标志：快速连击时两次请求会基于同一旧状态，
     // 回调翻转后 UI 与服务端不一致，在途时直接屏蔽新的点击
     private boolean mStarWatchInFlight = false;
+    // 0.1.64：点 star 加分组的 GraphQL 请求（拉列表/归属）。
+    private final CompositeDisposable mDisposables = new CompositeDisposable();
     private boolean mIsReadmeLoaded = false;
     private boolean mIsReadmeExpanded = false;
     // README translation state
@@ -153,6 +162,7 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        mDisposables.clear();
         if (mReadmeTranslator != null) {
             mReadmeTranslator.cancel();
             mReadmeTranslator = null;
@@ -746,6 +756,11 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                                 .stargazersCount(mRepository.stargazersCount() + (mIsStarring ? 1 : -1))
                                 .build();
                         updateStargazerUi();
+                        // 0.1.64：点 star 成功后弹出“加入列表”（只加星不进组
+                        // = 不勾选直接点确定）；取消 Star 不弹。
+                        if (mIsStarring) {
+                            showStarToGroupDialog();
+                        }
                     }
                 }, error -> {
                     mStarWatchInFlight = false;
@@ -755,6 +770,63 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     updateStargazerUi();
                 });
 
+    }
+
+    /**
+     * 0.1.64：点 star 加分组——加星成功后弹出“加入列表”多选框（全不勾选，
+     * “新建列表…”可建；不勾选直接点确定 = 只加星，不进组）。拉官方列表失败
+     * 时不弹框（不打扰，只加星）。
+     */
+    private void showStarToGroupDialog() {
+        if (getActivity() == null) return;
+        final String fullName = mRepository.fullName();
+        final String login = Gh4Application.get().getAuthLogin();
+        mDisposables.add(UserListsGraphQL.fetchLists(login)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(lists -> {
+                    if (!isAdded() || getActivity() == null) return;
+                    if (lists.isEmpty()) {
+                        // 无任何列表：直接新建（新建后归属到新列表）。
+                        UserListDialogHelper.showCreateListDialog(getActivity(),
+                                lists, mDisposables, newList -> {
+                                    if (!isAdded()) return;
+                                    List<String> ids = new ArrayList<>();
+                                    ids.add(newList.id);
+                                    assignStarredRepoToLists(fullName, ids);
+                                });
+                        return;
+                    }
+                    UserListDialogHelper.showAssignDialog(getActivity(), lists,
+                            new HashSet<>(),
+                            getString(R.string.star_list_star_subtitle, fullName),
+                            () -> UserListDialogHelper.showCreateListDialog(getActivity(),
+                                    lists, mDisposables, newList -> {
+                                        if (!isAdded()) return;
+                                        List<String> ids = new ArrayList<>();
+                                        ids.add(newList.id);
+                                        assignStarredRepoToLists(fullName, ids);
+                                    }),
+                            selectedIds -> assignStarredRepoToLists(fullName, selectedIds));
+                }, error -> {
+                    // 0.1.64：列表拉取失败不弹框（加星本身已成功）。
+                }));
+    }
+
+    private void assignStarredRepoToLists(String fullName, List<String> listIds) {
+        mDisposables.add(UserListsGraphQL.assignRepo(fullName, listIds)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(ok -> {
+                    if (!isAdded()) return;
+                    Toast.makeText(getActivity(), R.string.assign_official_success,
+                            Toast.LENGTH_SHORT).show();
+                }, error -> {
+                    if (isAdded()) {
+                        Toast.makeText(getActivity(), R.string.assign_official_failed,
+                                Toast.LENGTH_LONG).show();
+                    }
+                }));
     }
 
     private void toggleWatchingState() {

@@ -81,8 +81,8 @@ public class MeFragment extends Fragment {
     // (a disposed CompositeDisposable rejects every later add()).
     private CompositeDisposable mDisposables = new CompositeDisposable();
     private TextView mNotificationsValueView;
-    /** 打开中的镜像源卡片对话框，销毁时主动关闭、取消测速。 */
-    private MirrorSourceDialog mMirrorDialog;
+    /** 我页镜像源行的摘要视图：从独立页返回时在 onResume 里刷新。 */
+    private TextView mMirrorPresetValue;
 
     private final ActivityResultLauncher<String[]> mRestoreLauncher =
             registerForActivityResult(new ActivityResultContracts.OpenDocument(),
@@ -172,24 +172,20 @@ public class MeFragment extends Fragment {
     public void onResume() {
         super.onResume();
         loadUnreadNotificationCount();
+        // 从镜像源独立页返回：摘要可能变了（换了当前镜像），只刷新这一行
+        if (mMirrorPresetValue != null) {
+            mMirrorPresetValue.setText(mirrorPresetSummary());
+        }
     }
 
     @Override
     public void onDestroyView() {
-        if (mMirrorDialog != null) {
-            mMirrorDialog.dismiss();
-            mMirrorDialog = null;
-        }
         mDisposables.dispose();
         super.onDestroyView();
     }
 
     @Override
     public void onDestroy() {
-        if (mMirrorDialog != null) {
-            mMirrorDialog.dismiss();
-            mMirrorDialog = null;
-        }
         mDisposables.dispose();
         super.onDestroy();
     }
@@ -417,7 +413,8 @@ public class MeFragment extends Fragment {
                     }
                 });
         mirrorPresetValue[0] = addValueRow(browsing, R.string.mirror_preset,
-                mirrorPresetSummary(), v -> showMirrorSourceDialog(), R.drawable.me_ic_database);
+                mirrorPresetSummary(), v -> showMirrorSourcePage(), R.drawable.me_ic_database);
+        mMirrorPresetValue = mirrorPresetValue[0];
         mirrorPresetValue[0].setEnabled(mPrefs.getBoolean(SettingsFragment.KEY_MIRROR_ENABLED, false));
         addRow(browsing, getString(R.string.backup_restore), "›", v -> showBackupRestoreDialog(), R.drawable.download_small);
         addSwitchRow(browsing, R.string.use_custom_tabs, R.drawable.me_ic_browser,
@@ -839,25 +836,13 @@ public class MeFragment extends Fragment {
         buildSettingsRows(view);
     }
 
-    /** 我页镜像源行：打开与设置页同一张卡片对话框（0.1.15 统一入口）。 */
-    private void showMirrorSourceDialog() {
+    /** 我页镜像源行：打开镜像源独立页（0.1.62 起不再弹对话框）。 */
+    private void showMirrorSourcePage() {
         if (getActivity() == null) {
             return;
         }
-        mMirrorDialog = new MirrorSourceDialog(requireActivity(),
-                new MirrorSourceDialog.PresetStore() {
-                    @Override
-                    public String get() {
-                        return mPrefs.getString(SettingsFragment.KEY_MIRROR_PRESET, "");
-                    }
-
-                    @Override
-                    public void set(String value) {
-                        mPrefs.edit().putString(SettingsFragment.KEY_MIRROR_PRESET, value).apply();
-                        rebuildSettingsRows();
-                    }
-                });
-        mMirrorDialog.show();
+        startActivity(new android.content.Intent(requireActivity(),
+                com.gh4a.activities.MirrorSourceActivity.class));
     }
 
     private void showAboutDialog() {

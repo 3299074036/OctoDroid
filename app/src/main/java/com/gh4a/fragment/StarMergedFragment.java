@@ -1,5 +1,8 @@
 package com.gh4a.fragment;
 
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.text.format.Formatter;
@@ -7,16 +10,24 @@ import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.ImageView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.widget.PopupMenu;
 import androidx.core.content.ContextCompat;
+import androidx.core.widget.CompoundButtonCompat;
 import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -27,17 +38,24 @@ import com.gh4a.activities.ReleaseInfoActivity;
 import com.gh4a.activities.RepositoryActivity;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.UiUtils;
-import com.gh4a.utils.StarGroupManager;
+import com.gh4a.utils.UserListDialogHelper;
 import com.gh4a.utils.StringUtils;
 import com.meisolsson.githubsdk.model.Repository;
 import com.meisolsson.githubsdk.service.activity.StarringService;
 import com.vdurmont.emoji.EmojiParser;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
+import org.json.JSONArray;
+import org.json.JSONException;
 
-import io.reactivex.Single;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.schedulers.Schedulers;
@@ -46,11 +64,14 @@ import retrofit2.Response;
 /**
  * 0.1.2 Star 分段 3 页：顶部一段式分段控件（选中段主色填充白字，未选中灰字）
  * 点段即切换到对应独立页，不再单页滚动：①分组（官方 GraphQL 列表，可展开；
- * 失败/为空时回退本机分组，不自动上传；加载完成前不显示“正在加载官方列表”提示，
- * 列表数据直接出现）②列表（全部已加星标，REST 分页，排序菜单复用）③更新
- * （GraphQL，一次取最近 30 个 Star 仓库的最新 Release，与 ReleaseRadarFragment
- * 同一数据源 RadarGraphQL.fetch）。默认页为我的列表。更新数变化时同步到底栏
- * Star 角标（HomeActivity.setStarBadge）。
+ * 全部走官方接口，无本机分组）②列表（全部已加星标，REST 分页，排序菜单复用）
+ * ③更新（GraphQL，一次取最近 30 个 Star 仓库的最新 Release，与
+ * ReleaseRadarFragment 同一数据源 RadarGraphQL.fetch）。默认页为我的列表。
+ * 更新数变化时同步到底栏 Star 角标（HomeActivity.setStarBadge）。
+ * 0.1.64 Star 分组：组头 ⋮ 菜单（修改分组名 / 删除分组）、+ 新增分组
+ * （名称 + 设为私密开关）、未分组区、长按仓库行多选移组（批量逐个调官方
+ * 接口，带进度与失败重试）、长按组头排序（顺序只存本机，按账号记列表 ID
+ * 顺序）。
  * 0.1.3（性能）：①官方列表一次嵌套 GraphQL 查询取全量，不再 1+N 串行；
  * ②进页只加载当前页，列表/更新首次切过去才加载，下拉刷新也只刷当前页；
  * ③官方列表按账号本地缓存，进分组先即时显示缓存，后台刷新到后再替换显示。
@@ -73,12 +94,27 @@ public class StarMergedFragment extends Fragment {
     private static final int TYPE_STATUS = 3;
     private static final int TYPE_STARRED_REPO = 4;
     private static final int TYPE_UPDATE = 5;
+    // 0.1.64：未分组区头、+ 新增分组、多选顶栏、排序提示、底部操作栏、排序行
+    private static final int TYPE_UNGROUPED = 6;
+    private static final int TYPE_ADD_GROUP = 7;
+    private static final int TYPE_SELECTION_HEADER = 8;
+    private static final int TYPE_SORT_HEADER = 9;
+    private static final int TYPE_ACTION_BAR = 10;
+    private static final int TYPE_SORT_ROW = 11;
+
+    // 0.1.64：底部操作栏种类
+    private static final int ACTION_BAR_MOVE = 0;
+    private static final int ACTION_BAR_SORT = 1;
+
+    // 0.1.64：组头 ⋮ 菜单项
+    private static final int MENU_RENAME = 1;
+    private static final int MENU_DELETE = 2;
 
     private static class Item {
         int type;
         String title;
         String subtitle;
-        String key; // list id or local group name, for expand state
+        String key; // list id, for expand state
         boolean expanded;
         Repository repo;
         ReleaseRadarFragment.RadarItem radar;
@@ -88,6 +124,7 @@ public class StarMergedFragment extends Fragment {
         boolean retryLists; // 缓存过期提示行：点按重试官方列表
         boolean retryUpdates; // 更新失败行：点按重试更新
         boolean retryStarred; // 列表首屏失败行：点按重试列表
+        int actionKind; // TYPE_ACTION_BAR：ACTION_BAR_MOVE / ACTION_BAR_SORT
     }
 
     private String mLogin;
@@ -112,7 +149,16 @@ public class StarMergedFragment extends Fragment {
     private boolean mListsFailed;
     private boolean mListsLoaded; // BUG-18：与另两页一致的已加载门控
     private String mExpandedOfficialId;
-    private String mExpandedLocalGroup;
+    private boolean mUngroupedExpanded;
+    // 0.1.64：多选模式（长按仓库行进入）与排序模式（长按组头进入）
+    private boolean mMultiSelect;
+    private final Set<String> mSelectedRepos = new LinkedHashSet<>();
+    private boolean mSortMode;
+    private List<UserListsGraphQL.UserList> mSortLists;
+    private ItemTouchHelper mSortTouchHelper;
+    private OnBackPressedCallback mBackCallback;
+    // 0.1.64：批量移动进度条（dialog_move_progress.xml 的 pb_move）。
+    private ProgressBar mMoveProgressBar;
     // Starred state
     private final List<Repository> mStarred = new ArrayList<>();
     private int mStarredPage = 1;
@@ -150,19 +196,17 @@ public class StarMergedFragment extends Fragment {
     private static final String KEY_LISTS_LOADED = "star_lists_loaded";
     private static final String KEY_UPDATES_LOADED = "star_updates_loaded";
     private static final String KEY_EXPANDED_OFFICIAL = "star_expanded_official";
-    private static final String KEY_EXPANDED_LOCAL = "star_expanded_local";
+
+    // 0.1.64：列表显示顺序只存本机（官方接口无排序能力），按账号记一份
+    // 列表 ID 的顺序；拉取后按此顺序展示，新列表排最后，删除的去掉。
+    private static final String PREFS_LIST_ORDER = "star_list_order";
+    private static final String KEY_LIST_ORDER_IDS = "order_ids";
 
     // BUG-8/BUG-27：旋转恢复用。Starred REST 列表无磁盘缓存，loaded 标志
     // 即使存了也不能恢复（否则空列表 + 永不重拉），故只恢复排序与页签，
     // Starred 旋转后按新排序重拉第 1 页；列表/更新有磁盘缓存才恢复 loaded。
     private boolean mRestoredListsLoaded;
     private boolean mRestoredUpdatesLoaded;
-
-    /** 本地分组的显式登录（BUG-27：不再让 StarGroupManager 读全局登录）。 */
-    private String groupLogin() {
-        if (mLogin != null) return mLogin;
-        return com.gh4a.Gh4Application.get().getAuthLogin();
-    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -179,7 +223,6 @@ public class StarMergedFragment extends Fragment {
             mRestoredListsLoaded = savedInstanceState.getBoolean(KEY_LISTS_LOADED, false);
             mRestoredUpdatesLoaded = savedInstanceState.getBoolean(KEY_UPDATES_LOADED, false);
             mExpandedOfficialId = savedInstanceState.getString(KEY_EXPANDED_OFFICIAL);
-            mExpandedLocalGroup = savedInstanceState.getString(KEY_EXPANDED_LOCAL);
         }
     }
 
@@ -192,7 +235,6 @@ public class StarMergedFragment extends Fragment {
         outState.putBoolean(KEY_LISTS_LOADED, mListsLoaded);
         outState.putBoolean(KEY_UPDATES_LOADED, mUpdatesLoaded);
         outState.putString(KEY_EXPANDED_OFFICIAL, mExpandedOfficialId);
-        outState.putString(KEY_EXPANDED_LOCAL, mExpandedLocalGroup);
     }
 
     @Override
@@ -277,6 +319,8 @@ public class StarMergedFragment extends Fragment {
                 com.gh4a.utils.DiagTrace.log(getActivity(), "STAR",
                         "lists=cached count=" + cached.size());
                 mOfficialLists = cached;
+                // 0.1.64：按本机保存的顺序展示（新列表排最后）。
+                applySavedListOrder();
                 mListsFailed = false;
                 // BUG-18/BUG-27：旋转恢复时缓存能接住列表数据，才恢复 loaded
                 // 标志（否则仍按未加载处理，loadCurrentTab 会重拉）。
@@ -296,6 +340,19 @@ public class StarMergedFragment extends Fragment {
                 }
             }
         }
+        // 0.1.64：返回键先退出多选/排序模式（仅模式开启时生效）。
+        mBackCallback = new OnBackPressedCallback(false) {
+            @Override
+            public void handleOnBackPressed() {
+                if (mSortMode) {
+                    exitSortMode(false);
+                } else if (mMultiSelect) {
+                    exitMultiSelect();
+                }
+            }
+        };
+        requireActivity().getOnBackPressedDispatcher()
+                .addCallback(getViewLifecycleOwner(), mBackCallback);
         updateSegmented();
         rebuild();
         // 0.1.3：进页只加载当前页（默认分组），不把三页全拉一遍。
@@ -318,6 +375,15 @@ public class StarMergedFragment extends Fragment {
         mListsLoading = false;
         mStarredLoading = false;
         mUpdatesLoading = false;
+        // 0.1.64：视图销毁时拆掉排序拖动，模式状态随视图重建而丢弃。
+        if (mSortTouchHelper != null) {
+            mSortTouchHelper.attachToRecyclerView(null);
+            mSortTouchHelper = null;
+        }
+        mSortMode = false;
+        mMultiSelect = false;
+        mSelectedRepos.clear();
+        mSortLists = null;
         mList = null;
         mSwipe = null;
         mAdapter = null;
@@ -401,6 +467,9 @@ public class StarMergedFragment extends Fragment {
 
     private void selectTab(int tab) {
         if (tab == mCurrentTab) return;
+        // 0.1.64：切段先静默退出多选/排序模式（不重建，selectTab 自会重建）。
+        clearMultiSelectState();
+        clearSortModeState();
         mCurrentTab = tab;
         updateSegmented();
         rebuild();
@@ -543,10 +612,12 @@ public class StarMergedFragment extends Fragment {
                     mOfficialLists = lists;
                     mListsFailed = false;
                     mListsLoaded = true;
+                    // 0.1.64：按本机保存的顺序展示（新列表排最后）。
+                    applySavedListOrder();
                     // 成功拉取即覆盖本地缓存；只在仍停留在分组页时替换显示，
                     // 用户已切走的页不碰（切回分组时 rebuild 会显示新数据）。
                     if (getActivity() != null && mLogin != null) {
-                        UserListsCache.save(getActivity(), mLogin, lists);
+                        UserListsCache.save(getActivity(), mLogin, mOfficialLists);
                     }
                     if (mCurrentTab == TAB_LISTS) {
                         rebuild();
@@ -557,8 +628,8 @@ public class StarMergedFragment extends Fragment {
                     mListsDisposable = null;
                     if (generation != mListsGeneration || !isAdded()) return;
                     stopRefreshingFor(TAB_LISTS);
-                    // 失败不清空缓存：有缓存时继续显示缓存（回退语义不变，
-                    // 缓存为空时才走本机分组/失败提示）；失败本身不覆盖缓存。
+                    // 失败不清空缓存：有缓存时继续显示缓存；缓存为空时
+                    // 显示失败提示；失败本身不覆盖缓存。
                     // BUG-3/BUG-18：失败不置 mListsLoaded，切回/重试会再拉。
                     if (mOfficialLists == null) {
                         mOfficialLists = new ArrayList<>();
@@ -770,7 +841,25 @@ public class StarMergedFragment extends Fragment {
         if (mOfficialLists == null) {
             return;
         }
-        if (!mOfficialLists.isEmpty()) {
+        // 0.1.64：排序模式只画排序列表（提示行 + 可拖行 + 底部栏）。
+        if (mSortMode) {
+            buildSortSection();
+            return;
+        }
+        // 0.1.64：多选模式顶栏（主色底 + 已选 N 个 + 取消）。
+        if (mMultiSelect) {
+            Item head = new Item();
+            head.type = TYPE_SELECTION_HEADER;
+            head.title = getString(R.string.star_list_selected, mSelectedRepos.size());
+            mItems.add(head);
+        }
+        if (mOfficialLists.isEmpty()) {
+            // 0.1.64：无本机分组回退——空即空状态（失败/为空文案）。
+            Item st = new Item();
+            st.type = TYPE_STATUS;
+            st.title = getString(mListsFailed ? R.string.my_lists_failed : R.string.my_lists_empty);
+            mItems.add(st);
+        } else {
             // BUG-17：失败后仍显示缓存时，按缓存年龄判断是否过期；
             // 超过阈值（或年龄未知）才在顶部放一行可点按重试的提示，
             // 新鲜缓存的短暂失败不打扰用户。
@@ -798,56 +887,94 @@ public class StarMergedFragment extends Fragment {
                 row.expanded = TextUtils.equals(mExpandedOfficialId, list.id);
                 mItems.add(row);
                 if (row.expanded) {
-                    for (UserListsGraphQL.Repo repo : list.repos) {
-                        Item r = new Item();
-                        r.type = TYPE_LIST_REPO;
-                        r.title = repo.fullName;
-                        r.subtitle = repo.description;
-                        r.fullName = repo.fullName;
-                        mItems.add(r);
-                    }
+                    addListRepoItems(list.repos);
                 }
             }
-        } else {
-            // Fallback: local groups (same as 0.5.0 header behaviour)
-            List<String> groups = getActivity() != null
-                    ? StarGroupManager.getGroups(getActivity(), groupLogin()) : new ArrayList<>();
-            if (groups.isEmpty()) {
-                Item st = new Item();
-                st.type = TYPE_STATUS;
-                st.title = getString(mListsFailed ? R.string.my_lists_failed : R.string.my_lists_empty);
-                mItems.add(st);
-            } else {
-                if (mListsFailed) {
-                    Item st = new Item();
-                    st.type = TYPE_STATUS;
-                    st.title = getString(R.string.my_lists_failed);
-                    mItems.add(st);
+            // 0.1.64：未分组区——已加载的 Star 仓库中不在任何官方列表里的。
+            List<UserListsGraphQL.Repo> ungrouped = computeUngrouped();
+            if (!ungrouped.isEmpty()) {
+                Item head = new Item();
+                head.type = TYPE_UNGROUPED;
+                head.title = getString(R.string.star_list_ungrouped);
+                head.subtitle = getResources().getQuantityString(
+                        R.plurals.star_group_repo_count, ungrouped.size(), ungrouped.size());
+                head.expanded = mUngroupedExpanded;
+                mItems.add(head);
+                if (mUngroupedExpanded) {
+                    addListRepoItems(ungrouped);
                 }
-                for (String group : groups) {
-                    List<StarGroupManager.StarRepo> repos =
-                            StarGroupManager.getRepos(getActivity(), groupLogin(), group);
-                    Item row = new Item();
-                    row.type = TYPE_LIST;
-                    row.title = group;
-                    row.subtitle = getResources().getQuantityString(
-                            R.plurals.star_group_repo_count, repos.size(), repos.size());
-                    row.key = group;
-                    row.expanded = TextUtils.equals(mExpandedLocalGroup, group);
-                    mItems.add(row);
-                    if (row.expanded) {
-                        for (StarGroupManager.StarRepo repo : repos) {
-                            Item r = new Item();
-                            r.type = TYPE_LIST_REPO;
-                            r.title = repo.fullName;
-                            r.subtitle = repo.description;
-                            r.fullName = repo.fullName;
-                            mItems.add(r);
-                        }
-                    }
-                }
+            }
+            // 0.1.64：+ 新增分组（多选时不显示）。
+            if (!mMultiSelect) {
+                Item add = new Item();
+                add.type = TYPE_ADD_GROUP;
+                add.title = getString(R.string.star_list_add_group);
+                mItems.add(add);
             }
         }
+        // 0.1.64：多选模式底部栏（已选 N 个 + 取消 + 移动至分组）。
+        if (mMultiSelect) {
+            Item bar = new Item();
+            bar.type = TYPE_ACTION_BAR;
+            bar.actionKind = ACTION_BAR_MOVE;
+            bar.title = getString(R.string.star_list_selected, mSelectedRepos.size());
+            mItems.add(bar);
+        }
+    }
+
+    /** 0.1.64：排序模式的列表内容（提示行 + 可拖行 + 底部栏）。 */
+    private void buildSortSection() {
+        Item hint = new Item();
+        hint.type = TYPE_SORT_HEADER;
+        hint.title = getString(R.string.star_list_sort_hint);
+        mItems.add(hint);
+        if (mSortLists != null) {
+            for (UserListsGraphQL.UserList list : mSortLists) {
+                Item row = new Item();
+                row.type = TYPE_SORT_ROW;
+                row.title = list.name;
+                row.key = list.id;
+                mItems.add(row);
+            }
+        }
+        Item bar = new Item();
+        bar.type = TYPE_ACTION_BAR;
+        bar.actionKind = ACTION_BAR_SORT;
+        bar.title = getString(R.string.star_list_done);
+        mItems.add(bar);
+    }
+
+    private void addListRepoItems(List<UserListsGraphQL.Repo> repos) {
+        for (UserListsGraphQL.Repo repo : repos) {
+            Item r = new Item();
+            r.type = TYPE_LIST_REPO;
+            r.title = repo.fullName;
+            r.subtitle = repo.description;
+            r.fullName = repo.fullName;
+            mItems.add(r);
+        }
+    }
+
+    /**
+     * 0.1.64：未分组仓库 = 已加载的 Star 列表（mStarred，列表页懒加载、
+     * 后台预取第 1 页）中不在任何官方列表里的仓库。Star 列表未加载或
+     * 只加载了部分页时，未分组区只反映已加载部分。
+     */
+    private List<UserListsGraphQL.Repo> computeUngrouped() {
+        Set<String> grouped = new java.util.HashSet<>();
+        for (UserListsGraphQL.UserList list : mOfficialLists) {
+            for (UserListsGraphQL.Repo repo : list.repos) {
+                grouped.add(repo.fullName);
+            }
+        }
+        List<UserListsGraphQL.Repo> out = new ArrayList<>();
+        for (Repository repo : mStarred) {
+            if (!grouped.contains(repo.fullName())) {
+                out.add(new UserListsGraphQL.Repo(repo.fullName(),
+                        repo.description() != null ? repo.description() : ""));
+            }
+        }
+        return out;
     }
 
     private void buildStarredSection() {
@@ -914,72 +1041,41 @@ public class StarMergedFragment extends Fragment {
         if (mOfficialLists != null && !mOfficialLists.isEmpty()) {
             showAssignToOfficialListsDialog(repository);
         } else {
-            showAssignToLocalGroupDialog(repository);
+            // 0.1.64：无任何官方列表时直接新建（无本机分组回退）。
+            showCreateListDialogForAssign(repository);
         }
     }
 
     private void showAssignToOfficialListsDialog(Repository repository) {
         final String fullName = repository.fullName();
-        final List<String> names = new ArrayList<>();
-        final boolean[] checked = new boolean[mOfficialLists.size()];
-        for (int i = 0; i < mOfficialLists.size(); i++) {
-            names.add(mOfficialLists.get(i).name);
-            for (UserListsGraphQL.Repo repo : mOfficialLists.get(i).repos) {
+        Set<String> checked = new java.util.HashSet<>();
+        for (UserListsGraphQL.UserList list : mOfficialLists) {
+            for (UserListsGraphQL.Repo repo : list.repos) {
                 if (fullName.equals(repo.fullName)) {
-                    checked[i] = true;
+                    checked.add(list.id);
                     break;
                 }
             }
         }
-        new androidx.appcompat.app.AlertDialog.Builder(requireActivity())
-                .setTitle(R.string.assign_official_title)
-                .setMultiChoiceItems(names.toArray(new CharSequence[0]), checked,
-                        (dialog, which, isChecked) -> checked[which] = isChecked)
-                .setPositiveButton(R.string.ok, (dialog, which) -> {
-                    List<String> selectedIds = new ArrayList<>();
-                    for (int i = 0; i < checked.length; i++) {
-                        if (checked[i]) selectedIds.add(mOfficialLists.get(i).id);
-                    }
-                    assignToOfficialLists(fullName, selectedIds);
-                })
-                .setNeutralButton(R.string.assign_official_create_new, (dialog, which) ->
-                        showCreateOfficialListDialog(repository))
-                .setNegativeButton(R.string.cancel, null)
-                .show();
+        UserListDialogHelper.showAssignDialog(requireActivity(), mOfficialLists,
+                checked, null,
+                () -> showCreateListDialogForAssign(repository),
+                selectedIds -> assignToOfficialLists(fullName, selectedIds));
     }
 
-    private void showCreateOfficialListDialog(Repository repository) {
-        // 0.1.20 D-08: 文本输入走 TextInputDialogHelper（去空白/空则 return 不变）。
-        com.gh4a.utils.TextInputDialogHelper.show(requireActivity(),
-                R.string.star_group_create_title, "", name -> {
-                    if (name.isEmpty()) return;
-                    mDisposables.add(UserListsGraphQL.createList(name)
-                            .subscribeOn(Schedulers.io())
-                            .observeOn(AndroidSchedulers.mainThread())
-                            .subscribe(list -> {
-                                if (!isAdded()) return;
-                                List<String> ids = new ArrayList<>();
-                                ids.add(list.id);
-                                assignToOfficialLists(repository.fullName(), ids);
-                            }, error -> {
-                                if (isAdded()) {
-                                    Toast.makeText(getActivity(), R.string.assign_official_failed,
-                                            Toast.LENGTH_LONG).show();
-                                }
-                            }));
+    /** 0.1.64：新建官方列表后直接把该仓库归属到新列表。 */
+    private void showCreateListDialogForAssign(Repository repository) {
+        UserListDialogHelper.showCreateListDialog(requireActivity(),
+                mOfficialLists, mDisposables, newList -> {
+                    if (!isAdded()) return;
+                    List<String> ids = new ArrayList<>();
+                    ids.add(newList.id);
+                    assignToOfficialLists(repository.fullName(), ids);
                 });
     }
 
     private void assignToOfficialLists(String fullName, List<String> listIds) {
-        String[] parts = fullName.split("/", 2);
-        if (parts.length != 2) return;
-        mDisposables.add(UserListsGraphQL.fetchRepositoryNodeId(parts[0], parts[1])
-                .flatMap(nodeId -> {
-                    if (nodeId.isEmpty()) {
-                        return Single.error(new RuntimeException("empty node id"));
-                    }
-                    return UserListsGraphQL.updateListsForRepo(nodeId, listIds);
-                })
+        mDisposables.add(UserListsGraphQL.assignRepo(fullName, listIds)
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(ok -> {
@@ -987,8 +1083,7 @@ public class StarMergedFragment extends Fragment {
                     Toast.makeText(getActivity(), R.string.assign_official_success,
                             Toast.LENGTH_SHORT).show();
                     // BUG-4：官方路径无条件重拉（先取消在途请求，见 force 分支）。
-                    mListsLoaded = false;
-                    loadOfficialLists(true);
+                    refetchLists();
                 }, error -> {
                     if (isAdded()) {
                         Toast.makeText(getActivity(), R.string.assign_official_failed,
@@ -997,41 +1092,421 @@ public class StarMergedFragment extends Fragment {
                 }));
     }
 
-    private void showAssignToLocalGroupDialog(Repository repository) {
-        final List<String> groups = StarGroupManager.getGroups(getActivity(), groupLogin());
-        final String currentGroup =
-                StarGroupManager.findGroupFor(getActivity(), groupLogin(), repository.fullName());
-        final List<String> options = new ArrayList<>(groups);
-        options.add(getString(R.string.star_group_create_new));
-        int checkedIndex = currentGroup != null ? groups.indexOf(currentGroup) : -1;
-        // 0.1.20 D-07: 单选走 SingleChoiceDialogHelper（点选关表语义不变）。
-        com.gh4a.utils.SingleChoiceDialogHelper.show(requireActivity(),
-                R.string.star_group_assign_title, options.toArray(new CharSequence[0]),
-                checkedIndex, which -> {
-                    if (which < groups.size()) {
-                        StarGroupManager.assignRepo(getActivity(), groupLogin(),
-                                groups.get(which),
-                                repository.fullName(), repository.description());
-                        // BUG-4：本地归属后立即重建，分组计数/展开行马上更新。
-                        rebuild();
-                    } else {
-                        showCreateAndAssignDialog(repository);
-                    }
+    /** 0.1.64：无条件重拉官方列表（复用 BUG-4 的 force 语义）。 */
+    private void refetchLists() {
+        mListsLoaded = false;
+        loadOfficialLists(true);
+    }
+
+    // ---- 0.1.64：分组管理（官方列表）----
+    /** 组头 ⋮ 菜单：修改分组名 / 删除分组。 */
+    private void showListMenu(View anchor, UserListsGraphQL.UserList list) {
+        PopupMenu menu = new PopupMenu(requireContext(), anchor);
+        menu.getMenu().add(Menu.NONE, MENU_RENAME, Menu.NONE,
+                R.string.star_list_menu_rename);
+        menu.getMenu().add(Menu.NONE, MENU_DELETE, Menu.NONE,
+                R.string.star_list_menu_delete);
+        menu.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == MENU_RENAME) {
+                showRenameListDialog(list);
+                return true;
+            }
+            if (item.getItemId() == MENU_DELETE) {
+                showDeleteListDialog(list);
+                return true;
+            }
+            return false;
+        });
+        menu.show();
+    }
+
+    /** 0.1.64：+ 新增分组（名称 + 设为私密开关，默认公开）。 */
+    private void showCreateListDialog() {
+        UserListDialogHelper.showCreateListDialog(requireActivity(),
+                mOfficialLists, mDisposables, newList -> {
+                    if (!isAdded()) return;
+                    Toast.makeText(getActivity(), R.string.star_list_created,
+                            Toast.LENGTH_SHORT).show();
+                    refetchLists();
                 });
     }
 
-    private void showCreateAndAssignDialog(Repository repository) {
-        // 0.1.20 D-08: 文本输入走 TextInputDialogHelper（去空白/空则 return 不变）。
+    /** 0.1.64：修改分组名（官方 updateUserList，组内仓库自动跟随）。 */
+    private void showRenameListDialog(UserListsGraphQL.UserList list) {
         com.gh4a.utils.TextInputDialogHelper.show(requireActivity(),
-                R.string.star_group_create_title, "", name -> {
-                    if (name.isEmpty()) return;
-                    if (StarGroupManager.createGroup(getActivity(), groupLogin(), name)) {
-                        StarGroupManager.assignRepo(getActivity(), groupLogin(), name,
-                                repository.fullName(), repository.description());
-                        // BUG-4：新建并归属后立即重建。
-                        rebuild();
-                    }
+                R.string.star_list_rename_title, list.name, name -> {
+                    if (name.isEmpty() || name.equals(list.name)) return;
+                    mDisposables.add(UserListsGraphQL.renameList(list.id, name)
+                            .subscribeOn(Schedulers.io())
+                            .observeOn(AndroidSchedulers.mainThread())
+                            .subscribe(ok -> {
+                                if (!isAdded()) return;
+                                Toast.makeText(getActivity(), R.string.star_list_renamed,
+                                        Toast.LENGTH_SHORT).show();
+                                refetchLists();
+                            }, error -> {
+                                if (isAdded()) {
+                                    Toast.makeText(getActivity(), R.string.star_list_rename_failed,
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            }));
                 });
+    }
+
+    /** 0.1.64：删除分组（官方 deleteUserList；只解散列表，仓库仍保留 Star）。 */
+    private void showDeleteListDialog(UserListsGraphQL.UserList list) {
+        new AlertDialog.Builder(requireActivity())
+                .setTitle(R.string.star_list_delete_title)
+                .setMessage(getResources().getQuantityString(
+                        R.plurals.star_list_delete_message,
+                        list.repos.size(), list.repos.size()))
+                .setPositiveButton(R.string.ok, (dialog, which) -> {
+                    mDisposables.add(UserListsGraphQL.deleteList(list.id)
+                            .subscribeOn(Schedulers.io())
+                            .observeOn(AndroidSchedulers.mainThread())
+                            .subscribe(ok -> {
+                                if (!isAdded()) return;
+                                Toast.makeText(getActivity(), R.string.star_list_deleted,
+                                        Toast.LENGTH_SHORT).show();
+                                if (TextUtils.equals(mExpandedOfficialId, list.id)) {
+                                    mExpandedOfficialId = null;
+                                }
+                                refetchLists();
+                            }, error -> {
+                                if (isAdded()) {
+                                    Toast.makeText(getActivity(), R.string.star_list_delete_failed,
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            }));
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    // ---- 0.1.64：多选移组 ----
+    /** 长按仓库行：进入多选模式并选中该仓库；已在多选模式时再长按加选。 */
+    private void onRepoLongPressed(String fullName) {
+        if (mSortMode) return;
+        if (!mMultiSelect) {
+            mMultiSelect = true;
+            updateBackCallback();
+        }
+        mSelectedRepos.add(fullName);
+        rebuild();
+    }
+
+    /** 多选模式点行：切换勾选；勾选全空时自动退出多选模式。 */
+    private void onRepoClickedInMultiSelect(String fullName) {
+        if (mSelectedRepos.contains(fullName)) {
+            mSelectedRepos.remove(fullName);
+        } else {
+            mSelectedRepos.add(fullName);
+        }
+        if (mSelectedRepos.isEmpty()) {
+            exitMultiSelect();
+        } else {
+            rebuild();
+        }
+    }
+
+    private void exitMultiSelect() {
+        clearMultiSelectState();
+        rebuild();
+    }
+
+    private void clearMultiSelectState() {
+        mMultiSelect = false;
+        mSelectedRepos.clear();
+        updateBackCallback();
+    }
+
+    private void clearSortModeState() {
+        if (mSortTouchHelper != null) {
+            mSortTouchHelper.attachToRecyclerView(null);
+            mSortTouchHelper = null;
+        }
+        mSortMode = false;
+        mSortLists = null;
+        updateBackCallback();
+    }
+
+    private void updateBackCallback() {
+        if (mBackCallback != null) {
+            mBackCallback.setEnabled(mMultiSelect || mSortMode);
+        }
+    }
+
+    /**
+     * 0.1.64：移动至分组——与列表页长按同一份“加入列表”多选框。
+     * 预勾选规则（用户已批）：勾选所有已选仓库共有的列表（交集）；已选仓库
+     * 分属不同列表时交集为空 → 全不勾选。全不勾选 + 确定 = 移出全部列表，
+     * 回到未分组，Star 保留。
+     */
+    private void showMoveDialog() {
+        if (mOfficialLists == null || mOfficialLists.isEmpty() || mSelectedRepos.isEmpty()) {
+            return;
+        }
+        Set<String> common = null;
+        for (UserListsGraphQL.UserList list : mOfficialLists) {
+            Set<String> inList = new java.util.HashSet<>();
+            for (UserListsGraphQL.Repo repo : list.repos) {
+                inList.add(repo.fullName);
+            }
+            Set<String> selectedInList = new java.util.HashSet<>(inList);
+            selectedInList.retainAll(mSelectedRepos);
+            if (selectedInList.size() == mSelectedRepos.size()) {
+                if (common == null) {
+                    common = new java.util.HashSet<>();
+                    common.add(list.id);
+                } else {
+                    common.add(list.id);
+                }
+            }
+        }
+        final Set<String> checked = common != null ? common : new java.util.HashSet<>();
+        UserListDialogHelper.showAssignDialog(requireActivity(), mOfficialLists,
+                checked, null,
+                () -> showCreateListDialogForMove(),
+                selectedIds -> startBatchMove(selectedIds));
+    }
+
+    /** 0.1.64：移组框里新建列表后按当前选中集合批量移入新列表。 */
+    private void showCreateListDialogForMove() {
+        UserListDialogHelper.showCreateListDialog(requireActivity(),
+                mOfficialLists, mDisposables, newList -> {
+                    if (!isAdded()) return;
+                    List<String> ids = new ArrayList<>();
+                    ids.add(newList.id);
+                    startBatchMove(ids);
+                });
+    }
+
+    /**
+     * 0.1.64：批量移组——官方无批量接口，N 个仓库 = N 次顺序调用
+     * （每仓先取 node id 再 updateListsForItem，见 assignRepo），
+     * 带进度与失败重试（只重试失败的）。
+     */
+    private void startBatchMove(List<String> listIds) {
+        final List<String> repos = new ArrayList<>(mSelectedRepos);
+        final List<String> targetIds = new ArrayList<>(listIds);
+        final List<String> failed = new ArrayList<>();
+        final AlertDialog dialog = buildBatchMoveDialog(repos.size());
+        final boolean[] finished = new boolean[1];
+        dialog.show();
+        moveNext(repos, 0, targetIds, failed, dialog, finished);
+    }
+
+    /** 0.1.64：批量移动进度框（dialog_move_progress.xml，标题随进度更新）。 */
+    private AlertDialog buildBatchMoveDialog(int total) {
+        View view = LayoutInflater.from(requireContext())
+                .inflate(R.layout.dialog_move_progress, null);
+        mMoveProgressBar = view.findViewById(R.id.pb_move);
+        mMoveProgressBar.setMax(total);
+        mMoveProgressBar.setProgress(0);
+        return new AlertDialog.Builder(requireActivity())
+                .setTitle(getString(R.string.star_list_moving, 0, total))
+                .setView(view)
+                .setCancelable(false)
+                .create();
+    }
+
+    private void moveNext(List<String> repos, int index, List<String> targetIds,
+            List<String> failed, AlertDialog dialog, boolean[] finished) {
+        if (!isAdded() || finished[0]) {
+            return;
+        }
+        if (index >= repos.size()) {
+            finished[0] = true;
+            showBatchMoveResult(repos.size(), failed, targetIds, dialog);
+            return;
+        }
+        final String fullName = repos.get(index);
+        final int done = index;
+        mDisposables.add(UserListsGraphQL.assignRepo(fullName, targetIds)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(ok -> {
+                    if (finished[0]) return;
+                    moveNext(repos, index + 1, targetIds, failed, dialog, finished);
+                }, error -> {
+                    failed.add(fullName);
+                    moveNext(repos, index + 1, targetIds, failed, dialog, finished);
+                }));
+        if (dialog.isShowing()) {
+            // 0.1.64：标题与进度条随进度更新（见 dialog_move_progress.xml 注释）。
+            dialog.setTitle(getString(R.string.star_list_moving, done, repos.size()));
+            if (mMoveProgressBar != null) {
+                mMoveProgressBar.setProgress(done);
+            }
+        }
+    }
+
+    private void showBatchMoveResult(int total, List<String> failed,
+            List<String> targetIds, AlertDialog progressDialog) {
+        int moved = total - failed.size();
+        if (progressDialog.isShowing()) {
+            progressDialog.dismiss();
+        }
+        mMoveProgressBar = null;
+        if (failed.isEmpty()) {
+            Toast.makeText(getActivity(), getString(R.string.star_list_moved_title,
+                    moved, total), Toast.LENGTH_SHORT).show();
+            exitMultiSelect();
+            refetchLists();
+            return;
+        }
+        StringBuilder message = new StringBuilder();
+        message.append(getString(targetIds.isEmpty()
+                ? R.string.star_list_move_out_note : R.string.star_list_move_done_note, moved));
+        // 失败的仓库名（最多列 3 个）。
+        List<String> names = failed.size() > 3 ? failed.subList(0, 3) : failed;
+        message.append("\n").append(getString(R.string.star_list_move_failed, failed.size(),
+                TextUtils.join("、", names) + (failed.size() > 3 ? "…" : "")));
+        new AlertDialog.Builder(requireActivity())
+                .setTitle(getString(R.string.star_list_moved_title, moved, total))
+                .setMessage(message.toString())
+                .setPositiveButton(R.string.star_list_done, (d, w) -> {
+                    exitMultiSelect();
+                    refetchLists();
+                })
+                .setNegativeButton(R.string.star_list_retry_failed, (d, w) -> {
+                    // 只重试失败的仓库。
+                    List<String> retry = new ArrayList<>(failed);
+                    mSelectedRepos.clear();
+                    mSelectedRepos.addAll(retry);
+                    startBatchMove(targetIds);
+                })
+                .setCancelable(false)
+                .show();
+    }
+
+    // ---- 0.1.64：长按排序（顺序只存本机）----
+    /** 长按组头 → 排序模式（拖动手柄 ≡ 拖动，底部 完成/取消）。 */
+    private void enterSortMode() {
+        if (mOfficialLists == null || mOfficialLists.size() < 2) {
+            return;
+        }
+        mSortMode = true;
+        mSortLists = new ArrayList<>(mOfficialLists);
+        updateBackCallback();
+        rebuild();
+        attachSortTouchHelper();
+    }
+
+    private void exitSortMode(boolean save) {
+        if (save && mSortLists != null) {
+            saveListOrder(mSortLists);
+            mOfficialLists = mSortLists;
+        }
+        clearSortModeState();
+        rebuild();
+    }
+
+    private UserListsGraphQL.UserList findListById(String id) {
+        if (mOfficialLists == null) return null;
+        for (UserListsGraphQL.UserList list : mOfficialLists) {
+            if (TextUtils.equals(list.id, id)) return list;
+        }
+        return null;
+    }
+
+    /** 0.1.64：排序模式的拖动——只允许排序行之间换位（提示行/底部栏不可拖入）。 */
+    private void attachSortTouchHelper() {
+        if (mList == null) return;
+        if (mSortTouchHelper != null) {
+            mSortTouchHelper.attachToRecyclerView(null);
+        }
+        ItemTouchHelper.Callback callback = new ItemTouchHelper.SimpleCallback(
+                ItemTouchHelper.UP | ItemTouchHelper.DOWN, 0) {
+            @Override
+            public boolean onMove(@NonNull RecyclerView recyclerView,
+                    @NonNull RecyclerView.ViewHolder viewHolder,
+                    @NonNull RecyclerView.ViewHolder target) {
+                int from = viewHolder.getBindingAdapterPosition();
+                int to = target.getBindingAdapterPosition();
+                if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) {
+                    return false;
+                }
+                if (mItems.get(from).type != TYPE_SORT_ROW
+                        || mItems.get(to).type != TYPE_SORT_ROW) {
+                    return false;
+                }
+                if (mSortLists != null) {
+                    // 第 0 行是排序提示行，排序行下标 = 适配器下标 - 1。
+                    int listFrom = from - 1;
+                    int listTo = to - 1;
+                    if (listFrom >= 0 && listFrom < mSortLists.size()
+                            && listTo >= 0 && listTo < mSortLists.size()) {
+                        Collections.swap(mSortLists, listFrom, listTo);
+                        Collections.swap(mItems, from, to);
+                        mAdapter.notifyItemMoved(from, to);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            @Override
+            public void onSwiped(@NonNull RecyclerView.ViewHolder viewHolder, int direction) {
+            }
+
+            @Override
+            public boolean isLongPressDragEnabled() {
+                return false; // 0.1.64：只用手柄拖动，长按不触发。
+            }
+        };
+        mSortTouchHelper = new ItemTouchHelper(callback);
+        mSortTouchHelper.attachToRecyclerView(mList);
+    }
+
+    /** 0.1.64：列表显示顺序只存本机（官方接口无排序能力），按账号存 ID 顺序。 */
+    private SharedPreferences listOrderPrefs() {
+        String login = mLogin != null ? mLogin
+                : com.gh4a.Gh4Application.get().getAuthLogin();
+        return requireActivity().getSharedPreferences(
+                PREFS_LIST_ORDER + "_" + login, Context.MODE_PRIVATE);
+    }
+
+    private void saveListOrder(List<UserListsGraphQL.UserList> lists) {
+        JSONArray ids = new JSONArray();
+        for (UserListsGraphQL.UserList list : lists) {
+            ids.put(list.id);
+        }
+        listOrderPrefs().edit().putString(KEY_LIST_ORDER_IDS, ids.toString()).apply();
+    }
+
+    /** 0.1.64：拉取/缓存后按保存顺序重排；新列表排最后，已删除的去掉。 */
+    private void applySavedListOrder() {
+        if (mOfficialLists == null || mOfficialLists.isEmpty()) {
+            return;
+        }
+        String saved = listOrderPrefs().getString(KEY_LIST_ORDER_IDS, null);
+        if (saved == null) {
+            return;
+        }
+        List<String> order = new ArrayList<>();
+        try {
+            JSONArray ids = new JSONArray(saved);
+            for (int i = 0; i < ids.length(); i++) {
+                order.add(ids.getString(i));
+            }
+        } catch (JSONException e) {
+            return;
+        }
+        Map<String, UserListsGraphQL.UserList> byId = new LinkedHashMap<>();
+        for (UserListsGraphQL.UserList list : mOfficialLists) {
+            byId.put(list.id, list);
+        }
+        List<UserListsGraphQL.UserList> sorted = new ArrayList<>();
+        for (String id : order) {
+            UserListsGraphQL.UserList list = byId.remove(id);
+            if (list != null) {
+                sorted.add(list);
+            }
+        }
+        // 新列表（不在保存顺序里）排最后。
+        sorted.addAll(byId.values());
+        mOfficialLists = sorted;
     }
 
     private class MergedAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
@@ -1041,7 +1516,8 @@ public class StarMergedFragment extends Fragment {
             LayoutInflater inflater = LayoutInflater.from(parent.getContext());
             switch (viewType) {
                 case TYPE_SECTION:
-                case TYPE_STATUS: {
+                case TYPE_STATUS:
+                case TYPE_SORT_HEADER: {
                     TextView tv = new TextView(parent.getContext());
                     int pad = (int) (12 * getResources().getDisplayMetrics().density + 0.5f);
                     tv.setPadding(pad, pad, pad, pad);
@@ -1057,7 +1533,24 @@ public class StarMergedFragment extends Fragment {
                 }
                 case TYPE_LIST:
                 case TYPE_LIST_REPO:
+                case TYPE_UNGROUPED:
+                case TYPE_SORT_ROW:
                     return new GroupHolder(inflater.inflate(R.layout.row_star_group, parent, false));
+                case TYPE_ADD_GROUP: {
+                    // 0.1.65：+ 新增分组——主色文字的纯文字行，无边框无背景。
+                    TextView tv = new TextView(parent.getContext());
+                    int pad = (int) (16 * getResources().getDisplayMetrics().density + 0.5f);
+                    tv.setPadding(pad, pad, pad, pad);
+                    tv.setTextColor(UiUtils.resolveColor(parent.getContext(),
+                            androidx.appcompat.R.attr.colorPrimary));
+                    return new RecyclerView.ViewHolder(tv) {};
+                }
+                case TYPE_SELECTION_HEADER:
+                    return new SelectionHeaderHolder(inflater.inflate(
+                            R.layout.row_star_list_selection_header, parent, false));
+                case TYPE_ACTION_BAR:
+                    return new ActionBarHolder(inflater.inflate(
+                            R.layout.row_star_actionbar, parent, false));
                 case TYPE_STARRED_REPO:
                     return new RepoHolder(inflater.inflate(R.layout.row_repo, parent, false));
                 default:
@@ -1070,6 +1563,10 @@ public class StarMergedFragment extends Fragment {
             Item item = mItems.get(position);
             if (holder instanceof GroupHolder) {
                 GroupHolder h = (GroupHolder) holder;
+                if (item.type == TYPE_SORT_ROW) {
+                    bindSortRow(h, item);
+                    return;
+                }
                 float density = getResources().getDisplayMetrics().density;
                 int indent = (int) (32 * density + 0.5f);
                 // 0.1.2：组头与仓库行不再显示书形图标（分组名/仓库名 + 简介即可）。
@@ -1077,11 +1574,12 @@ public class StarMergedFragment extends Fragment {
                 // 标题统一用趋势页同款字体（ItemTitle，sans-serif-condensed）。
                 h.title.setTextAppearance(R.style.TextAppearance_ItemTitle);
                 h.title.setText(item.title);
-                if (item.type == TYPE_LIST) {
+                if (item.type == TYPE_LIST || item.type == TYPE_UNGROUPED) {
                     // 0.1.10：组头改卡片式——圆角卡片背景 + 阴影 + 左彩条 +
                     // 首字母圆标 + 数量胶囊 + 箭头（展开时箭头转 90°）。
-                    // 副标题只显示分组简介（官方列表自带简介，本地分组无简介
-                    // 时隐藏）；数量只放右侧胶囊，不再与副标题重复。
+                    // 副标题只显示分组简介（官方列表自带简介，无简介时隐藏）；
+                    // 数量只放右侧胶囊，不再与副标题重复。
+                    // 0.1.64：未分组区复用同一卡片（无身份色、无 ⋮ 菜单）。
                     h.itemView.setBackgroundResource(R.drawable.star_group_card);
                     h.itemView.setElevation(4 * density);
                     setGroupCardMargins(h.itemView, (int) (12 * density + 0.5f),
@@ -1089,23 +1587,30 @@ public class StarMergedFragment extends Fragment {
                     h.itemView.setPadding(h.basePaddingLeft,
                             h.itemView.getPaddingTop(), h.itemView.getPaddingRight(),
                             h.itemView.getPaddingBottom());
-                    // 0.1.20 F-24: hashCode()==MIN_VALUE 时 Math.abs 仍为负会越界。
-                    int color = GROUP_COLORS[Math.floorMod(item.title.hashCode(),
-                            GROUP_COLORS.length)];
-                    h.colorBar.setVisibility(View.VISIBLE);
-                    h.colorBar.setBackgroundColor(color);
-                    h.letter.setVisibility(View.VISIBLE);
-                    h.letter.setText(!TextUtils.isEmpty(item.title)
-                            ? item.title.substring(0, 1).toUpperCase() : "?");
-                    android.graphics.drawable.GradientDrawable circle =
-                            new android.graphics.drawable.GradientDrawable();
-                    circle.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-                    circle.setColor(color);
-                    h.letter.setBackground(circle);
-                    h.subtitle.setText(item.description);
-                    h.subtitle.setVisibility(TextUtils.isEmpty(item.description)
-                            ? View.GONE : View.VISIBLE);
-                    h.subtitle.setTypeface(android.graphics.Typeface.DEFAULT);
+                    if (item.type == TYPE_UNGROUPED) {
+                        // 0.1.64：未分组区无身份色（无彩条/首字母圆标/简介）。
+                        h.colorBar.setVisibility(View.GONE);
+                        h.letter.setVisibility(View.GONE);
+                        h.subtitle.setVisibility(View.GONE);
+                    } else {
+                        // 0.1.20 F-24: hashCode()==MIN_VALUE 时 Math.abs 仍为负会越界。
+                        int color = GROUP_COLORS[Math.floorMod(item.title.hashCode(),
+                                GROUP_COLORS.length)];
+                        h.colorBar.setVisibility(View.VISIBLE);
+                        h.colorBar.setBackgroundColor(color);
+                        h.letter.setVisibility(View.VISIBLE);
+                        h.letter.setText(!TextUtils.isEmpty(item.title)
+                                ? item.title.substring(0, 1).toUpperCase() : "?");
+                        android.graphics.drawable.GradientDrawable circle =
+                                new android.graphics.drawable.GradientDrawable();
+                        circle.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+                        circle.setColor(color);
+                        h.letter.setBackground(circle);
+                        h.subtitle.setText(item.description);
+                        h.subtitle.setVisibility(TextUtils.isEmpty(item.description)
+                                ? View.GONE : View.VISIBLE);
+                        h.subtitle.setTypeface(android.graphics.Typeface.DEFAULT);
+                    }
                     h.pill.setVisibility(View.VISIBLE);
                     h.pill.setText(item.subtitle);
                     // 0.1.12：数量胶囊跟主题走（主色浅底 + 深主色文字），不再是固定浅绿；
@@ -1124,8 +1629,23 @@ public class StarMergedFragment extends Fragment {
                         h.pill.setTextColor(primaryDark);
                     }
                     if (h.divider != null) h.divider.setVisibility(View.GONE);
-                    h.chevron.setVisibility(View.VISIBLE);
+                    // 0.1.64：多选时组头不显示箭头；组头行无复选框。
+                    h.chevron.setVisibility(mMultiSelect ? View.GONE : View.VISIBLE);
                     h.chevron.setRotation(item.expanded ? 90 : 0);
+                    h.checkbox.setVisibility(View.GONE);
+                    // 0.1.64：组头 ⋮ 菜单（多选时隐藏；未分组区无菜单）。
+                    if (item.type == TYPE_LIST && !mMultiSelect) {
+                        h.menu.setVisibility(View.VISIBLE);
+                        h.menu.setOnClickListener(v -> {
+                            UserListsGraphQL.UserList list = findListById(item.key);
+                            if (list != null) {
+                                showListMenu(v, list);
+                            }
+                        });
+                    } else {
+                        h.menu.setVisibility(View.GONE);
+                        h.menu.setOnClickListener(null);
+                    }
                 } else {
                     // 组下仓库行：恢复平面行（无卡片、无阴影、无装饰），
                     // 标题趋势字体 + 简介正常小字（非等宽）。
@@ -1152,22 +1672,64 @@ public class StarMergedFragment extends Fragment {
                                 && mItems.get(pos + 1).type == TYPE_LIST_REPO;
                         h.divider.setVisibility(nextIsRepo ? View.VISIBLE : View.GONE);
                     }
+                    h.menu.setVisibility(View.GONE);
+                    h.menu.setOnClickListener(null);
+                    // 0.1.64：多选模式显示复选框（主色勾选）；点框即切换勾选。
+                    boolean checked = mMultiSelect && mSelectedRepos.contains(item.fullName);
+                    h.checkbox.setVisibility(mMultiSelect ? View.VISIBLE : View.GONE);
+                    h.checkbox.setChecked(checked);
+                    h.checkbox.setOnClickListener(v ->
+                            onRepoClickedInMultiSelect(item.fullName));
                 }
                 holder.itemView.setOnClickListener(v -> {
                     if (item.type == TYPE_LIST) {
-                        boolean isOfficial = mOfficialLists != null && !mOfficialLists.isEmpty();
-                        if (isOfficial) {
-                            mExpandedOfficialId = TextUtils.equals(mExpandedOfficialId, item.key)
-                                    ? null : item.key;
-                        } else {
-                            mExpandedLocalGroup = TextUtils.equals(mExpandedLocalGroup, item.key)
-                                    ? null : item.key;
-                        }
+                        mExpandedOfficialId = TextUtils.equals(mExpandedOfficialId, item.key)
+                                ? null : item.key;
                         rebuild();
+                    } else if (item.type == TYPE_UNGROUPED) {
+                        mUngroupedExpanded = !mUngroupedExpanded;
+                        rebuild();
+                    } else if (mMultiSelect) {
+                        onRepoClickedInMultiSelect(item.fullName);
                     } else {
                         openRepo(item.fullName);
                     }
                 });
+                holder.itemView.setOnLongClickListener(v -> {
+                    if (item.type == TYPE_LIST) {
+                        // 0.1.64：长按组头 → 排序模式（多选时不进排序）。
+                        if (!mMultiSelect) {
+                            enterSortMode();
+                            return true;
+                        }
+                        return false;
+                    }
+                    if (item.type == TYPE_LIST_REPO) {
+                        // 0.1.64：长按仓库行 → 多选模式（排序时不进多选）。
+                        onRepoLongPressed(item.fullName);
+                        return true;
+                    }
+                    return false;
+                });
+            } else if (holder instanceof SelectionHeaderHolder) {
+                SelectionHeaderHolder h = (SelectionHeaderHolder) holder;
+                h.label.setText(item.title);
+                h.cancel.setOnClickListener(v -> exitMultiSelect());
+            } else if (holder instanceof ActionBarHolder) {
+                ActionBarHolder h = (ActionBarHolder) holder;
+                if (item.actionKind == ACTION_BAR_MOVE) {
+                    h.count.setVisibility(View.VISIBLE);
+                    h.count.setText(item.title);
+                    h.cancel.setOnClickListener(v -> exitMultiSelect());
+                    h.primary.setText(R.string.star_list_move_to);
+                    h.primary.setOnClickListener(v -> showMoveDialog());
+                } else {
+                    // 排序模式底部栏：无左标签，只有 取消 / 完成。
+                    h.count.setVisibility(View.GONE);
+                    h.cancel.setOnClickListener(v -> exitSortMode(false));
+                    h.primary.setText(R.string.star_list_done);
+                    h.primary.setOnClickListener(v -> exitSortMode(true));
+                }
             } else if (holder instanceof RepoHolder) {
                 RepoHolder h = (RepoHolder) holder;
                 Repository repo = item.repo;
@@ -1240,6 +1802,9 @@ public class StarMergedFragment extends Fragment {
                     ((TextView) holder.itemView).setTextColor(UiUtils.resolveColor(holder.itemView.getContext(),
                             androidx.appcompat.R.attr.colorPrimary));
                     holder.itemView.setOnClickListener(v -> loadStarredPage(true, true));
+                } else if (item.type == TYPE_ADD_GROUP) {
+                    // 0.1.64：+ 新增分组（主色行，点击新建官方列表）。
+                    holder.itemView.setOnClickListener(v -> showCreateListDialog());
                 } else {
                     // 回收复用时恢复状态行默认色，避免“全部已读”的主色串到状态行。
                     ((TextView) holder.itemView).setTextColor(ContextCompat.getColor(
@@ -1248,6 +1813,44 @@ public class StarMergedFragment extends Fragment {
                     holder.itemView.setOnClickListener(null);
                 }
             }
+        }
+
+        // 0.1.64：排序行绑定——拖动手柄 ≡ 仅用于拖动，无点击动作；
+        // setOnTouchListener 是 ItemTouchHelper.startDrag 的标准写法，
+        // 故抑制 ClickableViewAccessibility。
+        @SuppressLint("ClickableViewAccessibility")
+        private void bindSortRow(GroupHolder h, Item item) {
+            // 排序行——复用组行布局，平面行，只留标题 + 拖动手柄 ≡。
+            h.itemView.setElevation(0);
+            com.gh4a.utils.UiUtils.setSelectableBackground(h.itemView);
+            setGroupCardMargins(h.itemView, 0, 0);
+            h.itemView.setPadding(h.basePaddingLeft,
+                    h.itemView.getPaddingTop(), h.itemView.getPaddingRight(),
+                    h.itemView.getPaddingBottom());
+            h.icon.setVisibility(View.GONE);
+            h.colorBar.setVisibility(View.GONE);
+            h.letter.setVisibility(View.GONE);
+            h.pill.setVisibility(View.GONE);
+            h.chevron.setVisibility(View.GONE);
+            h.checkbox.setVisibility(View.GONE);
+            h.menu.setVisibility(View.GONE);
+            h.menu.setOnClickListener(null);
+            if (h.divider != null) h.divider.setVisibility(View.GONE);
+            h.title.setTextAppearance(R.style.TextAppearance_ItemTitle);
+            h.title.setText(item.title);
+            h.subtitle.setVisibility(View.GONE);
+            h.drag.setVisibility(View.VISIBLE);
+            // 拖动手柄按住即开始拖动（ItemTouchHelper.startDrag）。
+            h.drag.setOnTouchListener((v, event) -> {
+                if (event.getActionMasked() == MotionEvent.ACTION_DOWN
+                        && mSortTouchHelper != null) {
+                    mSortTouchHelper.startDrag(h);
+                    return true;
+                }
+                return false;
+            });
+            h.itemView.setOnClickListener(null);
+            h.itemView.setOnLongClickListener(null);
         }
 
         @Override
@@ -1270,6 +1873,9 @@ public class StarMergedFragment extends Fragment {
         final TextView pill;
         final View divider;
         final TextView chevron;
+        final CheckBox checkbox;
+        final TextView menu;
+        final TextView drag;
         final int basePaddingLeft;
         GroupHolder(View v) {
             super(v);
@@ -1281,7 +1887,32 @@ public class StarMergedFragment extends Fragment {
             pill = v.findViewById(R.id.tv_count_pill);
             divider = v.findViewById(R.id.v_divider);
             chevron = v.findViewById(R.id.tv_chevron);
+            checkbox = v.findViewById(R.id.cb_select);
+            menu = v.findViewById(R.id.tv_more);
+            drag = v.findViewById(R.id.tv_drag);
             basePaddingLeft = v.getPaddingLeft();
+        }
+    }
+
+    private static class SelectionHeaderHolder extends RecyclerView.ViewHolder {
+        final TextView label;
+        final TextView cancel;
+        SelectionHeaderHolder(View v) {
+            super(v);
+            label = v.findViewById(R.id.tv_label);
+            cancel = v.findViewById(R.id.tv_cancel);
+        }
+    }
+
+    private static class ActionBarHolder extends RecyclerView.ViewHolder {
+        final TextView count;
+        final Button cancel;
+        final Button primary;
+        ActionBarHolder(View v) {
+            super(v);
+            count = v.findViewById(R.id.tv_count);
+            cancel = v.findViewById(R.id.btn_cancel);
+            primary = v.findViewById(R.id.btn_primary);
         }
     }
 

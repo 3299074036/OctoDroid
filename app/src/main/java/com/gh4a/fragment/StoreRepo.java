@@ -33,13 +33,31 @@ public class StoreRepo {
     public final long publishedAt;
     public final EnumSet<StoreClassifier.Platform> platforms;
     public final int assetCount;
+    /**
+     * 后端公式字段（0.1.57）：三者均为可空——缺字段即“没有”，不是 0。
+     * trendingScore 仅镜像条目有；popularityScore 后端补算（缺失时
+     * popularityScoreOrComputed() 用星标 + 2×fork 现算）；starsPerDay
+     * 仅生成器条目有。旧缓存／实时接口三者均为 null，排序回落到星标。
+     */
+    public final Double trendingScore;
+    public final Double popularityScore;
+    public final Double starsPerDay;
+    /**
+     * 后端给的榜单归属（0.1.66）：null = 字段缺失（旧数据），回落本地静态表；
+     * 空列表 = 后端确认无榜，信后端、不回落。元素为榜单中文名。
+     */
+    public final List<String> ranks;
+    /** hiwiki 大类原值（ai／development／game／media／network／productivity／tools），缺失为 null。 */
+    public final String category;
 
     public StoreRepo(String fullName, String owner, String name,
             String description, String language, String avatarUrl,
             int stars, int forks, long downloadCount,
             List<String> topics, Set<String> topicCodes,
             String tag, long publishedAt,
-            EnumSet<StoreClassifier.Platform> platforms, int assetCount) {
+            EnumSet<StoreClassifier.Platform> platforms, int assetCount,
+            Double trendingScore, Double popularityScore, Double starsPerDay,
+            List<String> ranks, String category) {
         this.fullName = fullName != null ? fullName : "";
         this.owner = owner != null ? owner : "";
         this.name = name != null ? name : "";
@@ -56,6 +74,54 @@ public class StoreRepo {
         this.platforms = platforms != null ? platforms
                 : EnumSet.noneOf(StoreClassifier.Platform.class);
         this.assetCount = assetCount;
+        this.trendingScore = trendingScore;
+        this.popularityScore = popularityScore;
+        this.starsPerDay = starsPerDay;
+        this.ranks = ranks;
+        this.category = category;
+    }
+
+    /** 用途分类：后端 category 为空（旧数据／实时接口）时一律归“其他”。 */
+    public String categoryOrOther() {
+        return category != null && !category.isEmpty() ? category : "other";
+    }
+
+    /** 最热门分：后端给 popularityScore 就用它；缺失时现算 星标 + 2×fork（Komi 公式）。 */
+    public double popularityScoreOrComputed() {
+        return popularityScore != null ? popularityScore : stars + 2.0 * forks;
+    }
+
+    /**
+     * 热门排序比较器（0.1.57 公式）：有 trendingScore 的镜像条目按该分
+     * 降序在前；无该字段的生成器条目按 stars_per_day 降序在其后；两者
+     * 都缺（旧缓存／实时接口）回落按星标，不得崩溃；同组内平局按星标。
+     */
+    public static int compareHot(StoreRepo a, StoreRepo b) {
+        boolean aTrend = a.trendingScore != null;
+        boolean bTrend = b.trendingScore != null;
+        if (aTrend && bTrend) {
+            int byTrend = Double.compare(b.trendingScore, a.trendingScore);
+            return byTrend != 0 ? byTrend : Integer.compare(b.stars(), a.stars());
+        }
+        if (aTrend) {
+            return -1;
+        }
+        if (bTrend) {
+            return 1;
+        }
+        boolean aSpd = a.starsPerDay != null;
+        boolean bSpd = b.starsPerDay != null;
+        if (aSpd && bSpd) {
+            int bySpd = Double.compare(b.starsPerDay, a.starsPerDay);
+            return bySpd != 0 ? bySpd : Integer.compare(b.stars(), a.stars());
+        }
+        if (aSpd) {
+            return -1;
+        }
+        if (bSpd) {
+            return 1;
+        }
+        return Integer.compare(b.stars(), a.stars());
     }
 
     public boolean hasAssets() {
@@ -113,14 +179,44 @@ public class StoreRepo {
         }
         // 后端 JSON 一度不带 name：name 为空时从 fullName 截取（斜杠后一段），
         // 已发布数据与缓存不用动；生成器侧同时补 name（治本）。
+        // owner 同理：newest.json 等不带 owner 的条目从 fullName 截取。
         String fullName = obj.optString("fullName", "");
         String name = obj.optString("name", "");
         if (name.isEmpty() && fullName.contains("/")) {
             name = fullName.substring(fullName.lastIndexOf('/') + 1);
         }
+        String owner = obj.optString("owner", "");
+        if (owner.isEmpty() && fullName.contains("/")) {
+            owner = fullName.substring(0, fullName.indexOf('/'));
+        }
+        // 0.1.66：后端 ranks（null = 旧数据缺失，[] = 后端确认无榜）与 category。
+        List<String> ranks = null;
+        JSONArray ranksArr = obj.optJSONArray("ranks");
+        if (ranksArr != null) {
+            ranks = new ArrayList<>();
+            for (int i = 0; i < ranksArr.length(); i++) {
+                String rank = ranksArr.optString(i, "");
+                if (!rank.isEmpty()) {
+                    ranks.add(rank);
+                }
+            }
+        }
+        String category = obj.optString("category", null);
+        if (category != null && category.isEmpty()) {
+            category = null;
+        }
+        // 发版时间：feed 用 latestDate；newest.json 用 lastReleaseTime，
+        // 都没有时退到 pushedAt（hiwiki 的日期只有年月日）。
+        long publishedAt = parseDate(obj.optString("latestDate", ""));
+        if (publishedAt == 0) {
+            publishedAt = parseDate(obj.optString("lastReleaseTime", ""));
+        }
+        if (publishedAt == 0) {
+            publishedAt = parseDate(obj.optString("pushedAt", ""));
+        }
         return new StoreRepo(
                 fullName,
-                obj.optString("owner", ""),
+                owner,
                 name,
                 obj.optString("description", ""),
                 obj.optString("language", null),
@@ -130,8 +226,18 @@ public class StoreRepo {
                 obj.optLong("downloadCount", 0),
                 topics, codes,
                 obj.optString("latestTag", ""),
-                parseDate(obj.optString("latestDate", "")),
-                platforms, obj.optInt("assetCount", 0));
+                publishedAt,
+                platforms, obj.optInt("assetCount", 0),
+                optDoubleOrNull(obj, "trendingScore"),
+                optDoubleOrNull(obj, "popularityScore"),
+                optDoubleOrNull(obj, "stars_per_day"),
+                ranks, category);
+    }
+
+    /** 数字字段可空读取：字段缺失／null／非数字一律返回 null（不是 0），调用方靠 null 区分条目来源。 */
+    private static Double optDoubleOrNull(JSONObject obj, String key) {
+        Object value = obj.opt(key);
+        return value instanceof Number ? ((Number) value).doubleValue() : null;
     }
 
     private static StoreClassifier.Platform platformFromKey(String key) {
@@ -164,6 +270,7 @@ public class StoreRepo {
         String[] patterns = {
             "yyyy-MM-dd'T'HH:mm:ss'Z'",
             "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd",
         };
         for (String pattern : patterns) {
             try {

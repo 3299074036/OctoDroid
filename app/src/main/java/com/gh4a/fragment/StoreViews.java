@@ -2,6 +2,9 @@ package com.gh4a.fragment;
 
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.PorterDuff;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.util.AttributeSet;
@@ -9,6 +12,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -16,6 +20,7 @@ import com.gh4a.R;
 import com.gh4a.utils.UiUtils;
 
 import java.text.NumberFormat;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -91,55 +96,6 @@ public class StoreViews {
         return tv;
     }
 
-    /** 平台徽章（描边小圆角，如 APK / EXE / DMG）。 */
-    public static TextView badge(Context context, String label) {
-        TextView badge = new TextView(context);
-        badge.setText(label);
-        badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        badge.setTextColor(secondaryText(context));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.RECTANGLE);
-        bg.setCornerRadius(dp(context, 4));
-        bg.setStroke(dp(context, 1), secondaryText(context));
-        badge.setBackground(bg);
-        badge.setPadding(dp(context, 8), dp(context, 3), dp(context, 8), dp(context, 3));
-        return badge;
-    }
-
-    /** 筛选 chip（选中为主题色实底白字，未选中为描边）。 */
-    public static TextView chip(Context context, String label, boolean selected,
-            View.OnClickListener listener) {
-        TextView chip = new TextView(context);
-        chip.setText(label);
-        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        chip.setGravity(Gravity.CENTER);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.RECTANGLE);
-        bg.setCornerRadius(dp(context, 20));
-        if (selected) {
-            bg.setColor(primaryColor(context));
-            chip.setTextColor(Color.WHITE);
-        } else {
-            bg.setStroke(dp(context, 1), 0xFFBDBDBD);
-            bg.setColor(Color.TRANSPARENT);
-            chip.setTextColor(secondaryText(context));
-        }
-        chip.setBackground(bg);
-        chip.setPadding(dp(context, 16), dp(context, 8), dp(context, 16), dp(context, 8));
-        // 背景与按压反馈分层（Komi 同款思路）：pill 背景留在 background，
-        // ripple 放 foreground。原来这里调 setSelectableBackground，会把
-        // pill 背景整个换成透明 ripple，选中态白字落在透明底上就隐身了。
-        // minSdk 23，View.setForeground 与 Context.getDrawable 均可用。
-        TypedValue outValue = new TypedValue();
-        context.getTheme().resolveAttribute(
-                android.R.attr.selectableItemBackground, outValue, true);
-        if (outValue.resourceId != 0) {
-            chip.setForeground(context.getDrawable(outValue.resourceId));
-        }
-        chip.setOnClickListener(listener);
-        return chip;
-    }
-
     /** 入口行（标题 + 副标题 + 右箭头，如提交仓库／已下架记录／镜像源设置）。 */
     public static View entryRow(Context context, String title, String subtitle,
             View.OnClickListener listener) {
@@ -171,7 +127,7 @@ public class StoreViews {
         return row;
     }
 
-    /** 仓库行：名 + 描述 + ★／语言／版本 + 平台徽章。 */
+    /** 仓库行：名 + 描述 + ★／语言／版本 + 平台图标。 */
     public static View repoRow(Context context, StoreRepo item, View.OnClickListener listener) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.VERTICAL);
@@ -202,19 +158,198 @@ public class StoreViews {
         metaView.setTextColor(secondaryText(context));
         row.addView(metaView);
         if (!item.platforms.isEmpty()) {
-            FlowLayout badges = new FlowLayout(context);
-            badges.setPadding(0, dp(context, 8), 0, 0);
+            LinearLayout icons = new LinearLayout(context);
+            icons.setOrientation(LinearLayout.HORIZONTAL);
+            icons.setPadding(0, dp(context, 8), 0, 0);
+            boolean first = true;
             for (StoreClassifier.Platform platform : item.platforms) {
-                TextView badge = badge(context, platformLabel(context, platform));
-                FlowLayout.LayoutParams lp = new FlowLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp.setMargins(0, 0, dp(context, 6), dp(context, 6));
-                badges.addView(badge, lp);
+                if (!first) {
+                    View gap = new View(context);
+                    gap.setLayoutParams(new LinearLayout.LayoutParams(dp(context, 10), 0));
+                    icons.addView(gap);
+                }
+                first = false;
+                icons.addView(platformIcon(context, platform));
             }
-            row.addView(badges);
+            row.addView(icons);
         }
         return row;
+    }
+
+    public static int platformIconRes(StoreClassifier.Platform platform) {
+        switch (platform) {
+            case ANDROID:
+                return R.drawable.ic_store_android;
+            case IOS:
+                return R.drawable.ic_store_ios;
+            case WINDOWS:
+                return R.drawable.ic_store_windows;
+            case MACOS:
+                return R.drawable.ic_store_apple;
+            case LINUX:
+                return R.drawable.ic_store_linux;
+            case HARMONY:
+                return R.drawable.ic_store_harmony;
+            case EXTENSION:
+                return R.drawable.ic_store_extension;
+            case ARCHIVE:
+            default:
+                // 0.1.66：压缩包行图标照 hiwiki 用六边形（与系统网格“其他”同款）。
+                return R.drawable.ic_store_other;
+        }
+    }
+
+    /** 列表行里的平台小图标（20dp，次要文字色）。 */
+    public static ImageView platformIcon(Context context, StoreClassifier.Platform platform) {
+        ImageView icon = new ImageView(context);
+        icon.setImageResource(platformIconRes(platform));
+        icon.setColorFilter(secondaryText(context), PorterDuff.Mode.SRC_IN);
+        icon.setContentDescription(platformLabel(context, platform));
+        icon.setLayoutParams(new LinearLayout.LayoutParams(dp(context, 20), dp(context, 20)));
+        return icon;
+    }
+
+    /** 按压涟漪（foreground 用，与 chip() 同款取法）。 */
+    public static Drawable rippleDrawable(Context context) {
+        TypedValue outValue = new TypedValue();
+        context.getTheme().resolveAttribute(
+                android.R.attr.selectableItemBackground, outValue, true);
+        return outValue.resourceId != 0 ? context.getDrawable(outValue.resourceId) : null;
+    }
+
+    /** 带图标的胶囊 chip（排序用，一行等权排布）：选中绿底白字，未选中描边 + 次要文字色。 */
+    /** 纯文字 chip（0.1.61：排序 chips 去图标只留文字，四字全显不截断）。 */
+    public static View textChip(Context context, String label,
+            boolean selected, View.OnClickListener listener) {
+        LinearLayout chip = new LinearLayout(context);
+        chip.setOrientation(LinearLayout.HORIZONTAL);
+        chip.setGravity(Gravity.CENTER);
+        int padH = dp(context, 10);
+        chip.setPadding(padH, dp(context, 6), padH, dp(context, 6));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.RECTANGLE);
+        bg.setCornerRadius(dp(context, 14));
+        if (selected) {
+            bg.setColor(primaryColor(context));
+        } else {
+            bg.setColor(Color.TRANSPARENT);
+            bg.setStroke(dp(context, 1), secondaryText(context));
+        }
+        chip.setBackground(bg);
+        chip.setForeground(rippleDrawable(context));
+        chip.setClickable(true);
+        chip.setOnClickListener(listener);
+        TextView text = new TextView(context);
+        text.setText(label);
+        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        text.setTypeface(null, Typeface.BOLD);
+        text.setSingleLine(true);
+        text.setEllipsize(TextUtils.TruncateAt.END);
+        text.setTextColor(selected ? Color.WHITE : secondaryText(context));
+        chip.addView(text);
+        return chip;
+    }
+
+    public static final int TINT_AUTO = 0;
+    public static final int TINT_BRAND = 1;
+    public static final int TINT_NONE = 2;
+
+    /** 图标网格的一格：图标 + 粗体名 + 灰色数；tintMode 决定图标着色。 */
+    public static class IconCell {
+        public final int iconRes;
+        public final String name;
+        public final int count;
+        public final boolean selected;
+        public final View.OnClickListener listener;
+        public final int tintMode;
+
+        public IconCell(int iconRes, String name, int count, boolean selected,
+                View.OnClickListener listener, int tintMode) {
+            this.iconRes = iconRes;
+            this.name = name;
+            this.count = count;
+            this.selected = selected;
+            this.listener = listener;
+            this.tintMode = tintMode;
+        }
+    }
+
+    /** 三列图标网格（系统/平台、用途分类用）：每行 3 格，选中格浅绿底。 */
+    public static LinearLayout iconGrid(Context context, List<IconCell> cells) {
+        LinearLayout grid = new LinearLayout(context);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        for (int start = 0; start < cells.size(); start += 3) {
+            LinearLayout row = new LinearLayout(context);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            for (int i = start; i < Math.min(start + 3, cells.size()); i++) {
+                row.addView(iconCellView(context, cells.get(i)),
+                        new LinearLayout.LayoutParams(0,
+                                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            }
+            // 末行不足 3 格时补透明占位格，固定 3 列，跨行列对齐
+            // （否则 2 格的末行每格占 1/2 宽，"工具" 偏右）。
+            for (int i = Math.min(start + 3, cells.size()); i < start + 3; i++) {
+                View placeholder = new View(context);
+                row.addView(placeholder, new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            }
+            grid.addView(row);
+        }
+        return grid;
+    }
+
+    private static LinearLayout iconCellView(Context context, IconCell cell) {
+        LinearLayout view = new LinearLayout(context);
+        view.setOrientation(LinearLayout.HORIZONTAL);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        view.setPadding(dp(context, 6), dp(context, 10), dp(context, 6), dp(context, 10));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.RECTANGLE);
+        bg.setCornerRadius(dp(context, 8));
+        if (cell.selected) {
+            // 主题色 14% 透明底（设计稿浅绿 #e8f5e3 的主题化等价）。
+            bg.setColor((primaryColor(context) & 0x00FFFFFF) | (36 << 24));
+        } else {
+            bg.setColor(Color.TRANSPARENT);
+        }
+        view.setBackground(bg);
+        view.setForeground(rippleDrawable(context));
+        view.setClickable(true);
+        view.setOnClickListener(cell.listener);
+        ImageView icon = new ImageView(context);
+        icon.setImageResource(cell.iconRes);
+        if (cell.tintMode == TINT_BRAND) {
+            icon.setColorFilter(primaryColor(context), PorterDuff.Mode.SRC_IN);
+        } else if (cell.tintMode == TINT_AUTO) {
+            icon.setColorFilter(cell.selected ? primaryColor(context) : primaryText(context),
+                    PorterDuff.Mode.SRC_IN);
+        }
+        icon.setLayoutParams(new LinearLayout.LayoutParams(dp(context, 18), dp(context, 18)));
+        view.addView(icon);
+        View gap = new View(context);
+        gap.setLayoutParams(new LinearLayout.LayoutParams(dp(context, 6), 0));
+        view.addView(gap);
+        TextView name = new TextView(context);
+        name.setText(cell.name);
+        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        name.setTypeface(null, Typeface.BOLD);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        name.setTextColor(cell.selected ? primaryColor(context) : primaryText(context));
+        // 名字占剩余宽度（weight 1），数字总有位置，不再被挤掉。
+        view.addView(name, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        View gap2 = new View(context);
+        gap2.setLayoutParams(new LinearLayout.LayoutParams(dp(context, 4), 0));
+        view.addView(gap2);
+        TextView count = new TextView(context);
+        count.setText(String.valueOf(cell.count));
+        count.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        count.setSingleLine(true);
+        count.setEllipsize(TextUtils.TruncateAt.END);
+        count.setTextColor(secondaryText(context));
+        view.addView(count);
+        return view;
     }
 
     public static String platformLabel(Context context, StoreClassifier.Platform platform) {
@@ -286,7 +421,7 @@ public class StoreViews {
         }
     }
 
-    /** 自动换行的容器（徽章行、标签云用）。 */
+    /** 自动换行的容器（排序 chips 行用）。 */
     public static class FlowLayout extends ViewGroup {
         public FlowLayout(Context context) {
             super(context);

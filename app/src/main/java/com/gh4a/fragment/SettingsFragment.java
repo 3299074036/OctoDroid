@@ -101,8 +101,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private IntegerListPreference mReleaseRadarIntervalPref;
     private Preference mDarkModeScheduleTimePref;
     private ListPreference mDarkModePref;
-    /** 进行中的镜像源卡片对话框，存为字段以便销毁时主动关闭，避免 leaked window。 */
-    private MirrorSourceDialog mMirrorDialog;
 
     private final androidx.activity.result.ActivityResultLauncher<String[]> mRestoreLauncher =
             registerForActivityResult(
@@ -125,16 +123,21 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     @Override
     public void onResume() {
         super.onResume();
+        // 从镜像源独立页返回：页内直接写了同一份 prefs，ListPreference 内存里的值
+        // 还是旧的，先同步再刷摘要，否则摘要显示旧地址
+        MirrorPresetPreference pref = findPreference(KEY_MIRROR_PRESET);
+        if (pref != null) {
+            String v = getPreferenceManager().getSharedPreferences()
+                    .getString(KEY_MIRROR_PRESET, "");
+            if (!android.text.TextUtils.equals(v, pref.getValue())) {
+                pref.setValue(v);
+            }
+        }
         refreshMirrorPresetSummary();
     }
 
     @Override
     public void onDestroy() {
-        // 镜像源对话框打开时退出：关闭对话框并取消测速，避免 leaked window
-        if (mMirrorDialog != null) {
-            mMirrorDialog.dismiss();
-            mMirrorDialog = null;
-        }
         super.onDestroy();
     }
 
@@ -205,11 +208,11 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             mNotificationIntervalPref.setOnPreferenceChangeListener(this);
         }
 
-        // 镜像源：点击不弹原生对话框，改走“选择+实时测速”合并对话框
+        // 镜像源：点击不弹原生对话框，改走镜像源独立页
         // （MirrorPresetPreference.onClick 已空实现，原生对话框永不弹出）
         MirrorPresetPreference mirrorPresetPref = findPreference(KEY_MIRROR_PRESET);
         if (mirrorPresetPref != null) {
-            mirrorPresetPref.setOnPickListener(() -> showMirrorSourceDialog());
+            mirrorPresetPref.setOnPickListener(() -> showMirrorSourcePage());
         }
 
         mReleaseRadarPref = findPreference(KEY_RELEASE_RADAR_NOTIFICATIONS);
@@ -351,31 +354,16 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
      * 每完成一个实时刷新该行延迟，点击直接选用。测速与选择合二为一。
      */
     /**
-     * 镜像源管理对话框：选择 + 打开即测速 + 行内增删改。
+     * 镜像源管理独立页：选择 + 打开即测速 + 行内增删改。
      * 测完按延迟从低到高自动排序，并自动选中延迟最低的
      * （本次打开内用户手动选过则不再自动改）。
      */
-    private void showMirrorSourceDialog() {
+    private void showMirrorSourcePage() {
         if (getActivity() == null) {
             return;
         }
-        final ListPreference pref = findPreference(KEY_MIRROR_PRESET);
-        mMirrorDialog = new MirrorSourceDialog(getActivity(),
-                new MirrorSourceDialog.PresetStore() {
-                    @Override
-                    public String get() {
-                        return pref != null ? pref.getValue() : null;
-                    }
-
-                    @Override
-                    public void set(String value) {
-                        if (pref != null) {
-                            pref.setValue(value);
-                        }
-                        refreshMirrorPresetSummary();
-                    }
-                });
-        mMirrorDialog.show();
+        startActivity(new android.content.Intent(getActivity(),
+                com.gh4a.activities.MirrorSourceActivity.class));
     }
 
     /** 镜像源设置项的摘要：显示当前选中地址的 host。 */

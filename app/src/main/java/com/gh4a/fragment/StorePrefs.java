@@ -21,6 +21,47 @@ public class StorePrefs {
     private static final String KEY_REMOVED = "store_removed_repos";
     private static final String KEY_SEEN = "store_seen_repos";
     private static final String KEY_HIDDEN = "store_hidden_repos";
+    private static final String KEY_EXPLORE_SORT = "store_explore_sort";
+    private static final String KEY_RANK_ONLY_NONEMPTY = "store_rank_only_nonempty";
+    private static final String KEY_RANK_PLATFORM = "store_rank_platform";
+    private static final String KEY_NEWEST_PLATFORM = "store_newest_platform";
+
+    /** 探索排序偏好（0 星标／1 最近更新／2 下载量／3 近期热门，默认星标）。 */
+    public static int getExploreSort(Context context) {
+        return prefs(context).getInt(KEY_EXPLORE_SORT, 0);
+    }
+
+    public static void setExploreSort(Context context, int sort) {
+        prefs(context).edit().putInt(KEY_EXPLORE_SORT, sort).apply();
+    }
+
+    /** 排行榜“只看有收录的榜单”复选框（默认不勾选；勾选隐藏空卡片）。 */
+    public static boolean getRankOnlyNonEmpty(Context context) {
+        return prefs(context).getBoolean(KEY_RANK_ONLY_NONEMPTY, false);
+    }
+
+    public static void setRankOnlyNonEmpty(Context context, boolean onlyNonEmpty) {
+        prefs(context).edit().putBoolean(KEY_RANK_ONLY_NONEMPTY, onlyNonEmpty).apply();
+    }
+
+    /** 排行榜的系统筛选（平台 key，默认全部；只筛榜单池子，不动全局平台）。 */
+    public static String getRankPlatform(Context context) {
+        return prefs(context).getString(KEY_RANK_PLATFORM, "all");
+    }
+
+    public static void setRankPlatform(Context context, String platform) {
+        prefs(context).edit().putString(KEY_RANK_PLATFORM, platform).apply();
+    }
+
+    /** 最新入库的系统筛选（平台 key，默认全部；只筛最新入库的 60 条，
+     * 与排行榜的 store_rank_platform 分开存）。 */
+    public static String getNewestPlatform(Context context) {
+        return prefs(context).getString(KEY_NEWEST_PLATFORM, "all");
+    }
+
+    public static void setNewestPlatform(Context context, String platform) {
+        prefs(context).edit().putString(KEY_NEWEST_PLATFORM, platform).apply();
+    }
 
     public static class RemovedEntry {
         public final String name;

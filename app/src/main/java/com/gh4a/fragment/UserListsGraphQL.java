@@ -289,16 +289,18 @@ public class UserListsGraphQL {
     }
 
     private static final String CREATE_LIST_MUTATION =
-            "mutation($name: String!) {"
-            + "  createUserList(input: {name: $name}) {"
+            "mutation($name: String!, $isPrivate: Boolean) {"
+            + "  createUserList(input: {name: $name, isPrivate: $isPrivate}) {"
             + "    list { id name description }"
             + "  }"
             + "}";
 
-    public static Single<UserList> createList(String name) {
+    /** 0.1.64：新建官方列表；isPrivate 省略时服务端默认公开。 */
+    public static Single<UserList> createList(String name, boolean isPrivate) {
         return Single.fromCallable(() -> {
             JSONObject vars = new JSONObject();
             vars.put("name", name);
+            vars.put("isPrivate", isPrivate);
             String json = execute(CREATE_LIST_MUTATION, vars);
             JSONObject data = new JSONObject(json).optJSONObject("data");
             JSONObject payload = data != null ? data.optJSONObject("createUserList") : null;
@@ -309,5 +311,73 @@ public class UserListsGraphQL {
             return new UserList(list.optString("id", ""), list.optString("name", name),
                     list.optString("description", ""), new ArrayList<>());
         });
+    }
+
+    /** 0.1.64：新建官方列表（公开，默认行为；与旧单参调用点一致）。 */
+    public static Single<UserList> createList(String name) {
+        return createList(name, false);
+    }
+
+    private static final String RENAME_LIST_MUTATION =
+            "mutation($listId: ID!, $name: String!) {"
+            + "  updateUserList(input: {listId: $listId, name: $name}) {"
+            + "    list { id name description }"
+            + "  }"
+            + "}";
+
+    /** 0.1.64：修改官方列表名称；组内仓库跟随，不用重新归属。 */
+    public static Single<UserList> renameList(String listId, String newName) {
+        return Single.fromCallable(() -> {
+            JSONObject vars = new JSONObject();
+            vars.put("listId", listId);
+            vars.put("name", newName);
+            String json = execute(RENAME_LIST_MUTATION, vars);
+            JSONObject data = new JSONObject(json).optJSONObject("data");
+            JSONObject payload = data != null ? data.optJSONObject("updateUserList") : null;
+            JSONObject list = payload != null ? payload.optJSONObject("list") : null;
+            if (list == null) {
+                throw new RuntimeException("GraphQL: updateUserList returned no list");
+            }
+            return new UserList(list.optString("id", ""), list.optString("name", newName),
+                    list.optString("description", ""), new ArrayList<>());
+        });
+    }
+
+    private static final String DELETE_LIST_MUTATION =
+            "mutation($listId: ID!) {"
+            + "  deleteUserList(input: {listId: $listId}) {"
+            + "    user { login }"
+            + "  }"
+            + "}";
+
+    /**
+     * 0.1.64：删除官方列表。只删列表与仓库关联，仓库的 Star 保留
+     * （“删组即解散”），与 deleteUserList 的官方语义一致。
+     */
+    public static Single<Boolean> deleteList(String listId) {
+        return Single.fromCallable(() -> {
+            JSONObject vars = new JSONObject();
+            vars.put("listId", listId);
+            execute(DELETE_LIST_MUTATION, vars);
+            return true;
+        });
+    }
+
+    /**
+     * 0.1.64：把一个仓库归属到给定的官方列表集合（空集合 = 移出全部官方列表）。
+     * 供 StarMergedFragment（单仓/批量）与 RepositoryFragment（加星后入组）共用。
+     */
+    public static Single<Boolean> assignRepo(String fullName, List<String> listIds) {
+        String[] parts = fullName.split("/", 2);
+        if (parts.length != 2) {
+            return Single.error(new RuntimeException("invalid repo full name"));
+        }
+        return fetchRepositoryNodeId(parts[0], parts[1])
+                .flatMap(nodeId -> {
+                    if (nodeId.isEmpty()) {
+                        return Single.error(new RuntimeException("empty node id"));
+                    }
+                    return updateListsForRepo(nodeId, listIds);
+                });
     }
 }

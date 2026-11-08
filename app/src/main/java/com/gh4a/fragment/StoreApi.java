@@ -115,7 +115,19 @@ public class StoreApi {
         String path = "feed".equals(kind)
                 ? "feed/" + platform + ".json"
                 : "categories/" + kind + "/" + platform + ".json";
-        return loadBackendFileSync(context, key, ttl, path);
+        return loadBackendFileSync(context, key, ttl, path, false);
+    }
+
+    /**
+     * 最新入库（0.1.66）：store/feed/newest.json，24h 缓存，链路与 feed
+     * 一致（新鲜缓存 → 主站 → 过期缓存 → 离线镜像 → 失败）。文件尚未
+     * 发布（404）时整组失败，调用方显示空态／重试，绝不崩溃。
+     * 文件格式：60 条的 JSON 列表，或 {"items": [...]} 包裹（见 parseNewest）。
+     */
+    public static Single<StoreData> loadNewest(Context context) {
+        return Single.fromCallable(() -> loadBackendFileSync(context,
+                "newest", CHART_TTL_MS, "feed/newest.json", true))
+                .compose(RxUtils::doInBackground);
     }
 
     /**
@@ -126,19 +138,19 @@ public class StoreApi {
     public static Single<StoreData> loadBackendFeedPage(Context context, String platform, int page) {
         return Single.fromCallable(() -> loadBackendFileSync(context,
                 "feed_" + platform + "_page" + page, FEED_TTL_MS,
-                "feed/" + platform + "/page" + page + ".json"))
+                "feed/" + platform + "/page" + page + ".json", false))
                 .compose(RxUtils::doInBackground);
     }
 
-    private static StoreData loadBackendFileSync(Context context, String key, long ttl, String path)
-            throws IOException {
+    private static StoreData loadBackendFileSync(Context context, String key, long ttl, String path,
+            boolean newest) throws IOException {
         File dir = new File(context.getFilesDir(), CACHE_DIR);
         File cacheFile = new File(dir, key + ".json");
         File metaFile = new File(dir, key + ".meta");
         long savedAt = readSavedAt(metaFile);
         boolean fresh = savedAt > 0 && System.currentTimeMillis() - savedAt < ttl;
         if (fresh && cacheFile.exists()) {
-            StoreData data = parseBackend(readFile(cacheFile), false);
+            StoreData data = parseFile(readFile(cacheFile), false, newest);
             if (data != null) {
                 return data;
             }
@@ -148,14 +160,14 @@ public class StoreApi {
             dir.mkdirs();
             writeFile(cacheFile, body);
             writeFile(metaFile, String.valueOf(System.currentTimeMillis()));
-            StoreData data = parseBackend(body, false);
+            StoreData data = parseFile(body, false, newest);
             if (data != null) {
                 return data;
             }
             throw new IOException("bad backend payload");
         } catch (IOException e) {
             if (cacheFile.exists()) {
-                StoreData stale = parseBackend(readFile(cacheFile), true);
+                StoreData stale = parseFile(readFile(cacheFile), true, newest);
                 if (stale != null) {
                     return stale;
                 }
@@ -164,7 +176,7 @@ public class StoreApi {
             // 与 Komi 一致：标离线、不写缓存；镜像失败则整组失败（无快照）。
             try {
                 String mirrorBody = fetchUrl(MIRROR_BASE + path);
-                StoreData mirrorData = parseBackend(mirrorBody, true);
+                StoreData mirrorData = parseFile(mirrorBody, true, newest);
                 if (mirrorData != null) {
                     return new StoreData(mirrorData.items, true, true,
                             mirrorData.generatedAt, mirrorData.hasMore);
@@ -174,6 +186,10 @@ public class StoreApi {
             }
             throw e;
         }
+    }
+
+    private static StoreData parseFile(String json, boolean offline, boolean newest) {
+        return newest ? parseNewest(json, offline) : parseBackend(json, offline);
     }
 
     private static String fetchUrl(String url) throws IOException {
@@ -211,6 +227,35 @@ public class StoreApi {
                 }
             }
             return new StoreData(items, offline, generatedAt, hasMore);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 最新入库文件解析：裸 JSON 列表，或 {"items": [...]} 包裹；单条坏数据只跳过该条。 */
+    private static StoreData parseNewest(String json, boolean offline) {
+        try {
+            String text = json.trim();
+            JSONArray arr;
+            String generatedAt = "";
+            if (text.startsWith("[")) {
+                arr = new JSONArray(text);
+            } else {
+                JSONObject root = new JSONObject(text);
+                generatedAt = root.optString("generatedAt", "");
+                arr = root.optJSONArray("items");
+            }
+            List<StoreRepo> items = new ArrayList<>();
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    try {
+                        items.add(StoreRepo.fromJson(arr.getJSONObject(i)));
+                    } catch (Exception ignored) {
+                        // 单条坏数据只跳过该条，不让整组垮掉
+                    }
+                }
+            }
+            return new StoreData(items, offline, generatedAt);
         } catch (Exception e) {
             return null;
         }
@@ -388,6 +433,11 @@ public class StoreApi {
                 repo.forksCount() != null ? repo.forksCount() : 0,
                 downloads,
                 repo.topics(), StoreClassifier.topicCodesFor(repo),
-                tag, publishedAt, platforms, assets.size());
+                tag, publishedAt, platforms, assets.size(),
+                // 实时接口无后端公式字段：最热门分由 popularityScoreOrComputed()
+                // 用星标 + 2×fork 现算；热门排序回落到星标。
+                // 实时接口也无后端 ranks 与 category：ranks 为 null（本地回落），
+                // category 为 null（用途筛时归“其他”）。
+                null, null, null, null, null);
     }
 }
