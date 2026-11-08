@@ -11,6 +11,10 @@
 # 历史快照：每轮把输出仓库的星标数写成 store/history/<日期>.json 推到
 # gh-pages，下轮读 7 天前的快照算近 7 日均涨星（零新增 API 调用，
 # 攒够 7 天后生成器热门条目切到真·近期日均）。
+# 最新入库：harvest 每轮多抓 hiwiki /zh-CN/newest 页出
+# hiwiki-newest.json，生成器拼成 store/feed/newest.json（60 条、入库
+# 顺序）；该步失败永不拦整轮——生成器沿用上一轮的 newest.json
+# （stale），两者都没有则本轮不写该文件，feed 不受影响。
 # 快照（App 内置离线兜底）不由本工作流更新：只在出 App 包前本地跑
 # 一次生成器、随代码提交，避免往主分支写提交。
 name: store-backend
@@ -41,6 +45,7 @@ jobs:
             git worktree add /tmp/gh-pages-history gh-pages
             cp /tmp/gh-pages-history/store/history/*.json store-history/ 2>/dev/null || true
             cp /tmp/gh-pages-history/store/feed/all.json prev-feed.json 2>/dev/null || true
+            cp /tmp/gh-pages-history/store/feed/newest.json prev-newest.json 2>/dev/null || true
             cp /tmp/gh-pages-history/store/hiwiki/hiwiki-pool.json prev-hiwiki/ 2>/dev/null || true
             cp /tmp/gh-pages-history/store/hiwiki/hiwiki-ranks.json prev-hiwiki/ 2>/dev/null || true
             cp /tmp/gh-pages-history/store/hiwiki/harvest-log.json prev-hiwiki/ 2>/dev/null || true
@@ -80,7 +85,9 @@ jobs:
           python3 store-backend/generate.py \
             --hiwiki-pool hiwiki-data/hiwiki-pool.json \
             --hiwiki-ranks hiwiki-data/hiwiki-ranks.json \
+            --hiwiki-newest hiwiki-data/hiwiki-newest.json \
             --prev-feed prev-feed.json \
+            --prev-newest prev-newest.json \
             --metadata-cap 4500 \
             --harvest-status "$HARVEST_STATUS" \
             --history-dir store-history \
@@ -126,10 +133,44 @@ jobs:
           assert all(i.get("source") == "hiwiki" for i in feed), "non-hiwiki source in feed"
           assert all(r in set(mapping.values()) for i in feed for r in (i.get("ranks") or [])), "rank outside mapping"
           assert meta.get("apiCalls", 0) <= 5000, meta
-          print("ok poolSize=%s feed=%s ranked=%s unranked=%s nonemptyRanks=%s harvestStatus=%s apiCalls=%s droppedNoInstallable=%s metadataDegraded=%s"
+
+          # 最新入库：新鲜 harvest 有文件时必须与 harvest 逐条对上
+          # （条数、顺序、必填字段）；只有上一轮时沿用上一轮的条目
+          # 顺序；两者都没有时 meta 记 missing 且不写文件——三种情况
+          # 都不拦整轮，feed 计数上面已核过。
+          import os
+          newest_status = meta.get("newestStatus")
+          newest_path = "store-output/feed/newest.json"
+          if newest_status == "ok":
+              harvest_newest = json.load(
+                  open("hiwiki-data/hiwiki-newest.json"))["items"]
+              newest = json.load(open(newest_path))["items"]
+              assert len(newest) == len(harvest_newest), (
+                  len(newest), len(harvest_newest))
+              assert [i["fullName"] for i in newest] == [
+                  i["fullName"] for i in harvest_newest], "newest order mismatch"
+              assert all(set(("fullName", "description", "category",
+                              "language", "stars", "latestTag",
+                              "lastReleaseTime", "platforms")) <= set(i)
+                         for i in newest), "newest item missing field"
+              print("newest ok: %d items" % len(newest))
+          elif newest_status == "stale":
+              prev_newest = json.load(open("prev-newest.json"))["items"]
+              newest = json.load(open(newest_path))["items"]
+              assert [i["fullName"] for i in newest] == [
+                  i["fullName"] for i in prev_newest], "stale newest mismatch"
+              print("newest stale: %d items (previous round)" % len(newest))
+          else:
+              assert newest_status == "missing", meta
+              assert not os.path.exists(newest_path), (
+                  "newest.json should be absent when missing")
+              print("newest missing: no file this round (feed unaffected)")
+
+          print("ok poolSize=%s feed=%s ranked=%s unranked=%s nonemptyRanks=%s harvestStatus=%s apiCalls=%s droppedNoInstallable=%s metadataDegraded=%s newest=%s/%s"
                 % (meta["poolSize"], len(feed), ranked, unranked, nonempty,
                    meta.get("harvestStatus"), meta.get("apiCalls"),
-                   meta.get("droppedNoInstallable"), meta.get("metadataDegraded")))
+                   meta.get("droppedNoInstallable"), meta.get("metadataDegraded"),
+                   meta.get("newestStatus"), meta.get("newestCount")))
           PYEOF
       - name: Publish to gh-pages
         run: |
