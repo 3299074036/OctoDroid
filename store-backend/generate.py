@@ -118,11 +118,15 @@ SUFFIX_PLATFORM = [
     (".ipa", "ios"),
     (".exe", "windows"),
     (".msi", "windows"),
+    (".msix", "windows"),
+    (".appx", "windows"),
+    (".ps1", "windows"),
     (".dmg", "macos"),
     (".pkg", "macos"),
     (".appimage", "linux"),
     (".deb", "linux"),
     (".rpm", "linux"),
+    (".sh", "linux"),
     (".hap", "harmony"),
     (".crx", "extension"),
     (".xpi", "extension"),
@@ -130,6 +134,14 @@ SUFFIX_PLATFORM = [
     (".tar.gz", "archive"),
     (".tgz", "archive"),
     (".7z", "archive"),
+    (".whl", "archive"),
+    (".jar", "archive"),
+    (".war", "archive"),
+    (".iso", "archive"),
+    (".img", "archive"),
+    (".xz", "archive"),
+    (".bz2", "archive"),
+    (".rar", "archive"),
 ]
 
 # topics -> 分类码（Komi FeedCategory 同款集合，命中即归入，可多归）。
@@ -478,15 +490,20 @@ def write_json(path, payload):
 
 
 def select_installable_release(releases):
-    """Release 选择（补丁规则，方案 §2.1）：按 releases[] 最新在前扫
-    描，取首个非 prerelease 且带 ≥1 可安装附件的 release；没有则返
-    回 None（调用方丢弃该仓并记日志）。
+    """Release 选择（补丁规则，方案 §2.1；2026-11-08 修正）：按 releases[]
+    最新在前扫描，取首个带 ≥1 可安装附件的 release，不论 prerelease
+    标记；没有则返回 None（调用方丢弃该仓并记日志）。
+    不跳 prerelease 的原因：hiwiki 载荷里没有草稿（草稿在 GitHub 上不
+    公开），载荷里的每个 release 都是公开版；旧生成器 latest_release
+    也只跳草稿、不跳 prerelease。2026-11-08 run #30 的教训：58 个仓
+    的全部 release 都是 prerelease（preview/beta/rc/dev），“首个非
+    prerelease”规则把它们全丢了，feed 少了 58 条。
     hiwiki 只保证“某版本”能装（连续多版无安装包才下架），不保证最
     新版有——只取最新版会漏掉最新版无安装包、旧版有的仓。
     返回 (release, platforms, downloads, installable) 或 None。
     """
     for rel in releases or []:
-        if not isinstance(rel, dict) or rel.get("prerelease"):
+        if not isinstance(rel, dict):
             continue
         platforms = set()
         downloads = 0
@@ -677,6 +694,7 @@ def build_hiwiki_item(record, prev, api, metadata_cap, stats,
         "stars": stars,
         "forks": forks,
         "language": record.get("language") or "",
+        "category": record.get("category") or "other",
         "topics": topics,
         "topicCodes": topic_codes(topics),
         "latestTag": latest_tag,
