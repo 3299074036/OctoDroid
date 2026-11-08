@@ -3,7 +3,7 @@ package com.gh4a.utils;
 /**
  * 0.1.23: minimal dialog-visibility counter for crash breadcrumbs.
  * Only the app's central dialog helpers report here (SingleChoiceDialogHelper,
- * BottomSheetListBuilder, MirrorSourceDialog, the crash dialog itself); other
+ * BottomSheetListBuilder, the crash dialog itself); other
  * ad-hoc AlertDialogs are NOT tracked, so isAnyDialogShowing() is a lower
  * bound, not a guarantee of "no dialog open". Counter only — no content,
  * no names, nothing user-identifying — so it is safe to include in the

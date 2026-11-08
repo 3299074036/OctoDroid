@@ -52,9 +52,17 @@ public class BottomSheetListBuilder {
 
     /** 纯文字行：15sp、上下 pad/2；action 为 null 时不可点（当前账号行）。 */
     public TextView addTextRow(CharSequence text, View.OnClickListener action) {
+        return addTextRow(text, 0, action);
+    }
+
+    /** 带文字颜色的纯文字行：字号、边距与 addTextRow 一致，仅颜色不同（退出登录等红色行）。 */
+    public TextView addTextRow(CharSequence text, int textColor, View.OnClickListener action) {
         TextView row = new TextView(mContext);
         row.setText(text);
         row.setTextSize(15);
+        if (textColor != 0) {
+            row.setTextColor(textColor);
+        }
         row.setPadding(0, mPad / 2, 0, mPad / 2);
         if (action != null) {
             UiUtils.setSelectableBackground(row);

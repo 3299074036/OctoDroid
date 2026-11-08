@@ -660,9 +660,12 @@ public class MirrorHelper {
 
     private static final String KEY_SPEED_CACHE = "mirror_speed_cache";
 
+    /** 上次测速完成时间（毫秒 epoch，随测速缓存一起保存；0 表示从未测过）。 */
+    private static final String KEY_SPEED_CACHE_TIME = "mirror_speed_cache_time";
+
     /**
      * 保存测速结果缓存（url=latencyMs，-1 表示不可用），下次打开镜像源对话框直接显示，
-     * 不用干等。空 url 的占位行不存。
+     * 不用干等。空 url 的占位行不存。同时记下本次测速完成时间（统计条“更新于”用）。
      */
     public static void saveSpeedTestResults(Context context, List<MirrorSpeedResult> results) {
         java.util.Set<String> set = new java.util.HashSet<>();
@@ -671,7 +674,13 @@ public class MirrorHelper {
                 set.add(r.url + "=" + r.latencyMs);
             }
         }
-        prefs(context).edit().putStringSet(KEY_SPEED_CACHE, set).apply();
+        prefs(context).edit().putStringSet(KEY_SPEED_CACHE, set)
+                .putLong(KEY_SPEED_CACHE_TIME, System.currentTimeMillis()).apply();
+    }
+
+    /** 上次测速完成时间（毫秒 epoch）；从未测过返回 0。 */
+    public static long getSpeedTestTime(Context context) {
+        return prefs(context).getLong(KEY_SPEED_CACHE_TIME, 0);
     }
 
     /**
