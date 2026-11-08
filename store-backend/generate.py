@@ -64,10 +64,17 @@ store/history/，git 拉取不占 API 额度；攒够 7 天前生成器热门条
 输出（out 下）：
   feed/{all,android,macos,windows,linux,ios}.json
   feed/{all,android,macos,windows,linux,ios}/page<n>.json（20 条一页）
+  feed/newest.json（最新入库：harvest 的 hiwiki-newest.json 按入库
+    顺序原样出，每条含 fullName / description / category /
+    language / stars / latestTag / lastReleaseTime / platforms；
+    平台以 feed 为准，feed 里没有该仓时把 hiwiki 原始平台值映射
+    兜底。新鲜文件缺失时沿用上一轮的（meta newestStatus=stale），
+    两者都没有则不写本文件——三种情况都不拦 feed，整轮不失败）
   categories/{trending,new-releases,most-popular}/{platform}.json
   meta.json（含 poolSize / hiwikiItems / ranked / unranked /
   mappingDate / harvestStatus / apiCalls / droppedNoInstallable /
-  metadataDegraded）
+  metadataDegraded / newestCount / newestStatus / newestInFeed /
+  newestDate）
 历史快照（history-dir 下，文件名 <YYYY-MM-DD>.json）：
   {"date": ..., "generatedAt": ..., "stars": {"owner/repo": 星标数}}
   当天快照只写、不读；读的是 7 天前的那一份。
@@ -111,6 +118,17 @@ NEW_RELEASES_DAYS = 14
 # 单次等待上限 300 秒。
 RATE_LIMIT_RETRIES = 3
 RATE_LIMIT_WAIT_CAP = 300
+
+# hiwiki 最新入库原始平台值 -> feed 平台词表。只在 feed 里找不到
+# 该仓时兜底用（feed 的平台由附件后缀推导，权威；实测 hiwiki 原始
+# 值与 feed 有出入：hiwiki 没有 archive 概念、mac 写作 mac、部分
+# 平台是宣称值而非附件实测值，11/60 条直接映射会对不上 feed）。
+# 词表外的值丢弃（例如 hiwiki 某天新增的平台名）。
+HIWIKI_NEWEST_PLATFORM_MAP = {
+    "android": "android", "ios": "ios", "windows": "windows",
+    "mac": "macos", "linux": "linux", "extension": "extension",
+    "harmony": "harmony", "other": "archive",
+}
 
 # 附件后缀 -> 平台（与 StoreClassifier.platformsForAsset 同表）。
 SUFFIX_PLATFORM = [
@@ -521,6 +539,64 @@ def select_installable_release(releases):
     return None
 
 
+def load_newest(path):
+    """读最新入库文件，返回 (items, generatedAt)。
+
+    接受两种同形文件：harvest 产出的 hiwiki-newest.json 与上一轮的
+    feed/newest.json，都是 {"generatedAt", "items": [...]}。文件缺失
+    / 损坏 / 无有效条目返回 ([], "")。顺序原样保留，绝不重排。
+    """
+    if not path or not os.path.isfile(path):
+        return [], ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print("newest %s 读不到（按无最新入库处理）：%s" % (path, e))
+        return [], ""
+    items = (data or {}).get("items") or []
+    items = [i for i in items
+             if isinstance(i, dict) and i.get("fullName")]
+    print("newest: %s %d 条（%s）"
+          % (path, len(items), (data or {}).get("generatedAt") or "?"))
+    return items, (data or {}).get("generatedAt") or ""
+
+
+def build_newest_items(raw_items, feed_by_name):
+    """把最新入库行拼成 feed/newest.json 的条目，顺序原样。
+
+    平台以 feed 为准（附件后缀推导，权威）；feed 里没有该仓时才把
+    hiwiki 原始平台值按 HIWIKI_NEWEST_PLATFORM_MAP 映射兜底。其余
+    字段一律取 hiwiki 行的新鲜值。返回 (items, in_feed_count)。
+    """
+    out = []
+    in_feed = 0
+    for raw in raw_items:
+        full = (raw.get("fullName") or "").strip()
+        if not full:
+            continue
+        feed_item = feed_by_name.get(full.lower())
+        if feed_item is not None:
+            platforms = sorted(feed_item.get("platforms") or [])
+            in_feed += 1
+        else:
+            platforms = sorted(
+                {HIWIKI_NEWEST_PLATFORM_MAP[p]
+                 for p in (raw.get("platforms") or [])
+                 if p in HIWIKI_NEWEST_PLATFORM_MAP})
+        out.append({
+            "fullName": full,
+            "description": raw.get("description") or "",
+            "category": raw.get("category") or "other",
+            "language": raw.get("language") or "",
+            "stars": raw.get("stars") or 0,
+            "latestTag": raw.get("latestTag") or "",
+            "lastReleaseTime": raw.get("lastReleaseTime") or "",
+            "platforms": platforms,
+        })
+    return out, in_feed
+
+
 def load_hiwiki_pool(path):
     """读 harvest 产出的全量分类 JSON，返回 (records, meta)。
 
@@ -757,6 +833,10 @@ def main():
                     help="hiwiki 全量分类 JSON 路径（harvest 产物）；不传或文件缺失/损坏时走回落：用上一轮 feed 里 source==hiwiki 的条目")
     ap.add_argument("--hiwiki-ranks", default=None,
                     help="hiwiki 分类对照表 JSON 路径；不传则用 generate.py 同目录的 hiwiki-ranks.json")
+    ap.add_argument("--hiwiki-newest", default=None,
+                    help="harvest 产出的 hiwiki-newest.json 路径；不传或文件缺失/损坏时沿用 --prev-newest，两者都没有则本轮不写 feed/newest.json，feed 不受影响")
+    ap.add_argument("--prev-newest", default=None,
+                    help="上一轮 feed/newest.json 路径；新鲜文件缺失时沿用（stale），平台按本轮 feed 重算")
     ap.add_argument("--prev-feed", default=None,
                     help="上一轮 feed/all.json 路径；供元数据复用与回落池子")
     ap.add_argument("--metadata-cap", type=int, default=4500,
@@ -839,6 +919,28 @@ def main():
              sum(1 for i in feed
                  if hiwiki_map.get((i.get("fullName") or "").lower()))))
 
+    # 最新入库：harvest 新鲜文件优先；没有则沿用上一轮的（stale，
+    # 平台按本轮 feed 重算）；两者都没有则本轮不写 newest.json，
+    # 但 feed 照常出，整轮不失败。
+    feed_by_name = {i["fullName"].lower(): i for i in feed}
+    newest_raw, newest_date = load_newest(args.hiwiki_newest)
+    if newest_raw:
+        newest_status = "ok"
+        newest_items, newest_in_feed = build_newest_items(
+            newest_raw, feed_by_name)
+    else:
+        prev_newest, prev_newest_date = load_newest(args.prev_newest)
+        if prev_newest:
+            newest_status = "stale"
+            newest_items, newest_in_feed = build_newest_items(
+                prev_newest, feed_by_name)
+            newest_date = prev_newest_date
+        else:
+            newest_status = "missing"
+            newest_items, newest_in_feed = [], 0
+    print("newest: status=%s count=%d inFeed=%d"
+          % (newest_status, len(newest_items), newest_in_feed))
+
     # 三榜由同一份池子数据重算（App 不读这三个文件，零 UI 影响）。
     charts = compute_charts(feed, now_utc)
     for chart in CHARTS:
@@ -878,6 +980,13 @@ def main():
                        {"generatedAt": generated_at, "page": n,
                         "hasMore": n < len(pages), "items": chunk})
 
+    # 最新入库（单文件，不分页；缺失时不写，feed 不受影响）。
+    if newest_items:
+        write_json(os.path.join(args.out, "feed", "newest.json"),
+                   {"generatedAt": generated_at, "items": newest_items})
+    else:
+        print("newest: 无数据，本轮不写 feed/newest.json（feed 不受影响）")
+
     meta = {"generatedAt": generated_at,
             "feed": len(feed),
             "feedPages": feed_pages,
@@ -891,6 +1000,10 @@ def main():
             "harvestStatus": harvest_status,
             "droppedNoInstallable": stats["dropped"],
             "metadataDegraded": stats["degraded"],
+            "newestCount": len(newest_items),
+            "newestStatus": newest_status,
+            "newestInFeed": newest_in_feed,
+            "newestDate": newest_date,
             "historyDate": today.isoformat(),
             "historyOldDate": history_old_date.isoformat(),
             "historyOldFound": history_old is not None,
