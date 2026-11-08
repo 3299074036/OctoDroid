@@ -247,6 +247,12 @@
             android:title="@string/diagnostic_log"
             tools:ignore="ManifestResource" />
 
+        <activity
+            android:name=".activities.MirrorSourceActivity"
+            android:title="@string/mirror_preset"
+            android:windowSoftInputMode="adjustResize"
+            tools:ignore="ManifestResource" />
+
         <activity android:name=".resolver.BrowseFilter"
             android:excludeFromRecents="true"
             android:taskAffinity=""
