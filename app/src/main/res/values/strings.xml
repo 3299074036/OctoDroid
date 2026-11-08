@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">OctoDroid</string>
 
     <!-- Common -->
@@ -16,6 +16,8 @@
     <string name="search">Search</string>
     <string name="search_code">Search code</string>
     <string name="logout">Logout</string>
+    <string name="logout_confirm_title">Log out?</string>
+    <string name="logout_confirm_message">Your login for the current account will be removed; you\'ll need to log in again to use the app. Local settings and cache are kept.</string>
     <string name="login">Login</string>
     <string name="login_oauth">Login via OAuth</string>
     <string name="login_token">Login using access token</string>
@@ -764,15 +766,10 @@
 
     <!-- Star groups -->
     <string name="star_groups">Star groups</string>
-    <string name="no_star_groups">No groups yet. Create one to organize your starred repositories.</string>
-    <string name="no_star_group_repos">No repositories in this group yet. Long-press a starred repository to add it.</string>
     <string name="star_group_create">New group</string>
     <string name="star_group_create_title">Group name</string>
     <string name="star_group_create_new">New group\u2026</string>
-    <string name="star_group_rename_title">Rename group</string>
     <string name="star_group_assign_title">Add to group</string>
-    <string name="star_group_remove_confirm">Remove %1$s from this group?</string>
-    <string name="star_group_delete_confirm">Delete group \u201c%1$s\u201d? Repositories stay starred.</string>
     <!-- Official GitHub lists, merged into the starred page -->
     <string name="star_tab_groups">Groups</string>
     <string name="star_tab_list">List</string>
@@ -780,23 +777,61 @@
     <string name="mark_all_read">Mark all as read</string>
     <string name="my_lists">My lists</string>
     <string name="my_lists_loading">Loading official lists\u2026</string>
-    <string name="my_lists_failed">Official lists could not be loaded. Local groups are shown instead.</string>
-    <string name="my_lists_empty">No official lists yet. Long-press a starred repository to create one.</string>
+    <string name="my_lists_failed">Official lists could not be loaded.</string>
+    <string name="my_lists_empty">No lists yet. Long-press a starred repository to create one.</string>
     <string name="local_groups">Local groups</string>
     <string name="starred_all">All starred</string>
-    <string name="assign_official_title">Add to official lists</string>
-    <string name="assign_official_create_new">New official list\u2026</string>
+    <string name="assign_official_title">Add to list</string>
+    <string name="assign_official_create_new">New list</string>
     <string name="assign_official_success">List membership updated</string>
     <string name="assign_official_failed">Could not update lists. Check network and account permissions.</string>
-    <string name="rename">Rename</string>
-    <string name="remove">Remove</string>
+    <!-- 0.1.64 Star 分组：官方列表增删改、长按多选移组、长按排序 -->
+    <string name="star_list_create_title">New list</string>
+    <string name="star_list_save">Save</string>
+    <string name="star_list_menu_rename">Rename list</string>
+    <string name="star_list_menu_delete">Delete list</string>
+    <string name="star_list_delete_title">Delete list \u201c%1$s\u201d?</string>
+    <plurals name="star_list_delete_message">
+        <item quantity="one">After this list is disbanded, its 1 repository will stay starred and move to \u201cUngrouped\u201d.</item>
+        <item quantity="other">After this list is disbanded, its %1$d repositories will stay starred and move to \u201cUngrouped\u201d.</item>
+    </plurals>
+    <string name="star_list_ungrouped">Ungrouped</string>
+    <string name="star_list_add_group">+ New list</string>
+    <!-- 0.1.64：PluralsCandidate 误报——“selected/moved/failed”是分词，无单复数变化。 -->
+    <string name="star_list_selected" tools:ignore="PluralsCandidate">%1$d selected</string>
+    <string name="star_list_move_to">Move to list</string>
+    <string name="star_list_moving">Moving %1$d / %2$d\u2026</string>
+    <string name="star_list_moved_title">Moved %1$d / %2$d</string>
+    <string name="star_list_move_failed" tools:ignore="PluralsCandidate">%1$d failed: %2$s \u00b7 call failed, not moved.</string>
+    <string name="star_list_move_done_note" tools:ignore="PluralsCandidate">%1$d moved successfully; stars unchanged.</string>
+    <string name="star_list_move_out_note" tools:ignore="PluralsCandidate">%1$d moved to \u201cUngrouped\u201d; stars unchanged.</string>
+    <string name="star_list_retry_failed">Retry failed</string>
+    <string name="star_list_done">Done</string>
+    <string name="star_list_private">Make private</string>
+    <string name="star_list_private_note">Private lists are only visible to you; otherwise public</string>
+    <string name="star_list_create_hint">Name must not duplicate an existing list.</string>
+    <string name="star_list_name_hint">List name, e.g. Agent</string>
+    <string name="star_list_star_subtitle">%1$s \u00b7 just starred, add to which list?\nConfirm with nothing checked to star only, without a list</string>
+    <string name="star_list_sort_hint">Sorting: drag \u2261 to reorder.</string>
+    <string name="star_list_rename_title">Rename list</string>
+    <string name="star_list_create_failed">Could not create the list. Check network and account permissions.</string>
+    <string name="star_list_rename_failed">Could not rename the list. Check network and account permissions.</string>
+    <string name="star_list_delete_failed">Could not delete the list. Check network and account permissions.</string>
+    <string name="star_list_name_empty">Enter a list name</string>
+    <string name="star_list_name_dup">Name already exists</string>
+    <string name="star_list_renamed">List renamed</string>
+    <string name="star_list_deleted">List deleted</string>
+    <string name="star_list_created">List created</string>
+    <!-- 0.1.64：组头 ⋮ 菜单与排序拖柄 ≡（符号，非文案，不翻译）。 -->
+    <string name="star_list_more" translatable="false">\u22EE</string>
+    <string name="star_list_drag" translatable="false">\u2261</string>
     <string name="mirror_enabled">Enable mirror acceleration</string>
     <string name="mirror_enabled_summary">Load images, avatars, downloads and trending data via a mirror when the network to GitHub is slow</string>
     <string name="mirror_preset">Mirror</string>
     <string name="mirror_custom_url_invalid">Mirror URL must start with https://</string>
     <string name="mirror_source_testing">Testing…</string>
     <string name="mirror_source_latency">%1$d ms</string>
-    <string name="mirror_source_unavailable">Unavailable</string>
+    <string name="mirror_source_unavailable">Timeout</string>
     <string name="mirror_speed_selected">Mirror set to %1$s</string>
     <string name="mirror_empty_hint">No mirrors yet — tap + Add below</string>
     <string name="mirror_manage_testing">Testing mirrors…</string>
@@ -808,6 +843,19 @@
     <string name="mirror_added">Added — testing now</string>
     <string name="mirror_updated">Saved</string>
     <string name="mirror_deleted">Deleted</string>
+    <string name="mirror_auto_title">Auto-select fastest mirror</string>
+    <string name="mirror_manual_subtitle">Manual selection — auto-switch off</string>
+    <string name="mirror_current_none">None</string>
+    <string name="mirror_batch_delete">Batch delete</string>
+    <string name="mirror_batch_hint">Batch delete: check the mirrors to remove, then tap Delete below. In batch mode each row shows a checkbox and the edit/delete icons are hidden.</string>
+    <string name="mirror_batch_selected">%1$d selected</string>
+    <string name="mirror_batch_delete_confirm">Delete the %1$d selected mirrors?</string>
+    <string name="mirror_current_pill">Current</string>
+    <string name="mirror_url_hint">https://</string>
+    <string name="mirror_current_line">Current mirror: %1$s · %2$s</string>
+    <string name="mirror_stats_mirrors">Mirrors</string>
+    <string name="mirror_stats_ok">Normal</string>
+    <string name="mirror_stats_updated">Updated %1$s</string>
     <string name="release_radar_notifications">Starred repo release alerts</string>
     <string name="release_radar_interval">Star update check interval</string>
     <string name="channel_release_radar_name">Release updates</string>
@@ -914,6 +962,16 @@
     <string name="store_hot">Popular</string>
     <string name="store_recent_updated">Recently updated</string>
     <string name="store_newest">Newly added</string>
+    <string name="store_newest_back">‹ Home</string>
+    <plurals name="store_newest_sub">
+        <item quantity="one">Latest sync added %1$d repository · ordered by intake time</item>
+        <item quantity="other">Latest sync added %1$d repositories · ordered by intake time</item>
+    </plurals>
+    <plurals name="store_newest_updated_days">
+        <item quantity="one">Updated by author %1$d day ago</item>
+        <item quantity="other">Updated by author %1$d days ago</item>
+    </plurals>
+    <string name="store_newest_updated_today">Updated by author today</string>
     <string name="store_submit">Submit repository</string>
     <string name="store_submit_hint">Enter a GitHub repository link to preview its latest release, then follow it locally</string>
     <string name="store_submit_url_label">GitHub repository address</string>
@@ -939,15 +997,13 @@
     <string name="store_mirror">Mirror settings</string>
     <string name="store_mirror_hint">Download acceleration: GitHub official / ghproxy / CF Worker / custom</string>
     <string name="store_mirror_current">Current mirror: %1$s</string>
-    <string name="store_filter_platform">Platform</string>
-    <string name="store_filter_category">Category</string>
-    <string name="store_filter_language">Language</string>
+    <string name="store_filter_platform">System</string>
+    <string name="store_filter_category">Use</string>
     <string name="store_filter_all">All</string>
     <string name="store_explore_count">%1$d repositories · %2$s stars total · %3$d released in the last 7 days</string>
     <string name="store_rank_sample_note">Aggregated from the popular sample, not the full catalog totals.</string>
     <string name="store_rank_language">Language ranking</string>
     <string name="store_rank_lang_sub">%1$s stars · %2$d repos</string>
-    <string name="store_rank_suffix"> ranking</string>
     <string name="store_tag_results">Tag “%1$s”: %2$d repos</string>
     <string name="store_detail">Software details</string>
     <string name="store_latest">Latest release</string>
@@ -963,12 +1019,16 @@
     <string name="store_cat_tool">Tools</string>
     <string name="store_cat_media">Media</string>
     <string name="store_cat_dev">Development</string>
+    <string name="store_cat_game">Game</string>
+    <string name="store_cat_efficiency">Efficiency</string>
+    <string name="store_cat_other">Other</string>
     <string name="store_platform_windows">Windows</string>
-    <string name="store_platform_macos">macOS</string>
+    <string name="store_platform_macos">MacOS</string>
     <string name="store_platform_linux">Linux</string>
     <string name="store_platform_harmony">HarmonyOS</string>
     <string name="store_platform_extension">Extension</string>
     <string name="store_platform_archive">Archive</string>
+    <string name="store_platform_other">Other</string>
     <string name="store_guide_apk">APK: install directly on an Android device</string>
     <string name="store_guide_ipa">IPA: requires sideloading</string>
     <string name="store_guide_exe">EXE: double-click the installer</string>
@@ -983,19 +1043,37 @@
     <string name="store_chart_releases">Latest releases</string>
     <string name="store_chart_popular">Most popular</string>
     <string name="store_cat_ai">AI</string>
-    <string name="store_cat_privacy">Privacy</string>
     <string name="store_cat_networking">Networking</string>
-    <string name="store_cat_social">Social</string>
-    <string name="store_cat_reading">Reading</string>
-    <string name="store_platform_title">Choose your system</string>
-    <string name="store_platform_all">All platforms</string>
+    <string name="store_platform_all">All</string>
     <string name="store_offline_data">Offline data: showing the last saved list</string>
     <string name="store_mirror_data">Mirror data: main site unreachable, showing mirror data</string>
-    <string name="store_load_more">Load more</string>
     <string name="store_all_loaded">No more items</string>
     <string name="store_action_share">Share</string>
     <string name="store_action_open_github">Open on GitHub</string>
     <string name="store_action_mark_seen">Mark as seen</string>
     <string name="store_action_unmark_seen">Mark as unseen</string>
     <string name="store_action_hide">Hide</string>
+    <string name="store_sort_stars">Stars</string>
+    <string name="store_sort_updated">Recently updated</string>
+    <string name="store_sort_downloads">Downloads</string>
+    <string name="store_sort_hot">Trending now</string>
+    <string name="store_sort_note_stars">Sorted by stars, highest first.</string>
+    <string name="store_sort_note_updated">Sorted by latest release, newest first.</string>
+    <string name="store_sort_note_downloads">Sorted by downloads, highest first. Downloads count the installable assets of the latest release only, not cumulative across versions.</string>
+    <string name="store_sort_note_hot">Ranked by daily star gain; ties by stars.</string>
+    <string name="store_stat_repos">Repositories</string>
+    <string name="store_stat_assets">Installers</string>
+    <string name="store_stat_ranks">Rankings</string>
+    <string name="store_view_all">View all ›</string>
+    <string name="store_rank_title">All rankings</string>
+    <string name="store_rank_sub">96 ranked lists grouped by category</string>
+    <string name="store_rank_only_nonempty">Only show lists with entries</string>
+    <string name="store_rank_group_sub">%1$d lists in this category · %2$d with entries</string>
+    <string name="store_rank_list_count">%1$d entries</string>
+    <string name="store_rank_backend"> (from backend)</string>
+    <string name="store_rank_full_sub">%1$d entries · by stars, highest first%2$s</string>
+    <string name="store_back">‹ Back</string>
+    <string name="store_result_count">%1$d in total</string>
+    <string name="store_explore_title">Explore open-source software</string>
+    <string name="store_explore_sub">%1$d apps</string>
 </resources>
