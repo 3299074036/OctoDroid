@@ -32,6 +32,7 @@ import android.util.Log;
 import android.view.MenuItem;
 import android.widget.ImageView;
 
+import com.gh4a.Gh4Application;
 import com.gh4a.ServiceFactory;
 import com.meisolsson.githubsdk.model.User;
 
@@ -323,7 +324,8 @@ public class AvatarHandler {
                     try {
                         bitmap = fetchBitmap(url);
                     } catch (IOException e) {
-                        Log.e(TAG, "Couldn't fetch gravatar from URL " + url, e);
+                        Log.e(TAG, "Couldn't fetch gravatar from URL "
+                                + Gh4Application.redactUrlForLog(url), e);
                     }
                     sHandler.obtainMessage(MSG_LOADED, msg.arg1, 0, bitmap).sendToTarget();
                     break;

@@ -89,6 +89,31 @@ public class ReleaseAssetAdapter extends RootAdapter<ReleaseAsset, ReleaseAssetA
             dest.writeString(mContentType);
             dest.writeLong(mCreatedAt != null ? mCreatedAt.getTime() : 0);
         }
+
+        // B-L12：补 CREATOR（之前只有 writeToParcel 没有 CREATOR，
+        // lint ParcelCreator 报错；跨进程/跨 Intent 传递会抛异常）。
+        // 注：报告称此类是死代码是误判——ReleaseInfoActivity 用它补
+        // zipball/tarball 两条合成记录，故补 CREATOR 而不是删除。
+        protected SourceCodeAsset(Parcel in) {
+            mName = in.readString();
+            mUrl = in.readString();
+            mContentType = in.readString();
+            long t = in.readLong();
+            mCreatedAt = t != 0 ? new Date(t) : null;
+        }
+
+        public static final Parcelable.Creator<SourceCodeAsset> CREATOR =
+                new Parcelable.Creator<SourceCodeAsset>() {
+            @Override
+            public SourceCodeAsset createFromParcel(Parcel in) {
+                return new SourceCodeAsset(in);
+            }
+
+            @Override
+            public SourceCodeAsset[] newArray(int size) {
+                return new SourceCodeAsset[size];
+            }
+        };
     }
 
     public static class ViewHolder extends RecyclerView.ViewHolder {

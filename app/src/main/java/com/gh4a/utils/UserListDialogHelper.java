@@ -127,7 +127,9 @@ public class UserListDialogHelper {
                 }
                 if (existingLists != null) {
                     for (UserListsGraphQL.UserList list : existingLists) {
-                        if (name.equals(list.name)) {
+                        // B-L8：重名校验不分大小写（之前 "My List" 与 "my list"
+                        // 会通过本地校验交由服务端裁决）。
+                        if (name.equalsIgnoreCase(list.name)) {
                             Toast.makeText(context, R.string.star_list_name_dup,
                                     Toast.LENGTH_SHORT).show();
                             return;

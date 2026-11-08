@@ -72,6 +72,8 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     public static final String KEY_NOTIFICATION_INTERVAL = "notification_interval";
     public static final String KEY_MIRROR_ENABLED = "mirror_enabled";
     public static final String KEY_MIRROR_PRESET = "mirror_preset";
+    /** 镜像源页“自动选择延迟最低”开关（默认开；关 = 手动选择，持久化）。 */
+    public static final String KEY_MIRROR_AUTO_SELECT = "mirror_auto_select";
     public static final String KEY_RELEASE_RADAR_NOTIFICATIONS = "release_radar_notifications";
     public static final String KEY_RELEASE_RADAR_INTERVAL = "release_radar_interval";
     private static final String KEY_ABOUT = "about";

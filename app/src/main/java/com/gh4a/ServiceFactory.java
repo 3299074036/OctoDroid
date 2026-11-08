@@ -17,7 +17,6 @@ import java.util.concurrent.TimeUnit;
 
 import okhttp3.Cache;
 import okhttp3.CacheControl;
-import okhttp3.Credentials;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -40,7 +39,7 @@ public class ServiceFactory {
     private final static Interceptor CACHE_STATUS_INTERCEPTOR = chain -> {
         Response response = chain.proceed(chain.request());
         Log.d("OkHttp", String.format(Locale.US, "For %s: network return code %d, cache %d",
-                response.request().url().toString(),
+                Gh4Application.redactUrlForLog(response.request().url().toString()),
                 response.networkResponse() != null ? response.networkResponse().code() : -1,
                 response.cacheResponse() != null ? response.cacheResponse().code() : -1));
         return response;
@@ -141,10 +140,26 @@ public class ServiceFactory {
 
     private static String makeKey(Class<?> serviceClass, boolean bypassCache,
             String acceptHeader, String token, Integer pageSize) {
+        // S-L6：缓存 key 里不再拼原始 token，只拼它的 SHA-256（仅内存，
+        // 无持久化、无日志；区分度不变，token 本身不再出现在 key 里）。
         return String.format(Locale.US, "%s-%d-%s-%s-%d",
                 serviceClass.getSimpleName(), bypassCache ? 1 : 0,
                 acceptHeader != null ? acceptHeader : "",
-                token != null ? token : "", pageSize != null ? pageSize : 0);
+                token != null ? sha256Hex(token) : "", pageSize != null ? pageSize : 0);
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(
+                    value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                sb.append(String.format(Locale.US, "%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return String.valueOf(value.hashCode());
+        }
     }
 
     private static <S> S createService(Class<S> serviceClass, final boolean bypassCache,
@@ -169,10 +184,11 @@ public class ServiceFactory {
                         // api-http disk cache. Unauthenticated requests keep
                         // the existing caching behaviour (public data only).
                         requestBuilder.header("Cache-Control", "no-store");
-                    } else {
-                        requestBuilder.header("Authorization",
-                                Credentials.basic(BuildConfig.CLIENT_ID, BuildConfig.CLIENT_SECRET));
                     }
+                    // 0.2.2（S-M4）：未登录时不发任何 Authorization 头——之前
+                    // 用 CLIENT_ID:CLIENT_SECRET 发 Basic Auth，会把客户端
+                    // 密钥随每个未登录请求发往 api.github.com。代价是未登录
+                    // 请求走更低的匿名限额；已登录请求（Token）不受影响。
                     if (pageSize != null && original.url().queryParameterNames().contains("page")) {
                         requestBuilder.url(original.url().newBuilder()
                                 .addQueryParameter("per_page", String.valueOf(pageSize))

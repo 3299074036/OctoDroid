@@ -20,6 +20,7 @@ import android.animation.AnimatorSet;
 import android.animation.ArgbEvaluator;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.assist.AssistContent;
@@ -125,6 +126,10 @@ public abstract class BaseActivity extends AppCompatActivity implements
     private NavigationView mRightDrawer;
     private View mLeftDrawerHeader;
     private View mRightDrawerHeader;
+    // B-L13：SupportMenuInflater 是受限 API，但 AppCompatActivity 公开的
+    // getMenuInflater() 只能用 Activity 自身 context；这里需要 HeaderTheme
+    // 的 ContextThemeWrapper，公开 API 造不出带自定义主题的实例，故压制。
+    @SuppressLint("RestrictedApi")
     private SupportMenuInflater mMenuInflater;
 
     private boolean mAppBarLocked = false;
@@ -652,6 +657,7 @@ public abstract class BaseActivity extends AppCompatActivity implements
 
     @NonNull
     @Override
+    @SuppressLint("RestrictedApi") // B-L13：见 mMenuInflater 字段注释。
     public MenuInflater getMenuInflater() {
         if (mMenuInflater == null) {
             mMenuInflater = new SupportMenuInflater(

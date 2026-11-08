@@ -1,12 +1,9 @@
 package com.gh4a.utils;
 
-import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
@@ -18,10 +15,10 @@ import com.gh4a.ServiceFactory;
 import com.meisolsson.githubsdk.model.Download;
 import com.meisolsson.githubsdk.model.ReleaseAsset;
 
+import java.io.File;
 import java.io.IOException;
 
 import androidx.appcompat.app.AlertDialog;
-import androidx.core.app.ActivityCompat;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.OkHttpClient;
@@ -58,20 +55,9 @@ public class DownloadUtils {
     }
 
     private static void handleDownloadPermissionCheck(final BaseActivity activity, Runnable func) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // API 29+ doesn't require WRITE_EXTERNAL_STORAGE permission anymore,
-            // since we're writing to a pre-defined public directory only
-            func.run();
-            return;
-        }
-        final ActivityCompat.OnRequestPermissionsResultCallback cb =
-                (requestCode, permissions, grantResults) -> {
-                    if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                        func.run();
-                    }
-                };
-        activity.requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE, cb,
-                R.string.download_permission_rationale);
+        // 0.2.2（S-M5）：下载改落应用私有目录，不再需要 WRITE_EXTERNAL_STORAGE，
+        // 任何 API 级别都不用申请，直接执行。
+        func.run();
     }
 
     // Shared client for redirect resolution: built once, reused for every
@@ -218,12 +204,72 @@ public class DownloadUtils {
                         request.setAllowedOverMetered(false);
                     }
                 },
-                (ctx, success, file) -> {
+                (ctx, success, file, downloadId) -> {
                     if (!success) {
                         Toast.makeText(ctx, R.string.download_failed,
                                 Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if (file != null) {
+                        verifyDownloadedFile(ctx, file, downloadId);
                     }
                 });
+    }
+
+    /**
+     * 0.2.2（S-M1）：下载完成后的校验——算 SHA-256＋大小记进下载记录（供
+     * 下载列表展示、人工核对）；APK 再比签名：已安装同包名应用的签名必须
+     * 一致，不一致删文件＋清记录并提示；未安装则提示发布者签名无法验证。
+     * 上游（GitHub Release API）不提供文件哈希，无法自动比对。
+     * 哈希与签名校验在后台线程做，不卡主线程。
+     */
+    private static void verifyDownloadedFile(Context context, File file, long downloadId) {
+        final Context appContext = context.getApplicationContext();
+        final Handler handler = new Handler(Looper.getMainLooper());
+        new Thread(() -> {
+            String sha256 = computeSha256(file);
+            long size = file.length();
+            DownloadRecordManager.updateFileInfo(appContext, downloadId, size, sha256);
+            final boolean isApk = file.getName().toLowerCase(java.util.Locale.US)
+                    .endsWith(".apk");
+            final ApkUpdateDownloader.ApkSignatureCheck check = isApk
+                    ? ApkUpdateDownloader.checkDownloadedApkSignature(appContext, file)
+                    : null;
+            handler.post(() -> {
+                if (check == ApkUpdateDownloader.ApkSignatureCheck.MISMATCH) {
+                    // 签名与已安装的同包名应用不一致：可能是投毒／冒名包，删掉。
+                    file.delete();
+                    DownloadRecordManager.remove(appContext, downloadId);
+                    Toast.makeText(appContext,
+                            R.string.apk_download_signature_mismatch,
+                            Toast.LENGTH_LONG).show();
+                } else if (check == ApkUpdateDownloader.ApkSignatureCheck.NOT_INSTALLED) {
+                    Toast.makeText(appContext, R.string.apk_signature_unverified,
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+        }).start();
+    }
+
+    /** 文件的 SHA-256（小写 hex）；算不出返回 null。 */
+    private static String computeSha256(java.io.File file) {
+        try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+            java.security.MessageDigest md =
+                    java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                md.update(buf, 0, n);
+            }
+            byte[] digest = md.digest();
+            StringBuilder sb = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                sb.append(String.format(java.util.Locale.US, "%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")

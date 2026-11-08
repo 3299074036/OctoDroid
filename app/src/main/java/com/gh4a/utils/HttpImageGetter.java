@@ -491,7 +491,8 @@ public class HttpImageGetter {
                     }
                 }
             } catch (IOException e) {
-                Log.e(Gh4Application.LOG_TAG, "Couldn't display image " + url, e);
+                Log.e(Gh4Application.LOG_TAG, "Couldn't display image "
+                        + Gh4Application.redactUrlForLog(url.toString()), e);
                 // fall through to showing the error bitmap
             }
         }

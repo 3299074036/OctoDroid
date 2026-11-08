@@ -1,6 +1,7 @@
 package com.gh4a.widget;
 
 import android.content.Context;
+import android.annotation.SuppressLint;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
 import android.os.Parcelable;
@@ -85,6 +86,9 @@ public class ReactionBar extends HorizontalScrollView implements View.OnClickLis
     private ReactionUserPopup mPopup;
 
     private ReactionDetailsCache mDetailsCache;
+    // B-L13：MenuPopupHelper.setForceShowIcon 是受限 API；公开的 PopupMenu
+    // 没有强制显示图标的方法，反应菜单的图标只能走这条路，故压制。
+    @SuppressLint("RestrictedApi")
     private MenuPopupHelper mAddReactionPopup;
     private @MenuRes int mAddReactionMenuResId = R.menu.reaction_menu;
     private AddReactionMenuHelper mAddReactionMenuHelper;
@@ -175,6 +179,7 @@ public class ReactionBar extends HorizontalScrollView implements View.OnClickLis
     }
 
     @Override
+    @SuppressLint("RestrictedApi") // B-L13：见 mAddReactionPopup 字段注释。
     public void onClick(View view) {
         if (mPopup != null && mPopup.isShowing()) {
             mPopup.dismiss();

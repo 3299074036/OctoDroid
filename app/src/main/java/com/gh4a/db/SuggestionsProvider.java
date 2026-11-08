@@ -13,6 +13,7 @@ import androidx.annotation.NonNull;
 import android.util.Log;
 
 import com.gh4a.BuildConfig;
+import com.gh4a.Gh4Application;
 
 import java.util.Locale;
 
@@ -33,6 +34,84 @@ public class SuggestionsProvider extends ContentProvider {
     }
 
     private static final int MATCH_ALL = 0;
+
+    // S-L4：调用方传入的 selection/sortOrder 只接受白名单（Provider 虽然
+    // exported=false，但原样进 SQLiteQueryBuilder 仍是注入面；实际调用方
+    // 只有 SearchFragment 的三组常量模板）。
+    private static final String SELECTION_TYPE =
+            Columns.TYPE + " = ?";
+    private static final String SELECTION_TYPE_AND_SUGGESTION_LIKE =
+            Columns.TYPE + " = ? AND " + Columns.SUGGESTION + " LIKE ?";
+    private static final String SELECTION_TYPE_AND_SUGGESTION_EQ =
+            Columns.TYPE + " = ? AND " + Columns.SUGGESTION + " = ?";
+    private static final String[] SORT_COLUMNS = {"date", "suggestion", "type", "_id"};
+    private static final String DEFAULT_SORT_ORDER = Columns.DATE + " desc";
+
+    private static boolean isAllowedSelection(String selection) {
+        return selection == null
+                || SELECTION_TYPE.equals(selection)
+                || SELECTION_TYPE_AND_SUGGESTION_LIKE.equals(selection)
+                || SELECTION_TYPE_AND_SUGGESTION_EQ.equals(selection);
+    }
+
+    /** sortOrder 只接受白名单列名 + asc/desc；不合法时回落默认 date desc。 */
+    private static String sanitizeSortOrder(String sortOrder) {
+        if (sortOrder == null) {
+            return DEFAULT_SORT_ORDER;
+        }
+        StringBuilder out = new StringBuilder();
+        for (String part : sortOrder.split(",")) {
+            String[] tokens = part.trim().split("\\s+");
+            if (tokens.length == 0 || tokens.length > 2) {
+                return DEFAULT_SORT_ORDER;
+            }
+            String col = tokens[0].toLowerCase(Locale.US);
+            boolean okCol = false;
+            for (String c : SORT_COLUMNS) {
+                if (c.equals(col)) {
+                    okCol = true;
+                    break;
+                }
+            }
+            if (!okCol) {
+                return DEFAULT_SORT_ORDER;
+            }
+            String dir = "asc";
+            if (tokens.length == 2) {
+                if ("asc".equalsIgnoreCase(tokens[1])) {
+                    dir = "asc";
+                } else if ("desc".equalsIgnoreCase(tokens[1])) {
+                    dir = "desc";
+                } else {
+                    return DEFAULT_SORT_ORDER;
+                }
+            }
+            if (out.length() > 0) {
+                out.append(", ");
+            }
+            out.append(col).append(' ').append(dir);
+        }
+        return out.length() == 0 ? DEFAULT_SORT_ORDER : out.toString();
+    }
+
+    /** projection 只留已知列；null 表示全部列（本表只有这 4 列），原样放行。 */
+    private static String[] sanitizeProjection(String[] projection) {
+        if (projection == null) {
+            return null;
+        }
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (String col : projection) {
+            if (col == null) {
+                continue;
+            }
+            String c = col.trim();
+            if (Columns._ID.equals(c) || Columns.TYPE.equals(c)
+                    || Columns.SUGGESTION.equals(c) || Columns.DATE.equals(c)) {
+                out.add(c);
+            }
+        }
+        return out.toArray(new String[0]);
+    }
 
     private static final UriMatcher
             sURIMatcher = new UriMatcher(UriMatcher.NO_MATCH);
@@ -63,13 +142,18 @@ public class SuggestionsProvider extends ContentProvider {
             case MATCH_ALL:
                 break;
             default:
-                Log.e(TAG, "query: invalid request: " + uri);
+                // S-L1：URI 去 query 再记（与 URL 日志同款处理）。
+                Log.e(TAG, "query: invalid request: "
+                        + Gh4Application.redactUrlForLog(uri.toString()));
                 return null;
         }
 
-        if (sortOrder == null) {
-            sortOrder = Columns.DATE + " desc";
+        if (!isAllowedSelection(selection)) {
+            Log.e(TAG, "query: invalid selection");
+            return null;
         }
+        sortOrder = sanitizeSortOrder(sortOrder);
+        projection = sanitizeProjection(projection);
 
         SQLiteDatabase db = mDbHelper.getReadableDatabase();
         Cursor ret = qb.query(db, projection, selection, selectionArgs, null, null, sortOrder);
@@ -109,6 +193,11 @@ public class SuggestionsProvider extends ContentProvider {
 
         switch (match) {
             case MATCH_ALL:
+                // S-L4：与 query() 同款 selection 白名单。
+                if (!isAllowedSelection(selection)) {
+                    Log.e(TAG, "update: invalid selection");
+                    return 0;
+                }
                 count = db.update(DbHelper.SUGGESTIONS_TABLE, values, selection, selectionArgs);
                 break;
             default:
@@ -132,6 +221,12 @@ public class SuggestionsProvider extends ContentProvider {
                 break;
             default:
                 throw new UnsupportedOperationException("Cannot delete the URI " + uri);
+        }
+
+        // S-L4：与 query() 同款 selection 白名单。
+        if (!isAllowedSelection(selection)) {
+            Log.e(TAG, "delete: invalid selection");
+            return 0;
         }
 
         int count = db.delete(DbHelper.SUGGESTIONS_TABLE, selection, selectionArgs);

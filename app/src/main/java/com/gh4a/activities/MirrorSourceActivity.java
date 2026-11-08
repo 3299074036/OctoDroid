@@ -67,8 +67,6 @@ public class MirrorSourceActivity extends BaseActivity {
     private View mBatchBar;
     private TextView mBatchCount;
     private Button mBatchDeleteBtn;
-    /** 删正在用的镜像时：跳过 refreshAndRetest 的回退逻辑，执行稿子定的规则。 */
-    private boolean mKeepCurrentOnRefresh;
 
     @Override
     protected String getActionBarTitle() {
@@ -97,7 +95,11 @@ public class MirrorSourceActivity extends BaseActivity {
         mStatsTimeout = findViewById(R.id.stats_timeout);
         mStatsUpdated = findViewById(R.id.stats_updated);
         mAutoSwitch = findViewById(R.id.auto_switch);
-        mAutoSwitch.setChecked(true);
+        // 恢复上次的自动选择开关（默认开）；手动选过则恢复为关，mUserPicked 同步恢复。
+        boolean autoSelect = mPrefs.getBoolean(
+                SettingsFragment.KEY_MIRROR_AUTO_SELECT, true);
+        mUserPicked = !autoSelect;
+        mAutoSwitch.setChecked(autoSelect);
         mAutoSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (mIgnoreSwitchEvent) {
                 return;
@@ -235,11 +237,16 @@ public class MirrorSourceActivity extends BaseActivity {
         mPrefs.edit().putString(SettingsFragment.KEY_MIRROR_PRESET, mCurrentValue).apply();
     }
 
+    private void storeAutoSelect(boolean auto) {
+        mPrefs.edit().putBoolean(SettingsFragment.KEY_MIRROR_AUTO_SELECT, auto).apply();
+    }
+
     /** 点行选用：测速结果仅供参考，随时可点，不用等测完；选完留在页内，同时关掉自动选择。 */
     private void pick(MirrorHelper.MirrorSpeedResult r) {
         mUserPicked = true;
         mCurrentValue = r.url;
         storeCurrent();
+        storeAutoSelect(false);
         Toast.makeText(this, getString(R.string.mirror_speed_selected, r.name),
                 Toast.LENGTH_SHORT).show();
         setAutoSwitchChecked(false);
@@ -251,6 +258,7 @@ public class MirrorSourceActivity extends BaseActivity {
     /** 自动选择开关：打开时重选延迟最低的；关闭等于手动选择。 */
     private void setAuto(boolean on) {
         mUserPicked = !on;
+        storeAutoSelect(on);
         if (on) {
             String fastest = fastestOkUrl(null);
             if (fastest != null) {
@@ -297,8 +305,11 @@ public class MirrorSourceActivity extends BaseActivity {
             sortByLatency(mItems);
         }
         // 当前选中的地址若已被删掉：优先回退默认地址，否则取第一个，否则置空。
-        // 删正在用的镜像时走稿子规则（mKeepCurrentOnRefresh），不走这里。
-        if (!mKeepCurrentOnRefresh && !containsUrl(mCurrentValue)) {
+        // 0.2.2：当前为空（手动清空）时不自动回填——空就是用户的选择，
+        // 之后再增删改也不应把它填回来；旧的一次性 mKeepCurrentOnRefresh
+        // 标志因此不再需要（删正在用的镜像时 deleteUrls 已按稿子规则定好
+        // 新当前值，这里只处理“非空但不在列表里”的过期值）。
+        if (!mCurrentValue.isEmpty() && !containsUrl(mCurrentValue)) {
             mCurrentValue = "";
             for (MirrorHelper.MirrorSpeedResult r : mItems) {
                 if (r.url.equalsIgnoreCase(MirrorHelper.DEFAULT_PRESET)) {
@@ -311,7 +322,6 @@ public class MirrorSourceActivity extends BaseActivity {
             }
             storeCurrent();
         }
-        mKeepCurrentOnRefresh = false;
         updateCurrentLine();
         mAdapter.notifyDataSetChanged();
         updateStatsBar();
@@ -556,12 +566,11 @@ public class MirrorSourceActivity extends BaseActivity {
         collapseAddCard();
     }
 
-    /** 删除行：弹确认框（按地址删，确认框弹出期间列表重排也不怕删错）。 */
-    private void deleteAt(int position) {
+    /** 删除行：弹确认框（按地址删，绑定后列表重排也不怕删错）。 */
+    private void deleteByUrl(String url) {
         if (isAddCardOpen()) {
             return;
         }
-        final String url = mItems.get(position).url;
         new AlertDialog.Builder(this)
                 .setMessage(R.string.mirror_delete_confirm)
                 .setPositiveButton(android.R.string.ok, (d, which) -> {
@@ -597,7 +606,6 @@ public class MirrorSourceActivity extends BaseActivity {
         }
         Toast.makeText(this, R.string.mirror_deleted, Toast.LENGTH_SHORT).show();
         if (removedCurrent) {
-            mKeepCurrentOnRefresh = true;
             mCurrentValue = newCurrent != null ? newCurrent : "";
             storeCurrent();
         }
@@ -747,7 +755,7 @@ public class MirrorSourceActivity extends BaseActivity {
             }
             bindBadge(v, r);
             edit.setOnClickListener(eb -> startEditing(r.url));
-            delete.setOnClickListener(db -> deleteAt(position));
+            delete.setOnClickListener(db -> deleteByUrl(r.url));
         }
 
         /** 绑定/刷新延迟徽章（颜色随延迟区间变化）。 */

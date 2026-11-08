@@ -3,6 +3,7 @@ package com.gh4a.resolver;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -48,8 +49,15 @@ public class BrowseFilter extends AppCompatActivity {
         if ((flags & (Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT)) != 0) {
             flags |= Intent.FLAG_ACTIVITY_MULTIPLE_TASK;
         }
-        IntentUtils.InitialCommentMarker initialComment =
-                getIntent().getParcelableExtra(EXTRA_INITIAL_COMMENT);
+        // S-L6：API 33+ 用带 Class 参数的 typed API 取 Parcelable，避免
+        // 反序列化时的类混淆；低版本走旧 API（minSdk 23）。
+        IntentUtils.InitialCommentMarker initialComment;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            initialComment = getIntent().getParcelableExtra(
+                    EXTRA_INITIAL_COMMENT, IntentUtils.InitialCommentMarker.class);
+        } else {
+            initialComment = getIntent().getParcelableExtra(EXTRA_INITIAL_COMMENT);
+        }
 
         LinkParser.ParseResult result = LinkParser.parseUri(this, uri, initialComment);
         if (result == null) {

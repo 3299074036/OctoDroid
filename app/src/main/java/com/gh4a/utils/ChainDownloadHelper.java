@@ -24,9 +24,11 @@ import java.util.List;
  * 不再各写一份 BroadcastReceiver 重试。
  */
 public class ChainDownloadHelper {
-    /** 下载完成回调：success=false 表示全部链路都失败，file 为 null。 */
+    /** 下载完成回调：success=false 表示全部链路都失败，file 为 null。
+     * downloadId 用于把完成后的文件信息（大小／哈希）补进下载记录。 */
     public interface Callback {
-        void onDownloadComplete(Context context, boolean success, File file);
+        void onDownloadComplete(Context context, boolean success, File file,
+                long downloadId);
     }
 
     /** 每条链路拼装 Request 时的定制点（标题、mime、请求头等），可为 null。 */
@@ -56,7 +58,11 @@ public class ChainDownloadHelper {
         // 文件名来自网络：先 sanitize，防止路径穿越写到 Downloads 之外 (L-2)
         final String safeName = FileUtils.sanitizeFileName(fileName);
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
+                // 0.2.2（S-M5）：下载落到应用私有目录（Android/data/<包>/files/Download），
+                // 不再进公共 Downloads/（其他应用可读）；打开时走 FileProvider。
+                // 私有目录不需要 WRITE_EXTERNAL_STORAGE，任何 API 级别都不用申请。
+                .setDestinationInExternalFilesDir(context,
+                        Environment.DIRECTORY_DOWNLOADS, safeName)
                 .setNotificationVisibility(
                         DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setAllowedOverRoaming(false);
@@ -111,12 +117,12 @@ public class ChainDownloadHelper {
             }
         }
         if (file != null) {
-            callback.onDownloadComplete(context, true, file);
+            callback.onDownloadComplete(context, true, file, downloadId);
         } else if (!rest.isEmpty()) {
             Toast.makeText(context, R.string.download_retry_alt, Toast.LENGTH_SHORT).show();
             enqueueNext(context, rest, fileName, description, customizer, callback);
         } else {
-            callback.onDownloadComplete(context, false, null);
+            callback.onDownloadComplete(context, false, null, downloadId);
         }
     }
 }

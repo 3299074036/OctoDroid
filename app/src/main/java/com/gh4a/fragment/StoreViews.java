@@ -7,7 +7,6 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
-import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -418,100 +417,6 @@ public class StoreViews {
             case "zip":
             default:
                 return R.string.store_guide_zip;
-        }
-    }
-
-    /** 自动换行的容器（排序 chips 行用）。 */
-    public static class FlowLayout extends ViewGroup {
-        public FlowLayout(Context context) {
-            super(context);
-        }
-
-        public static class LayoutParams extends MarginLayoutParams {
-            public LayoutParams(int width, int height) {
-                super(width, height);
-            }
-        }
-
-        @Override
-        protected ViewGroup.LayoutParams generateDefaultLayoutParams() {
-            return new LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        }
-
-        @Override
-        public ViewGroup.LayoutParams generateLayoutParams(AttributeSet attrs) {
-            return new MarginLayoutParams(getContext(), attrs);
-        }
-
-        @Override
-        protected ViewGroup.LayoutParams generateLayoutParams(ViewGroup.LayoutParams p) {
-            return new MarginLayoutParams(p);
-        }
-
-        @Override
-        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            int width = MeasureSpec.getSize(widthMeasureSpec);
-            int paddingH = getPaddingLeft() + getPaddingRight();
-            int paddingV = getPaddingTop() + getPaddingBottom();
-            int lineWidth = 0;
-            int lineHeight = 0;
-            int totalHeight = paddingV;
-            int maxLineWidth = 0;
-            for (int i = 0; i < getChildCount(); i++) {
-                View child = getChildAt(i);
-                if (child.getVisibility() == GONE) {
-                    continue;
-                }
-                MarginLayoutParams lp = (MarginLayoutParams) child.getLayoutParams();
-                int childWidthSpec = getChildMeasureSpec(widthMeasureSpec,
-                        paddingH + lp.leftMargin + lp.rightMargin, lp.width);
-                int childHeightSpec = getChildMeasureSpec(heightMeasureSpec,
-                        paddingV + lp.topMargin + lp.bottomMargin, lp.height);
-                child.measure(childWidthSpec, childHeightSpec);
-                int childWidth = child.getMeasuredWidth() + lp.leftMargin + lp.rightMargin;
-                int childHeight = child.getMeasuredHeight() + lp.topMargin + lp.bottomMargin;
-                if (lineWidth > 0 && lineWidth + childWidth > width - paddingH) {
-                    totalHeight += lineHeight;
-                    maxLineWidth = Math.max(maxLineWidth, lineWidth);
-                    lineWidth = 0;
-                    lineHeight = 0;
-                }
-                lineWidth += childWidth;
-                lineHeight = Math.max(lineHeight, childHeight);
-            }
-            totalHeight += lineHeight;
-            maxLineWidth = Math.max(maxLineWidth, lineWidth);
-            setMeasuredDimension(
-                    resolveSize(maxLineWidth + paddingH, widthMeasureSpec),
-                    resolveSize(totalHeight, heightMeasureSpec));
-        }
-
-        @Override
-        protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-            int width = right - left;
-            int x = getPaddingLeft();
-            int y = getPaddingTop();
-            int lineHeight = 0;
-            for (int i = 0; i < getChildCount(); i++) {
-                View child = getChildAt(i);
-                if (child.getVisibility() == GONE) {
-                    continue;
-                }
-                MarginLayoutParams lp = (MarginLayoutParams) child.getLayoutParams();
-                int childWidth = child.getMeasuredWidth() + lp.leftMargin + lp.rightMargin;
-                int childHeight = child.getMeasuredHeight() + lp.topMargin + lp.bottomMargin;
-                if (x > getPaddingLeft() && x + childWidth > width - getPaddingRight()) {
-                    x = getPaddingLeft();
-                    y += lineHeight;
-                    lineHeight = 0;
-                }
-                child.layout(x + lp.leftMargin, y + lp.topMargin,
-                        x + lp.leftMargin + child.getMeasuredWidth(),
-                        y + lp.topMargin + child.getMeasuredHeight());
-                x += childWidth;
-                lineHeight = Math.max(lineHeight, childHeight);
-            }
         }
     }
 }

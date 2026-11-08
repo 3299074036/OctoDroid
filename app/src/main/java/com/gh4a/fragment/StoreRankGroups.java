@@ -31,7 +31,7 @@ public final class StoreRankGroups {
     private StoreRankGroups() {
     }
 
-    /** 一个细分榜单：名＋按最热门分排好的成员（客户端现算）。 */
+    /** 一个细分榜单：名＋按星标排好的成员。 */
     public static final class RankList {
         public final String name;
         public final List<StoreRepo> items = new ArrayList<>();
@@ -305,7 +305,9 @@ public final class StoreRankGroups {
             { "music-player", "1:1" },
             { "audio-player", "1:1" },
             { "music-streaming", "1:6" },
-            { "video+player", "1:0" },
+            // 0.2.2：删 "video+player"——matchRules 要求每个 + 分段都是精确
+            // topic 或 fullName 子串，topic "video-player" 含连字符、拆不开，
+            // 这条永远命中不了；单关键词 "video-player" 已覆盖。
             { "video-player", "1:0" },
             { "movie", "1:2" },
             { "anime", "1:2" },

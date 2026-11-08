@@ -11,7 +11,9 @@ import android.preference.PreferenceManager;
 import android.provider.MediaStore;
 import android.util.Log;
 
+import com.gh4a.Gh4Application;
 import com.gh4a.fragment.SettingsFragment;
+import com.gh4a.utils.translate.TranslationManager;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -40,7 +42,7 @@ import java.util.Set;
  * from the default shared preferences.
  * Never backed up: account logins/tokens. Those stay on the device and
  * must be re-entered after a restore.
- * 注意：备份文件是明文 JSON，含翻译 API 凭据，请妥善保管备份文件。
+ * 注意：备份文件是明文 JSON（翻译 API 凭据以密文形式存放），请妥善保管备份文件。
  *
  * <p>备份政策总纲（R-6，两套备份机制共用）：
  * <ul>
@@ -199,9 +201,26 @@ public class SettingsBackupManager {
         // backup could otherwise point translated issue/comment text at an
         // attacker-controlled endpoint. Provider, keys/secrets and region
         // still restore (export itself is untouched, SEC-2 excluded).
-        return key.startsWith("translation_api_key")
-                || key.startsWith("translation_api_secret")
+        return isTranslationCredentialKey(key)
                 || key.startsWith("translation_region");
+    }
+
+    /** 翻译凭据键（key/secret，按 provider 隔离）。 */
+    private static boolean isTranslationCredentialKey(String key) {
+        return key.startsWith("translation_api_key")
+                || key.startsWith("translation_api_secret");
+    }
+
+    /** 凭据密文写入备份 JSON（值本身就是密文，不解密；空表示未配置）。 */
+    private static void putCredentialCiphertext(JSONObject translation, String key,
+            String ciphertext) throws JSONException {
+        if (ciphertext == null || ciphertext.isEmpty()) {
+            return;
+        }
+        JSONObject single = new JSONObject();
+        single.put("t", "s");
+        single.put("v", ciphertext);
+        translation.put(key, single);
     }
 
     private static void jsonToPrefs(JSONObject json, SharedPreferences prefs,
@@ -262,16 +281,29 @@ public class SettingsBackupManager {
         // Translation provider settings live in the default shared
         // preferences; all translation_* keys are exported, including
         // API keys/secrets/endpoints (用户要求手动备份携带翻译凭据)。
+        // S-H2：凭据先迁进加密存储（若还有明文残留），再以密文形式导出；
+        // 默认 prefs 里的凭据键一律不直接导出，防止明文落盘。
+        TranslationManager.migrateCredentialsFromDefaultPrefs(context);
         SharedPreferences def = PreferenceManager.getDefaultSharedPreferences(context);
         JSONObject translation = new JSONObject();
         for (Map.Entry<String, ?> entry : def.getAll().entrySet()) {
             String key = entry.getKey();
-            if (key.startsWith("translation_")) {
+            if (key.startsWith("translation_") && !isTranslationCredentialKey(key)) {
                 JSONObject single = new JSONObject();
                 if (putTypedValue(single, entry.getValue())) {
                     translation.put(key, single);
                 }
             }
+        }
+        // 凭据以密文形式导出（存的值本身就是密文，不解密）。
+        for (String provider : new String[]{TranslationManager.PROVIDER_YOUDAO,
+                TranslationManager.PROVIDER_BAIDU, TranslationManager.PROVIDER_DEEPL}) {
+            putCredentialCiphertext(translation,
+                    TranslationManager.apiKeyPrefKey(provider),
+                    TranslationManager.getStoredApiKeyCiphertext(context, provider));
+            putCredentialCiphertext(translation,
+                    TranslationManager.apiSecretPrefKey(provider),
+                    TranslationManager.getStoredApiSecretCiphertext(context, provider));
         }
         prefs.put("default", translation);
 
@@ -337,8 +369,8 @@ public class SettingsBackupManager {
     }
 
     /**
-     * 备份中是否包含翻译 API 凭据（明文）。备份前调用，有则弹窗告知用户
-     * 备份文件含敏感信息、请妥善保管 (#4)。
+     * 备份中是否包含翻译 API 凭据（现为密文，仍属敏感信息）。备份前调用，
+     * 有则弹窗告知用户备份文件含敏感信息、请妥善保管 (#4)。
      */
     public static boolean backupContainsTranslationCredentials(JSONObject backup) {
         JSONObject translation = backup.optJSONObject("prefs");
@@ -390,10 +422,29 @@ public class SettingsBackupManager {
                 // 翻译区只接受白名单内的 translation_ 键（含 API key/secret，
                 // 用户要求手动备份携带翻译凭据；translation_url_* 已移出白名单，
                 // 见 SEC-9）；未知形状的键拒绝，防止恶意备份
-                // 注入翻译 endpoint 劫持翻译流量 (N-4)
-                jsonToPrefs(prefs.getJSONObject("default"),
+                // 注入翻译 endpoint 劫持翻译流量 (N-4)。
+                // S-H2：凭据键写进加密存储（值本身是密文，不解密），
+                // 其他翻译键写默认 prefs；旧版备份的明文凭据照常写入
+                // 加密存储，读取时就地加密迁移。
+                JSONObject defJson = prefs.getJSONObject("default");
+                JSONObject credJson = new JSONObject();
+                JSONObject plainJson = new JSONObject();
+                JSONArray defNames = defJson.names();
+                if (defNames != null) {
+                    for (int i = 0; i < defNames.length(); i++) {
+                        String key = defNames.getString(i);
+                        if (isTranslationCredentialKey(key)) {
+                            credJson.put(key, defJson.getJSONObject(key));
+                        } else {
+                            plainJson.put(key, defJson.getJSONObject(key));
+                        }
+                    }
+                }
+                jsonToPrefs(plainJson,
                         PreferenceManager.getDefaultSharedPreferences(context),
                         SettingsBackupManager::isTranslationKeyAllowed);
+                jsonToPrefs(credJson, Gh4Application.securePrefs(context),
+                        SettingsBackupManager::isTranslationCredentialKey);
             }
             return true;
         } catch (JSONException e) {

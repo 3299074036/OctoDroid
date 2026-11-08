@@ -102,11 +102,9 @@ public class LinkParserTest {
     }
 
     @Test
-    public void gistsLink__opensHomeActivity_onGistsSection() {
-        LinkParser.ParseResult result = parseLink("https://github.com/gists");
-        assertRedirectsTo(result, HomeActivity.class);
-        Bundle extras = result.intent.getExtras();
-        assertThat("Redirected to wrong HomeActivity section", extras.getString("initial_page"), is("gists"));
+    public void gistsLink__opensBrowser() {
+        // 0.2.2：0.5.0 已下架“我的 Gist”，gists 链接走浏览器打开（与 blog 同例）。
+        assertRedirectsToBrowser(parseLink("https://github.com/gists"));
     }
 
     @Test

@@ -199,8 +199,15 @@ public class HtmlUtils {
         return rewriteUrlsInAttribute("src", rewrittenHtml, baseUrlForImages);
     }
 
+    // S-L6：属性重写正则预编译为静态常量（之前每次调用都 Pattern.compile）。
+    private static final java.util.regex.Pattern HREF_ATTR_PATTERN =
+            java.util.regex.Pattern.compile("(href)=\"(\\S+)\"");
+    private static final java.util.regex.Pattern SRC_ATTR_PATTERN =
+            java.util.regex.Pattern.compile("(src)=\"(\\S+)\"");
+
     private static String rewriteUrlsInAttribute(String attribute, String html, String baseUrl) {
-        final Matcher matcher = Pattern.compile("(" + attribute + ")=\"(\\S+)\"").matcher(html);
+        final Matcher matcher = ("href".equals(attribute) ? HREF_ATTR_PATTERN : SRC_ATTR_PATTERN)
+                .matcher(html);
         StringBuffer sb = null; // lazy initialized only if there's any match
         while (matcher.find()) {
             String url = matcher.group(2);

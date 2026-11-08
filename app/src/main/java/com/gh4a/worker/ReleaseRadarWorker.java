@@ -6,10 +6,8 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.os.Build;
 import android.util.Log;
-import android.Manifest;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
@@ -145,6 +143,11 @@ public class ReleaseRadarWorker extends Worker {
         }
 
         NotificationManagerCompat nm = NotificationManagerCompat.from(context);
+        // 0.2.2：无通知权限时跳过两条通知（不抛 SecurityException）。
+        if (!NotificationPermission.canPostNotifications(context)) {
+            Log.d(TAG, "Skipping release notifications: POST_NOTIFICATIONS not granted");
+            return Result.success();
+        }
         for (ReleaseRadarFragment.RadarItem item : newReleases) {
             nm.notify(itemKey(item).hashCode(), buildRepoNotification(context, item));
         }
@@ -170,10 +173,7 @@ public class ReleaseRadarWorker extends Worker {
 
     private void notifyAuthFailed(Context context) {
         // 无通知权限时不打扰（同时避免 MissingPermission lint error）
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                && ContextCompat.checkSelfPermission(context,
-                        Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
+        if (!NotificationPermission.canPostNotifications(context)) {
             return;
         }
         PendingIntent contentIntent = PendingIntent.getActivity(context, 0,

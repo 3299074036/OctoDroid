@@ -227,12 +227,15 @@ public class MarkdownPreviewWebView extends WebView implements NestedScrollingCh
         content.append("converter.setFlavor('github');\n");
         content.append("var html = converter.makeHtml(text);\n");
         // SEC-13: same sanitizer as WebViewerActivity — user-typed markdown
-        // in the editor preview reaches innerHTML too.
+        // in the editor preview reaches innerHTML too. S-L2 补：同款
+        // math/mtext/mglyph/annotation-xml/foreignobject 与
+        // data:text//data:image/svg 拦截。
         content.append("function sanitizeHtml(html) {"
                 + "var tpl = document.createElement('template');"
                 + "tpl.innerHTML = html;"
                 + "var bad = ['script','style','iframe','object','embed','form',"
-                + "'base','link','meta','title'];"
+                + "'base','link','meta','title','math','mtext','mglyph',"
+                + "'annotation-xml','foreignobject'];"
                 + "var els = tpl.content.querySelectorAll('*');"
                 + "for (var i = 0; i < els.length; i++) {"
                 + "var el = els[i];"
@@ -244,7 +247,7 @@ public class MarkdownPreviewWebView extends WebView implements NestedScrollingCh
                 + "var n = attrs[j].name.toLowerCase();"
                 + "var v = (attrs[j].value || '').replace(/[\\s\\u0000-\\u0020]+/g, '').toLowerCase();"
                 + "if (n.indexOf('on') === 0 || v.indexOf('javascript:') === 0"
-                + "|| v.indexOf('vbscript:') === 0 || v.indexOf('data:text/html') === 0) {"
+                + "|| v.indexOf('vbscript:') === 0 || v.indexOf('data:text/') === 0 || v.indexOf('data:image/svg') === 0) {"
                 + "el.removeAttribute(attrs[j].name); } } }"
                 + "return tpl.innerHTML; }\n");
         content.append("document.getElementById('content').innerHTML = sanitizeHtml(html);");

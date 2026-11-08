@@ -81,6 +81,8 @@
     <string name="downloading_update">Downloading update…</string>
     <string name="allow_install_unknown_apps">Please allow installing unknown apps, then retry</string>
     <string name="apk_signature_mismatch">Update package signature does not match the installed app, installation blocked</string>
+    <string name="apk_download_signature_mismatch">Downloaded APK signature does not match the installed app with the same package name; the file was deleted</string>
+    <string name="apk_signature_unverified">This APK is for an app that is not installed, so the publisher signature could not be verified; install with caution</string>
     <string name="reply">Reply</string>
     <string name="reply_selected">Reply (Selected)</string>
     <string name="add_comment">Add comment</string>
@@ -672,8 +674,8 @@
     <string name="check_pending_description">Waiting for run</string>
     <string name="check_running_description">Running</string>
     <string name="check_runtime_description">Finished after %1$s</string>
-    <string name="check_runtime_format_seconds">%3$d s</string>
-    <string name="check_runtime_format_minutes">%2$d min %3$d s</string>
+    <string name="check_runtime_format_seconds">%1$d s</string>
+    <string name="check_runtime_format_minutes">%1$d min %2$d s</string>
     <string name="check_runtime_format_hours">%1$d h %2$d min</string>
 
     <plurals name="checks_summary">
@@ -796,6 +798,7 @@
         <item quantity="other">After this list is disbanded, its %1$d repositories will stay starred and move to \u201cUngrouped\u201d.</item>
     </plurals>
     <string name="star_list_ungrouped">Ungrouped</string>
+    <string name="star_list_ungrouped_partial">Only showing the %1$d loaded items</string>
     <string name="star_list_add_group">+ New list</string>
     <!-- 0.1.64：PluralsCandidate 误报——“selected/moved/failed”是分词，无单复数变化。 -->
     <string name="star_list_selected" tools:ignore="PluralsCandidate">%1$d selected</string>
@@ -1050,9 +1053,6 @@
     <string name="store_all_loaded">No more items</string>
     <string name="store_action_share">Share</string>
     <string name="store_action_open_github">Open on GitHub</string>
-    <string name="store_action_mark_seen">Mark as seen</string>
-    <string name="store_action_unmark_seen">Mark as unseen</string>
-    <string name="store_action_hide">Hide</string>
     <string name="store_sort_stars">Stars</string>
     <string name="store_sort_updated">Recently updated</string>
     <string name="store_sort_downloads">Downloads</string>

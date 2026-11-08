@@ -4,7 +4,6 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.TextUtils;
 import android.widget.Toast;
 
 import androidx.preference.EditTextPreference;
@@ -37,6 +36,32 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
         mKeyPref = findPreference(TranslationManager.KEY_API_KEY);
         // password field with eye toggle (PasswordEditTextPreference)
         mSecretPref = findPreference(TranslationManager.KEY_API_SECRET);
+        // S-H2：凭据不走 Preference 框架的默认 prefs 明文持久化。
+        // 输入框只负责显示（解密后的值）与收集输入，保存时由下面的
+        // listener 加密后写进加密存储；setPersistent(false) 保证框架
+        // 本身绝不把明文写进默认 prefs。
+        if (mKeyPref != null) {
+            mKeyPref.setPersistent(false);
+            mKeyPref.setOnPreferenceChangeListener((preference, newValue) -> {
+                if (getContext() == null) {
+                    return false;
+                }
+                TranslationManager.setApiKey(getContext(), currentProvider(),
+                        newValue == null ? "" : String.valueOf(newValue));
+                return true;
+            });
+        }
+        if (mSecretPref != null) {
+            mSecretPref.setPersistent(false);
+            mSecretPref.setOnPreferenceChangeListener((preference, newValue) -> {
+                if (getContext() == null) {
+                    return false;
+                }
+                TranslationManager.setApiSecret(getContext(), currentProvider(),
+                        newValue == null ? "" : String.valueOf(newValue));
+                return true;
+            });
+        }
         Preference testPref = findPreference("translation_test");
         if (testPref != null) {
             testPref.setOnPreferenceClickListener(p -> {
@@ -63,22 +88,23 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
     }
 
     /**
-     * One-time migration: old versions stored all providers' credentials
-     * under the same shared keys. Move them to the current provider's
-     * isolated keys so nothing the user typed is lost.
+     * One-time migration: old versions stored credentials in the default
+     * prefs as plaintext. Move them into the encrypted store (S-H2);
+     * TranslationManager's migration is idempotent, so this is safe to
+     * run on every open (a user upgrading from a version that already
+     * set the old flag still gets migrated).
      */
     private void migrateCredentials() {
-        SharedPreferences prefs = getPreferenceManager().getSharedPreferences();
-        if (isMigrationDone(prefs)) {
+        if (getContext() == null) {
             return;
         }
-        String provider = getStringSafe(prefs, TranslationManager.KEY_PROVIDER,
+        TranslationManager.migrateCredentialsFromDefaultPrefs(getContext());
+    }
+
+    private String currentProvider() {
+        SharedPreferences prefs = getPreferenceManager().getSharedPreferences();
+        return getStringSafe(prefs, TranslationManager.KEY_PROVIDER,
                 TranslationManager.PROVIDER_GOOGLE);
-        copyIfPresent(prefs, TranslationManager.KEY_API_KEY,
-                TranslationManager.apiKeyPrefKey(provider));
-        copyIfPresent(prefs, TranslationManager.KEY_API_SECRET,
-                TranslationManager.apiSecretPrefKey(provider));
-        prefs.edit().putBoolean("translation_cred_migrated_v1", true).apply();
     }
 
     /**
@@ -91,32 +117,6 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
             return v instanceof String ? (String) v : defValue;
         } catch (Exception e) {
             return defValue;
-        }
-    }
-
-    /**
-     * 备份恢复可能把 boolean 存成 String（0.0.32 的 bug），这里兼容读取并顺手修复类型；
-     * 其他错乱类型一律视为未迁移并修复为 boolean，直接 getBoolean 会闪退。
-     */
-    private static boolean isMigrationDone(SharedPreferences prefs) {
-        Object v;
-        try {
-            v = prefs.getAll().get("translation_cred_migrated_v1");
-        } catch (Exception e) {
-            return false;
-        }
-        if (v instanceof Boolean) {
-            return (Boolean) v;
-        }
-        boolean done = v instanceof String && Boolean.parseBoolean((String) v);
-        prefs.edit().putBoolean("translation_cred_migrated_v1", done).apply();
-        return done;
-    }
-
-    private static void copyIfPresent(SharedPreferences prefs, String from, String to) {
-        String value = getStringSafe(prefs, from, "");
-        if (!TextUtils.isEmpty(value) && TextUtils.isEmpty(getStringSafe(prefs, to, ""))) {
-            prefs.edit().putString(to, value).apply();
         }
     }
 
@@ -206,7 +206,9 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
             // rebind to this provider's isolated storage
             String key = TranslationManager.apiKeyPrefKey(provider);
             mKeyPref.setKey(key);
-            mKeyPref.setText(getStringSafe(prefs, key, ""));
+            // S-H2：显示解密后的值；框架不持久化（setPersistent(false)）。
+            mKeyPref.setText(getContext() == null ? ""
+                    : TranslationManager.getApiKey(getContext(), provider));
             mKeyPref.setVisible(!isGoogle);
             int titleRes;
             int summaryRes;
@@ -230,7 +232,9 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
         if (mSecretPref != null) {
             String key = TranslationManager.apiSecretPrefKey(provider);
             mSecretPref.setKey(key);
-            mSecretPref.setText(getStringSafe(prefs, key, ""));
+            // S-H2：显示解密后的值；框架不持久化（setPersistent(false)）。
+            mSecretPref.setText(getContext() == null ? ""
+                    : TranslationManager.getApiSecret(getContext(), provider));
             mSecretPref.setVisible(isYoudao || isBaidu);
             int titleRes;
             int summaryRes;

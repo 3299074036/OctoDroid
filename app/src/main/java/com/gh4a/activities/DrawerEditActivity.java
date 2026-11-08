@@ -99,6 +99,8 @@ public class DrawerEditActivity extends BaseActivity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
+        // B-L11：调 super，带上 BaseActivity 的可选 detach 项（默认关闭，无可见变化）。
+        super.onCreateOptionsMenu(menu);
         getMenuInflater().inflate(R.menu.drawer_edit_menu, menu);
         return true;
     }

@@ -73,7 +73,6 @@ public class StoreView extends LinearLayout {
     private static final int SORT_DOWNLOADS = 2;
     private static final int SORT_HOT = 3;
 
-    private static final long RECENT_WINDOW_MS = 7L * 24 * 60 * 60 * 1000;
     private static final int HOME_HOT_COUNT = 9;
     private static final int HOME_RECENT_COUNT = 6;
 
@@ -121,7 +120,7 @@ public class StoreView extends LinearLayout {
     private final LinearLayout[] mTabListContainers = new LinearLayout[TAB_COUNT];
 
     // 0.1.59：feed 级计数缓存——平台／用途数量与统计行在 feed 加载完
-    // 算一次，渲染时直接取；feed 重载／隐藏改 pool 时失效重算。
+    // 算一次，渲染时直接取；feed 重载时失效重算。
     private int[] mPlatformCounts;
     private int[] mCategoryCounts;
     private int mStatsAssets;
@@ -144,6 +143,9 @@ public class StoreView extends LinearLayout {
     private LinearLayout mNewestContainer;
     private boolean mShowingNewest;
     private StoreApi.StoreData mNewestData;
+    // 0.2.2：首页统计块里“最新入库”的数字 TextView（renderHomeHeader 时记下；
+    // 最新入库数据到了只改这一格的数字，不重建整个首页头，避免滚动时抖动）。
+    private TextView mNewestCountView;
     private boolean mNewestLoading;
     private boolean mNewestFailed;
 
@@ -162,6 +164,14 @@ public class StoreView extends LinearLayout {
     private int mRankGroup = -1;
     private int mRankList = -1;
 
+    // 0.2.2：完整榜单分页（与探索页同款 20 条/页）：当前已展示条数、
+    // 当前榜单总条数（滑到底监听直接读，避免每次滚动都重算分组），
+    // 以及当前展示的组/榜下标（换榜时自动回到第 1 页）。
+    private int mRankShown = PAGE_SIZE;
+    private int mRankFullTotal;
+    private int mRankShownGroup = -1;
+    private int mRankShownList = -1;
+
     // 排行榜“只看有收录的榜单”复选框（StorePrefs 持久化，默认不勾选）。
     private boolean mRankOnlyNonEmpty;
 
@@ -175,6 +185,8 @@ public class StoreView extends LinearLayout {
         mRankOnlyNonEmpty = StorePrefs.getRankOnlyNonEmpty(context);
         mRankPlatform = StorePrefs.getRankPlatform(context);
         mNewestPlatform = StorePrefs.getNewestPlatform(context);
+        mPlatform = StorePrefs.getPlatform(context);
+        mCategory = StorePrefs.getCategory(context);
         setOrientation(VERTICAL);
         setBackgroundColor(StoreViews.backgroundColor(context));
 
@@ -228,7 +240,28 @@ public class StoreView extends LinearLayout {
             }
             if (!mTabScrolls[TAB_EXPLORE].canScrollVertically(1)) {
                 mExploreShown += PAGE_SIZE;
-                renderExplore();
+                // 0.2.2：追加只重建列表区，不重建静态头（之前调 renderExplore()
+                // 连标题＋排序 chips＋筛选网格一起重建，滚动时会抖）。
+                renderExploreList();
+            }
+        });
+        // 0.2.2：完整榜单滑到底自动加载下一页（与探索页同款 20 条/页）。
+        // 只在完整榜单页追加，概览页不动；mRankShown 严格递增且以当前榜单
+        // 总数为界，不会循环。
+        mTabScrolls[TAB_RANK].setOnScrollChangeListener(
+                (v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            if (scrollY <= oldScrollY || mFeedData == null) {
+                return;
+            }
+            if (mRankGroup < 0 || mRankList < 0) {
+                return;
+            }
+            if (mRankShown >= mRankFullTotal) {
+                return;
+            }
+            if (!mTabScrolls[TAB_RANK].canScrollVertically(1)) {
+                mRankShown += PAGE_SIZE;
+                renderRank();
             }
         });
         // 0.1.66：最新入库子屏（独立 ScrollView，与三页签同处一个 FrameLayout）。
@@ -350,6 +383,15 @@ public class StoreView extends LinearLayout {
         boolean reselect = tab == mCurrentTab && mTabLoaded[tab] && !mShowingNewest;
         mCurrentTab = tab;
         mShowingNewest = false;
+        // 0.2.2：切回探索页／排行榜从第 1 页重看（与 applyPlatform/
+        // applyCategory/jumpToExploreWithSort 一致）；否则 mExploreShown/
+        // mRankShown 停在上次滑到的页数，切回来直接从半截开始。
+        if (tab == TAB_EXPLORE) {
+            mExploreShown = PAGE_SIZE;
+        }
+        if (tab == TAB_RANK) {
+            mRankShown = PAGE_SIZE;
+        }
         updateTabStyles();
         for (int i = 0; i < TAB_COUNT; i++) {
             mTabScrolls[i].setVisibility(i == tab ? VISIBLE : GONE);
@@ -440,6 +482,7 @@ public class StoreView extends LinearLayout {
     private void applyPlatform(String key) {
         if (!key.equals(mPlatform)) {
             mPlatform = key;
+            StorePrefs.setPlatform(mContext, key);
             mExploreShown = PAGE_SIZE;
             renderTabFromCache(mCurrentTab);
         }
@@ -448,6 +491,7 @@ public class StoreView extends LinearLayout {
     /** 首页／探索的用途网格：只筛已加载项，不发请求，留在当前页重绘。 */
     private void applyCategory(String category) {
         mCategory = category;
+        StorePrefs.setCategory(mContext, category);
         if (mCurrentTab == TAB_EXPLORE) {
             mExploreShown = PAGE_SIZE;
             renderExplore();
@@ -557,7 +601,7 @@ public class StoreView extends LinearLayout {
     }
 
     /** 0.1.59：feed 级计数缓存——平台／用途数量与统计行在 feed 加载完
-     * 算一次，渲染时直接取；feed 重载／隐藏改 pool 时失效重算。 */
+     * 算一次，渲染时直接取；feed 重载时失效重算。 */
     private void ensureCounts() {
         if (!mCountsReady && mFeedData != null) {
             computeCounts();
@@ -623,16 +667,14 @@ public class StoreView extends LinearLayout {
         return counts;
     }
 
-    /** 已加载 feed（去隐藏后）；三页签的派生都从这里取，不再各取各的。 */
+    /** 已加载 feed；三页签的派生都从这里取，不再各取各的。 */
     private List<StoreRepo> pool() {
         List<StoreRepo> out = new ArrayList<>();
         if (mFeedData == null) {
             return out;
         }
         for (StoreRepo item : mFeedData.items) {
-            if (!StorePrefs.isHidden(mContext, item.fullName())) {
-                out.add(item);
-            }
+            out.add(item);
         }
         return out;
     }
@@ -676,14 +718,12 @@ public class StoreView extends LinearLayout {
         mRankPlatform = key;
         StorePrefs.setRankPlatform(mContext, key);
         mRankGroups = null;
+        // 0.2.2：榜单池子换了，完整榜单回到第 1 页。
+        mRankShown = PAGE_SIZE;
         renderRank();
     }
 
-    private long recentCutoff() {
-        return System.currentTimeMillis() - RECENT_WINDOW_MS;
-    }
-
-    private static void sortForExplore(List<StoreRepo> items, int sort, long recentCutoff) {
+    private static void sortForExplore(List<StoreRepo> items, int sort) {
         switch (sort) {
             case SORT_UPDATED:
                 Collections.sort(items, (a, b) -> {
@@ -721,6 +761,8 @@ public class StoreView extends LinearLayout {
     private void renderHomeHeader() {
         LinearLayout header = mTabHeaderContainers[TAB_HOME];
         header.removeAllViews();
+        // 0.2.2：头重建后旧的数字引用失效，先清掉，statsRow 会重新记。
+        mNewestCountView = null;
         ensureCounts();
 
         // 统计块（hiwiki 首页 2x2：收录／安装包／最新入库／排行榜，四项都能点；
@@ -758,10 +800,10 @@ public class StoreView extends LinearLayout {
 
         // 热门软件：feed 按星标取前 9；最近更新：按最新 release 取前 6。
         List<StoreRepo> hot = new ArrayList<>(pool);
-        sortForExplore(hot, SORT_STARS, recentCutoff());
+        sortForExplore(hot, SORT_STARS);
         List<StoreRepo> hotVisible = homeFiltered(hot);
         List<StoreRepo> recent = new ArrayList<>(pool);
-        sortForExplore(recent, SORT_UPDATED, recentCutoff());
+        sortForExplore(recent, SORT_UPDATED);
         List<StoreRepo> recentVisible = homeFiltered(recent);
 
         boolean anySection = false;
@@ -826,11 +868,11 @@ public class StoreView extends LinearLayout {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         first.addView(statCell(R.drawable.ic_stat_package,
                 StoreViews.formatStars(repos), getString(R.string.store_stat_repos),
-                false, v -> selectTab(TAB_EXPLORE)));
+                false, false, v -> selectTab(TAB_EXPLORE)));
         first.addView(statGap());
         first.addView(statCell(R.drawable.ic_stat_download,
                 StoreViews.formatStars(assets), getString(R.string.store_stat_assets),
-                false, v -> selectTab(TAB_EXPLORE)));
+                false, false, v -> selectTab(TAB_EXPLORE)));
         rows.addView(first);
         LinearLayout second = new LinearLayout(mContext);
         second.setOrientation(HORIZONTAL);
@@ -840,11 +882,11 @@ public class StoreView extends LinearLayout {
         second.addView(statCell(R.drawable.ic_stat_clock,
                 newestCount >= 0 ? StoreViews.formatStars(newestCount) : "–",
                 getString(R.string.store_newest),
-                true, v -> showNewest()));
+                true, true, v -> showNewest()));
         second.addView(statGap());
         second.addView(statCell(R.drawable.ic_stat_chart,
                 StoreViews.formatStars(ranks), getString(R.string.store_stat_ranks),
-                true, v -> selectTab(TAB_RANK)));
+                true, false, v -> selectTab(TAB_RANK)));
         rows.addView(second);
         return rows;
     }
@@ -857,9 +899,11 @@ public class StoreView extends LinearLayout {
         return gap;
     }
 
-    /** 统计块一格：图标＋粗体数字＋灰字标签；link 时标签下加虚线下划线。 */
+    /** 统计块一格：图标＋粗体数字＋灰字标签；link 时标签下加虚线下划线。
+     * isNewest 时把数字 TextView 记到 mNewestCountView，供最新入库数据到
+     * 达时只改数字（见 loadNewest）。 */
     private View statCell(int iconRes, String number, String label,
-            boolean link, View.OnClickListener listener) {
+            boolean link, boolean isNewest, View.OnClickListener listener) {
         LinearLayout cell = new LinearLayout(mContext);
         cell.setOrientation(HORIZONTAL);
         cell.setGravity(Gravity.CENTER_VERTICAL);
@@ -877,6 +921,9 @@ public class StoreView extends LinearLayout {
         TextView num = StoreViews.text(mContext, 20, true);
         num.setText(number);
         cell.addView(num);
+        if (isNewest) {
+            mNewestCountView = num;
+        }
         View gap2 = new View(mContext);
         gap2.setLayoutParams(new LinearLayout.LayoutParams(
                 StoreViews.dp(mContext, 6), 0));
@@ -1013,11 +1060,15 @@ public class StoreView extends LinearLayout {
     private int categoryIcon(String category) {
         switch (category) {
             case "ai":
-            case "development":
                 return R.drawable.ic_store_cat_ai;
+            case "development":
+                // 0.2.2：开发不再与 AI 共用图标——用现成的代码标签图标（md_code）。
+                return R.drawable.md_code;
             case "media":
-            case "tools":
                 return R.drawable.ic_store_cat_media;
+            case "tools":
+                // 0.2.2：工具不再与媒体共用图标——用现成的齿轮图标（icon_settings）。
+                return R.drawable.icon_settings;
             case "network":
                 return R.drawable.ic_store_cat_network;
             case "productivity":
@@ -1068,7 +1119,10 @@ public class StoreView extends LinearLayout {
                 Toast.LENGTH_LONG).show());
         titleRow.addView(info);
         TextView sub = StoreViews.text(mContext, 13, false);
-        sub.setText(getString(R.string.store_explore_sub, mPlatformCounts[0]));
+        // B-L2：副标题用当前筛选下的条数，与下方“共 X 条”同一口径
+        // （之前是全池总数，选 Android 后副标题 2450、结果数 718）。
+        sub.setText(getString(R.string.store_explore_sub,
+                exploreFiltered(pool()).size()));
         sub.setTextColor(StoreViews.secondaryText(mContext));
         LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1148,6 +1202,46 @@ public class StoreView extends LinearLayout {
                     side, StoreViews.dp(mContext, 18));
             list.addView(end);
         }
+        // 0.2.2：大屏/横屏下 20 条可能塞不满一屏、滑不到底就触发不了自动
+        // 加载；渲染后若内容仍不可滚动且还有未展示的条目，再追加一页。
+        ensureExploreFillViewport();
+    }
+
+    /** 0.2.2：探索列表塞不满一屏时自动追加，直到能滚动或全部展完。 */
+    private void ensureExploreFillViewport() {
+        ScrollView scroll = mTabScrolls[TAB_EXPLORE];
+        if (scroll == null) {
+            return;
+        }
+        scroll.post(() -> {
+            if (mFeedData == null || mCurrentTab != TAB_EXPLORE) {
+                return;
+            }
+            if (!scroll.canScrollVertically(1) && mExploreShown < mExploreVisibleSize) {
+                mExploreShown += PAGE_SIZE;
+                renderExploreList();
+            }
+        });
+    }
+
+    /** 0.2.2：完整榜单塞不满一屏时自动追加，直到能滚动或全部展完。 */
+    private void ensureRankFillViewport() {
+        ScrollView scroll = mTabScrolls[TAB_RANK];
+        if (scroll == null) {
+            return;
+        }
+        scroll.post(() -> {
+            if (mFeedData == null || mCurrentTab != TAB_RANK) {
+                return;
+            }
+            if (mRankGroup < 0 || mRankList < 0) {
+                return;
+            }
+            if (!scroll.canScrollVertically(1) && mRankShown < mRankFullTotal) {
+                mRankShown += PAGE_SIZE;
+                renderRank();
+            }
+        });
     }
 
     private TextView filterLabel(String label) {
@@ -1162,7 +1256,6 @@ public class StoreView extends LinearLayout {
     /** 探索的内存内筛选＋排序：平台＋分类筛选都在这里算。 */
     private List<StoreRepo> exploreFiltered(List<StoreRepo> pool) {
         List<StoreRepo> out = new ArrayList<>();
-        long cutoff = recentCutoff();
         for (StoreRepo item : pool) {
             if (!matchesPlatform(item, mPlatform)) {
                 continue;
@@ -1175,7 +1268,7 @@ public class StoreView extends LinearLayout {
             // 页的事。这里删掉过滤，全池子按 compareHot 排；“共 X 条”即全池子。
             out.add(item);
         }
-        sortForExplore(out, mSort, cutoff);
+        sortForExplore(out, mSort);
         return out;
     }
 
@@ -1220,6 +1313,8 @@ public class StoreView extends LinearLayout {
         onlyNonEmpty.setOnCheckedChangeListener((button, checked) -> {
             mRankOnlyNonEmpty = checked;
             StorePrefs.setRankOnlyNonEmpty(mContext, checked);
+            // 0.2.2：榜单池子换了，完整榜单回到第 1 页。
+            mRankShown = PAGE_SIZE;
             renderRank();
         });
         LinearLayout.LayoutParams onlyLp = new LinearLayout.LayoutParams(
@@ -1329,8 +1424,9 @@ public class StoreView extends LinearLayout {
         return card;
     }
 
-    /** 完整榜单：同一榜单的完整数组就地展开，按最热门分排，有多少展多少
-     *（0.1.68：去掉 24 条上限，数据本身全在，不再截断）。 */
+    /** 完整榜单：同一榜单的完整数组就地展开，按星标排；
+     *（0.1.68：去掉 24 条上限，数据本身全在，不再截断；
+     * 0.2.2：分页展示，20 条/页，滑到底自动追加）。 */
     private void renderRankFullList(LinearLayout container) {
         List<StoreRankGroups.Group> groups = rankGroups();
         if (mRankGroup < 0 || mRankGroup >= groups.size()) {
@@ -1356,6 +1452,9 @@ public class StoreView extends LinearLayout {
         back.setOnClickListener(v -> {
             mRankGroup = -1;
             mRankList = -1;
+            // 0.2.2：回到概览后重进同一榜单也要从第 1 页开始。
+            mRankShownGroup = -1;
+            mRankShownList = -1;
             renderRank();
         });
         container.addView(back);
@@ -1364,6 +1463,13 @@ public class StoreView extends LinearLayout {
         title.setPadding(side, StoreViews.dp(mContext, 8), side, 0);
         container.addView(title);
         List<StoreRepo> rows = list.items;
+        // 0.2.2：换了榜单（组/榜下标变了）回到第 1 页；同榜内追加不重置。
+        if (mRankGroup != mRankShownGroup || mRankList != mRankShownList) {
+            mRankShown = PAGE_SIZE;
+            mRankShownGroup = mRankGroup;
+            mRankShownList = mRankList;
+        }
+        mRankFullTotal = rows.size();
         // 0.1.68：副标题照设计稿“收录 N 条 · 按星标从高到低（后端给榜）”；
         // 旧数据（本地分组）不带括号。一次格式化，不拼接（SetTextI18n）。
         String subText = getString(R.string.store_rank_full_sub, rows.size(),
@@ -1378,10 +1484,26 @@ public class StoreView extends LinearLayout {
                     getString(R.string.store_empty_result)));
             return;
         }
-        for (int i = 0; i < rows.size(); i++) {
+        // 0.2.2：完整榜单分页（20 条/页），不再一次建全部行（最多 195 行）；
+        // 滑到底由排行榜 ScrollView 的 OnScrollChangeListener 自动追加。
+        int limit = Math.min(mRankShown, rows.size());
+        for (int i = 0; i < limit; i++) {
             container.addView(rankRowView(i + 1, rows.get(i)));
             container.addView(StoreViews.divider(mContext));
         }
+        // 全部展完才显示底栏（与探索页一致）。
+        if (mRankShown >= rows.size()) {
+            TextView end = StoreViews.text(mContext, 13, false);
+            end.setText(R.string.store_all_loaded);
+            end.setTextColor(StoreViews.secondaryText(mContext));
+            end.setGravity(Gravity.CENTER);
+            end.setPadding(side, StoreViews.dp(mContext, 14),
+                    side, StoreViews.dp(mContext, 18));
+            container.addView(end);
+        }
+        // 0.2.2：大屏/横屏下 20 条可能塞不满一屏、滑不到底就触发不了自动
+        // 加载；渲染后若内容仍不可滚动且还有未展示的条目，再追加一页。
+        ensureRankFillViewport();
     }
 
     /** 完整榜单的行：名次＋名＋简介＋★／语言／版本＋平台图标（设计稿样式）。 */
@@ -1442,9 +1564,6 @@ public class StoreView extends LinearLayout {
         UiUtils.setSelectableBackground(row);
         row.setOnClickListener(v -> mContext.startActivity(
                 RepositoryActivity.makeIntent(mContext, item.owner(), item.name())));
-        if (StorePrefs.isSeen(mContext, item.fullName())) {
-            row.setAlpha(0.55f);
-        }
         row.setOnLongClickListener(v -> {
             showRowMenu(item);
             return true;
@@ -1500,8 +1619,14 @@ public class StoreView extends LinearLayout {
                     if (mShowingNewest) {
                         renderNewestList();
                     } else if (mCurrentTab == TAB_HOME && mFeedData != null) {
-                        // 统计块的最新入库数字到了，重绘首页头。
-                        renderHomeHeader();
+                        // 0.2.2：统计块的最新入库数字到了，只改那一格的数字，
+                        // 不重建整个首页头（之前调 renderHomeHeader()，滚动时
+                        // 会抖）。不在首页时什么也不做，切回首页重绘时会带上
+                        // 新数字（renderTabFromCache）。
+                        if (mNewestCountView != null) {
+                            mNewestCountView.setText(
+                                    StoreViews.formatStars(data.items.size()));
+                        }
                     }
                 }, error -> {
                     mNewestLoading = false;
@@ -1547,9 +1672,10 @@ public class StoreView extends LinearLayout {
         }
         List<StoreRepo> items = newestPool();
         TextView sub = StoreViews.text(mContext, 13, false);
+        // B-L3：副标题与结果数用同一口径（筛选后条数），之前副标题是未筛的 60。
         sub.setText(mContext.getResources().getQuantityString(
-                R.plurals.store_newest_sub, mNewestData.items.size(),
-                mNewestData.items.size()));
+                R.plurals.store_newest_sub, items.size(),
+                items.size()));
         sub.setTextColor(StoreViews.secondaryText(mContext));
         sub.setPadding(side, StoreViews.dp(mContext, 2), side, StoreViews.dp(mContext, 8));
         container.addView(sub);
@@ -1572,16 +1698,13 @@ public class StoreView extends LinearLayout {
         }
     }
 
-    /** 最新入库池子（去隐藏＋系统筛选后，顺序保持 newest.json 的入库顺序，不重排）。 */
+    /** 最新入库池子（系统筛选后，顺序保持 newest.json 的入库顺序，不重排）。 */
     private List<StoreRepo> newestPool() {
         List<StoreRepo> out = new ArrayList<>();
         if (mNewestData == null) {
             return out;
         }
         for (StoreRepo item : mNewestData.items) {
-            if (StorePrefs.isHidden(mContext, item.fullName())) {
-                continue;
-            }
             // 0.1.68：最新入库的系统筛选（与排行榜同款网格，只筛这 60 条）。
             if (!matchesPlatform(item, mNewestPlatform)) {
                 continue;
@@ -1591,16 +1714,13 @@ public class StoreView extends LinearLayout {
         return out;
     }
 
-    /** 最新入库 60 条内的各平台计数（网格数字；只去隐藏，不筛平台）。 */
+    /** 最新入库 60 条内的各平台计数（网格数字；不筛平台）。 */
     private int[] newestPlatformCounts() {
         int[] counts = new int[PLATFORM_KEYS.length];
         if (mNewestData == null) {
             return counts;
         }
         for (StoreRepo item : mNewestData.items) {
-            if (StorePrefs.isHidden(mContext, item.fullName())) {
-                continue;
-            }
             for (int i = 0; i < PLATFORM_KEYS.length; i++) {
                 if (matchesPlatform(item, PLATFORM_KEYS[i])) {
                     counts[i]++;
@@ -1711,9 +1831,6 @@ public class StoreView extends LinearLayout {
         UiUtils.setSelectableBackground(row);
         row.setOnClickListener(v -> mContext.startActivity(
                 RepositoryActivity.makeIntent(mContext, item.owner(), item.name())));
-        if (StorePrefs.isSeen(mContext, item.fullName())) {
-            row.setAlpha(0.55f);
-        }
         row.setOnLongClickListener(v -> {
             showRowMenu(item);
             return true;
@@ -1735,8 +1852,11 @@ public class StoreView extends LinearLayout {
         if (days <= 0) {
             return getString(R.string.store_newest_updated_today);
         }
+        // B-L4：量词与格式参数统一用 int（先钳制到 int 范围，避免 (int) 截断；
+        // %1$d 的实参类型与量词一致）。
+        int d = (int) Math.min(days, Integer.MAX_VALUE);
         return mContext.getResources().getQuantityString(
-                R.plurals.store_newest_updated_days, (int) days, days);
+                R.plurals.store_newest_updated_days, d, d);
     }
 
     // ---------- 通用 ----------
@@ -1744,9 +1864,6 @@ public class StoreView extends LinearLayout {
     private View rowView(final StoreRepo item) {
         View row = StoreViews.repoRow(mContext, item, v -> mContext.startActivity(
                 RepositoryActivity.makeIntent(mContext, item.owner(), item.name())));
-        if (StorePrefs.isSeen(mContext, item.fullName())) {
-            row.setAlpha(0.55f);
-        }
         row.setOnLongClickListener(v -> {
             showRowMenu(item);
             return true;
@@ -1756,13 +1873,9 @@ public class StoreView extends LinearLayout {
 
     private void showRowMenu(final StoreRepo item) {
         final String fullName = item.fullName();
-        boolean seen = StorePrefs.isSeen(mContext, fullName);
         String[] actions = {
             getString(R.string.store_action_share),
             getString(R.string.store_action_open_github),
-            getString(seen ? R.string.store_action_unmark_seen
-                    : R.string.store_action_mark_seen),
-            getString(R.string.store_action_hide),
         };
         new AlertDialog.Builder(mContext)
                 .setItems(actions, (dialog, which) -> {
@@ -1775,19 +1888,9 @@ public class StoreView extends LinearLayout {
                             mContext.startActivity(Intent.createChooser(send, null));
                             break;
                         }
-                        case 1:
+                        default:
                             mContext.startActivity(new Intent(Intent.ACTION_VIEW,
                                     Uri.parse("https://github.com/" + fullName)));
-                            break;
-                        case 2:
-                            StorePrefs.setSeen(mContext, fullName, !seen);
-                            renderTabFromCache(mCurrentTab);
-                            break;
-                        default:
-                            StorePrefs.hide(mContext, fullName);
-                            // 0.1.59：隐藏改了 pool，计数缓存失效，下次渲染重算。
-                            mCountsReady = false;
-                            renderTabFromCache(mCurrentTab);
                             break;
                     }
                 })

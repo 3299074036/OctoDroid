@@ -723,8 +723,11 @@ public class IssueEditActivity extends BasePagerActivity implements
         final List<String> defaultAssignees = new ArrayList<>();
 
         IssueTemplate(String contentString) {
-            Matcher matcher = FRONT_MATTER_PATTERN.matcher(contentString);
-            if (matcher.matches()) {
+            // S-L6：front-matter 正则只对合理大小的模板跑（模板通常只有几 KB）；
+            // 超大内容直接当无 front-matter，避免 DOTALL 回溯拖垮解析。
+            Matcher matcher = contentString != null && contentString.length() <= 256 * 1024
+                    ? FRONT_MATTER_PATTERN.matcher(contentString) : null;
+            if (matcher != null && matcher.matches()) {
                 content = matcher.group(6);
                 for (String line : matcher.group(2).split("\n")) {
                     int colonPos = line.indexOf(": ");

@@ -143,11 +143,24 @@ public class Github4AndroidActivity extends BaseActivity implements
             }
             // 校验 state：拒绝伪造的回调 intent（登录 CSRF，CR-2）。
             // 无 state 或对不上的一律视为取消，不拿 code 换 token。
-            SharedPreferences prefs = androidx.preference.PreferenceManager
-                    .getDefaultSharedPreferences(this);
+            // S-L6：state/verifier 存加密存储（之前是默认 prefs 明文）。
+            // 读不到时回落一次默认 prefs（升级前已发起的登录流程），两处都删。
+            SharedPreferences prefs = Gh4Application.securePrefs(this);
             String expectedState = prefs.getString(PREF_OAUTH_STATE, null);
             String verifier = prefs.getString(PREF_OAUTH_VERIFIER, null);
             prefs.edit().remove(PREF_OAUTH_STATE).remove(PREF_OAUTH_VERIFIER).apply();
+            if (expectedState == null || verifier == null) {
+                SharedPreferences legacyPrefs = androidx.preference.PreferenceManager
+                        .getDefaultSharedPreferences(this);
+                if (expectedState == null) {
+                    expectedState = legacyPrefs.getString(PREF_OAUTH_STATE, null);
+                }
+                if (verifier == null) {
+                    verifier = legacyPrefs.getString(PREF_OAUTH_VERIFIER, null);
+                }
+                legacyPrefs.edit().remove(PREF_OAUTH_STATE)
+                        .remove(PREF_OAUTH_VERIFIER).apply();
+            }
             String actualState = data.getQueryParameter(PARAM_STATE);
             if (expectedState == null || !expectedState.equals(actualState)) {
                 // 0.1.38：回调校验埋点（不记 state 与 code）。
@@ -315,7 +328,9 @@ public class Github4AndroidActivity extends BaseActivity implements
         // 换 token 时提交；即使授权码被其他应用截获也无法换 token (CR-1 纵深)
         String verifier = generateCodeVerifier();
         String challenge = codeChallengeS256(verifier);
-        androidx.preference.PreferenceManager.getDefaultSharedPreferences(activity)
+        // S-L6：state/verifier 存加密存储（之前是默认 prefs 明文；单次有效、
+        // 回调后立即删除，但加密存储与 token 同款，无额外成本）。
+        Gh4Application.securePrefs(activity)
                 .edit()
                 .putString(PREF_OAUTH_STATE, state)
                 .putString(PREF_OAUTH_VERIFIER, verifier)

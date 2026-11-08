@@ -1,6 +1,5 @@
 package com.gh4a.utils;
 
-import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -9,7 +8,6 @@ import android.os.Build;
 import android.provider.Settings;
 import android.widget.Toast;
 
-import androidx.core.app.ActivityCompat;
 import androidx.core.content.FileProvider;
 
 import com.gh4a.BaseActivity;
@@ -60,7 +58,7 @@ public class ApkUpdateDownloader {
             ChainDownloadHelper.enqueueChain(appContext, apkUrl, safeName,
                     appContext.getString(R.string.downloading_update),
                     request -> request.setMimeType("application/vnd.android.package-archive"),
-                    (ctx, success, file) -> {
+                    (ctx, success, file, downloadId) -> {
                         if (!success) {
                             Toast.makeText(ctx, R.string.download_failed,
                                     Toast.LENGTH_LONG).show();
@@ -77,18 +75,9 @@ public class ApkUpdateDownloader {
                         installApk(ctx, file);
                     });
         };
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            activity.requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                    (requestCode, permissions, grantResults) -> {
-                        if (grantResults.length > 0
-                                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                            startDownload.run();
-                        }
-                    },
-                    R.string.download_permission_rationale);
-        } else {
-            startDownload.run();
-        }
+        // 0.2.2（S-M5）：下载改落应用私有目录，不再需要 WRITE_EXTERNAL_STORAGE，
+        // 任何 API 级别都不用申请，直接开始下载。
+        startDownload.run();
     }
 
     /**
@@ -115,8 +104,34 @@ public class ApkUpdateDownloader {
     /**
      * 校验下载到的 APK 签名证书与当前已安装应用一致。
      * API 28+ 用 signingInfo，低版本用 signatures，兼容 targetSdk 33 (L-3)。
+     * 自更新只接受自己的包：先核对包名，再核对签名。
      */
     private static boolean isSignatureMatch(Context context, File apkFile) {
+        return checkApkSignature(context, apkFile, context.getPackageName())
+                == ApkSignatureCheck.MATCH;
+    }
+
+    /** 下载到的 APK 的签名校验结果（S-M1，供 Release 附件下载复用）。 */
+    public enum ApkSignatureCheck {
+        /** 与已安装的同包名应用签名一致。 */
+        MATCH,
+        /** 该包名未安装，发布者签名无法验证。 */
+        NOT_INSTALLED,
+        /** 与已安装的同包名应用签名不一致，或包本身无法解析。 */
+        MISMATCH
+    }
+
+    /**
+     * 校验下载到的 APK：取其包名，找已安装的同包名应用比签名。
+     * 未安装 → NOT_INSTALLED（无法验证发布者）；签名不一致或包无法解析
+     * → MISMATCH。expectedPackage 非空时还要求包名等于它（自更新用）。
+     */
+    public static ApkSignatureCheck checkDownloadedApkSignature(Context context, File apkFile) {
+        return checkApkSignature(context, apkFile, null);
+    }
+
+    private static ApkSignatureCheck checkApkSignature(Context context, File apkFile,
+            String expectedPackage) {
         try {
             PackageManager pm = context.getPackageManager();
             int flags = PackageManager.GET_SIGNATURES;
@@ -125,16 +140,27 @@ public class ApkUpdateDownloader {
             }
             android.content.pm.PackageInfo archiveInfo = pm.getPackageArchiveInfo(
                     apkFile.getAbsolutePath(), flags);
-            android.content.pm.PackageInfo installedInfo =
-                    pm.getPackageInfo(context.getPackageName(), flags);
-            if (archiveInfo == null || installedInfo == null) {
-                return false;
+            if (archiveInfo == null || archiveInfo.packageName == null) {
+                return ApkSignatureCheck.MISMATCH;
+            }
+            if (expectedPackage != null
+                    && !expectedPackage.equals(archiveInfo.packageName)) {
+                return ApkSignatureCheck.MISMATCH;
+            }
+            android.content.pm.PackageInfo installedInfo;
+            try {
+                installedInfo = pm.getPackageInfo(archiveInfo.packageName, flags);
+            } catch (PackageManager.NameNotFoundException e) {
+                return ApkSignatureCheck.NOT_INSTALLED;
+            }
+            if (installedInfo == null) {
+                return ApkSignatureCheck.MISMATCH;
             }
             android.content.pm.Signature[] archiveSigs = getSignatures(archiveInfo);
             android.content.pm.Signature[] installedSigs = getSignatures(installedInfo);
             if (archiveSigs == null || archiveSigs.length == 0
                     || installedSigs == null || installedSigs.length == 0) {
-                return false;
+                return ApkSignatureCheck.MISMATCH;
             }
             // 已安装应用的每个签名都必须在下载包中找到
             for (android.content.pm.Signature installed : installedSigs) {
@@ -146,12 +172,12 @@ public class ApkUpdateDownloader {
                     }
                 }
                 if (!found) {
-                    return false;
+                    return ApkSignatureCheck.MISMATCH;
                 }
             }
-            return true;
+            return ApkSignatureCheck.MATCH;
         } catch (Exception e) {
-            return false;
+            return ApkSignatureCheck.MISMATCH;
         }
     }
 

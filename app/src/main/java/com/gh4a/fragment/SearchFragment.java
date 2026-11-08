@@ -1,5 +1,6 @@
 package com.gh4a.fragment;
 
+import android.annotation.SuppressLint;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
@@ -228,6 +229,9 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
      * 菜单区 padding 清零。幂等：可由 onCreateOptionsMenu 与
      * onPrepareOptionsMenu 重复调用。
      */
+    // B-L13：ActionMenuItemView 是受限 API；公开 API 里没有能区分菜单项
+    // 视图与溢出按钮的类型（两者都是 AppCompatImageButton 子类），故压制。
+    @SuppressLint("RestrictedApi")
     private void capSearchBoxWidth() {
         if (!isAdded() || mSearch == null || getActivity() == null) return;
         final androidx.appcompat.widget.Toolbar toolbar =
@@ -410,6 +414,7 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
      * （下限为顶栏宽 25%），最多 4 步，直至溢出消失。窄屏/大字体下排序
      * 因此仍可见；宽屏下校验直接通过，不改 60% 上限。
      */
+    @SuppressLint("RestrictedApi") // B-L13：见 capSearchBoxWidth 注释。
     private void verifySortVisible(final androidx.appcompat.widget.Toolbar toolbar,
             final int currentMax, final int attempt) {
         if (!isAdded() || mSearch == null) return;

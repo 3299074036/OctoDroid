@@ -83,8 +83,9 @@ public class MirrorHelper {
         }
         String base = normalizeUrl(preset);
         // 只接受 https 镜像：无 scheme 或 http 会在改写时产生畸形 URL (M-9)，
-        // 且明文传输可被窃听篡改；不合法视为未配置，原样直连
-        if (!base.regionMatches(true, 0, "https://", 0, 8)) {
+        // 且明文传输可被窃听篡改；不合法视为未配置，原样直连。
+        // 0.2.2（S-M3）：同时拒绝回环／内网 host。
+        if (!isValidMirrorUrl(base)) {
             return "";
         }
         return base;
@@ -100,6 +101,79 @@ public class MirrorHelper {
             s = s.substring(0, s.length() - 1);
         }
         return s;
+    }
+
+    /**
+     * 0.2.2（S-M3）：镜像地址集中校验——必须是 https://，host 不能缺失、
+     * 不能是回环／内网 IP 或 localhost。供 add/update/getMirrorUrls/
+     * nextMirrorBase/buildFallbackChain/getMirrorBase 共用；UI 保存路径
+     * 原有校验不变，这里是纵深防御（防旧存量／外部写 prefs 的非法地址
+     * 进入故障转移、测速与拦截器）。
+     */
+    public static boolean isValidMirrorUrl(String url) {
+        if (url == null) {
+            return false;
+        }
+        String norm = normalizeUrl(url);
+        if (!norm.regionMatches(true, 0, "https://", 0, 8)) {
+            return false;
+        }
+        String host;
+        try {
+            host = Uri.parse(norm).getHost();
+        } catch (Exception e) {
+            return false;
+        }
+        if (host == null || host.isEmpty()) {
+            return false;
+        }
+        return !isLoopbackOrPrivateHost(host);
+    }
+
+    /** host 是回环／内网地址时返回 true（IPv4、IPv6 与 localhost；域名一律放行）。 */
+    private static boolean isLoopbackOrPrivateHost(String host) {
+        if (host.equalsIgnoreCase("localhost")) {
+            return true;
+        }
+        if (host.contains(":")) {
+            // IPv6（Uri.getHost() 已去括号）：::1、fe80::/10、fc00::/7；
+            // ::ffff:a.b.c.d 是 IPv4 映射地址，按内层 IPv4 再判一次。
+            String h = host.toLowerCase(java.util.Locale.US);
+            if (h.equals("::1")) {
+                return true;
+            }
+            if (h.startsWith("::ffff:")) {
+                return isLoopbackOrPrivateHost(h.substring("::ffff:".length()));
+            }
+            // fe80::/10：首组 fe80-febf；fc00::/7：首组 fc00-fdff。
+            return h.startsWith("fe8") || h.startsWith("fe9")
+                    || h.startsWith("fea") || h.startsWith("feb")
+                    || h.startsWith("fc") || h.startsWith("fd");
+        }
+        // IPv4：127/8、10/8、172.16/12、192.168/16、169.254/16。
+        String[] parts = host.split("\\.");
+        if (parts.length != 4) {
+            return false; // 不是 IPv4，是域名
+        }
+        try {
+            int b0 = Integer.parseInt(parts[0]);
+            int b1 = Integer.parseInt(parts[1]);
+            if (b0 == 127 || b0 == 10) {
+                return true;
+            }
+            if (b0 == 172 && b1 >= 16 && b1 <= 31) {
+                return true;
+            }
+            if (b0 == 192 && b1 == 168) {
+                return true;
+            }
+            if (b0 == 169 && b1 == 254) {
+                return true;
+            }
+        } catch (NumberFormatException e) {
+            return false; // 不是纯数字 IPv4，是域名
+        }
+        return false;
     }
 
     /** 列表里显示的名字：取 URL 的 host，解析失败就显示原串。 */
@@ -203,24 +277,29 @@ public class MirrorHelper {
                     continue;
                 }
                 String norm = normalizeUrl(v);
-                if (!norm.isEmpty() && !containsIgnoreCase(seed, norm)) {
+                if (!norm.isEmpty() && isValidMirrorUrl(norm)
+                        && !containsIgnoreCase(seed, norm)) {
                     seed.add(norm);
                 }
             }
             p.edit().putString(PREF_MIRROR_LIST, toJsonArray(seed)).apply();
             return seed;
         }
-        return readMirrorList(p);
+        List<String> list = readMirrorList(p);
+        // 0.2.2（S-M3）：过滤掉非法存量条目（非 https／回环／内网）；
+        // 只过滤不回写，下次保存时自然清理。
+        list.removeIf(u -> !isValidMirrorUrl(u));
+        return list;
     }
 
     private static void saveMirrorUrls(Context context, List<String> urls) {
         prefs(context).edit().putString(PREF_MIRROR_LIST, toJsonArray(urls)).apply();
     }
 
-    /** 新增镜像：去重（忽略大小写）。 */
+    /** 新增镜像：去重（忽略大小写）。非法地址（非 https／回环／内网）拒绝写入。 */
     public static void addMirrorUrl(Context context, String url) {
         String norm = normalizeUrl(url);
-        if (norm.isEmpty()) {
+        if (!isValidMirrorUrl(norm)) {
             return;
         }
         List<String> list = getMirrorUrls(context);
@@ -230,10 +309,10 @@ public class MirrorHelper {
         }
     }
 
-    /** 修改镜像：原位替换旧地址；新地址若已存在则只删旧的，避免重复。 */
+    /** 修改镜像：原位替换旧地址；新地址若已存在则只删旧的，避免重复。非法地址拒绝写入。 */
     public static void updateMirrorUrl(Context context, String oldUrl, String newUrl) {
         String normNew = normalizeUrl(newUrl);
-        if (normNew.isEmpty()) {
+        if (!isValidMirrorUrl(normNew)) {
             return;
         }
         List<String> list = getMirrorUrls(context);
@@ -258,6 +337,37 @@ public class MirrorHelper {
         List<String> list = getMirrorUrls(context);
         if (removeIgnoreCase(list, normalizeUrl(url))) {
             saveMirrorUrls(context, list);
+        }
+        // 0.2.2：同时清掉它的测速缓存，否则故障转移还会选它。
+        removeSpeedTestResult(context, url);
+    }
+
+    /**
+     * 0.2.2：清除单个镜像的测速缓存条目（删镜像时调用）。
+     * 缓存以 "url=latencyMs" 存 StringSet，按归一化后的地址匹配。
+     */
+    public static void removeSpeedTestResult(Context context, String url) {
+        String norm = normalizeUrl(url);
+        if (norm.isEmpty()) {
+            return;
+        }
+        java.util.Set<String> set = prefs(context).getStringSet(KEY_SPEED_CACHE, null);
+        if (set == null || set.isEmpty()) {
+            return;
+        }
+        java.util.Set<String> kept = new java.util.HashSet<>();
+        boolean removed = false;
+        for (String s : set) {
+            int eq = s.lastIndexOf('=');
+            String key = eq > 0 ? s.substring(0, eq) : s;
+            if (normalizeUrl(key).equalsIgnoreCase(norm)) {
+                removed = true;
+            } else {
+                kept.add(s);
+            }
+        }
+        if (removed) {
+            prefs(context).edit().putStringSet(KEY_SPEED_CACHE, kept).apply();
         }
     }
 
@@ -336,6 +446,9 @@ public class MirrorHelper {
     private static String nextMirrorBase(Context appContext, String currentBase) {
         String normCurrent = normalizeUrl(currentBase);
         List<String> candidates = new ArrayList<>();
+        // 0.2.2：测速缓存从不清理，删掉的镜像仍会作为故障转移候选；
+        // 只保留仍在镜像列表里的缓存条目。
+        List<String> currentUrls = getMirrorUrls(appContext);
         List<java.util.Map.Entry<String, Long>> sorted =
                 new ArrayList<>(getCachedSpeedResults(appContext).entrySet());
         sorted.sort((a, b) -> Long.compare(a.getValue(), b.getValue()));
@@ -343,12 +456,14 @@ public class MirrorHelper {
             if (e.getValue() != null && e.getValue() >= 0) {
                 String norm = normalizeUrl(e.getKey());
                 if (!norm.isEmpty() && !norm.equalsIgnoreCase(normCurrent)
-                        && !containsIgnoreCase(candidates, norm)) {
+                        && !containsIgnoreCase(candidates, norm)
+                        && containsIgnoreCase(currentUrls, norm)
+                        && isValidMirrorUrl(norm)) {
                     candidates.add(norm);
                 }
             }
         }
-        for (String u : getMirrorUrls(appContext)) {
+        for (String u : currentUrls) {
             String norm = normalizeUrl(u);
             if (!norm.isEmpty() && !norm.equalsIgnoreCase(normCurrent)
                     && !containsIgnoreCase(candidates, norm)) {
@@ -423,6 +538,9 @@ public class MirrorHelper {
      */
     public static List<String> buildFallbackChain(Context context, String url,
             boolean blindPrefix) {
+        // 0.2.2（S-M3）：链路基地址只来自 getMirrorBase()（已集中校验 https＋
+        // 非回环／内网）与常量 DEFAULT_PRESET（https://gh-proxy.com），
+        // 非法基地址到不了这里。
         List<String> chain = new ArrayList<>();
         if (blindPrefix) {
             if (isEnabled(context)) {

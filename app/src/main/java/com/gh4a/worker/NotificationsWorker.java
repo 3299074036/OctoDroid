@@ -168,8 +168,16 @@ public class NotificationsWorker extends Worker {
                 }
             }
         } catch (Exception e) {
+            if (isUnauthorized(e)) {
+                // 401：登录失效，重试永远不会成功，与 ReleaseRadarWorker
+                // 一致返回 failure（不无限重试）。
+                Log.d(TAG, "Failed fetching notifications: unauthorized", e);
+                return Result.failure();
+            }
+            // B-L16：瞬时失败改 retry，与 ReleaseRadarWorker 一致
+            // （之前一律 failure，一次断网就丢掉当轮通知，直到下次周期任务）。
             Log.d(TAG, "Failed fetching notifications", e);
-            return Result.failure();
+            return Result.retry();
         }
 
         synchronized (sPrefsLock) {
@@ -230,9 +238,29 @@ public class NotificationsWorker extends Worker {
         return Result.success();
     }
 
+    /** 401（token 失效/被撤销）才判不可恢复；其余异常走 retry（与 ReleaseRadarWorker 同款）。 */
+    private static boolean isUnauthorized(Throwable t) {
+        while (t != null) {
+            if (t instanceof com.gh4a.fragment.GraphQLClient.UnauthorizedException) {
+                return true;
+            }
+            if (t instanceof retrofit2.HttpException
+                    && ((retrofit2.HttpException) t).code() == 401) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
     private void showRepoNotification(NotificationManagerCompat nm,
             List<NotificationThread> notifications, long lastCheck) {
         final Context context = getApplicationContext();
+        // 0.2.2：无通知权限时跳过（不抛 SecurityException）。
+        if (!NotificationPermission.canPostNotifications(context)) {
+            Log.d(TAG, "Skipping repo notification: POST_NOTIFICATIONS not granted");
+            return;
+        }
         Repository repository = notifications.get(0).repository();
         final int id = repository.id().intValue();
         String title = ApiHelpers.formatRepoName(getApplicationContext(), repository);
@@ -307,6 +335,11 @@ public class NotificationsWorker extends Worker {
     private void showSummaryNotification(NotificationManagerCompat nm,
             List<List<NotificationThread>> notificationsPerRepo, boolean hasNewNotification) {
         final Context context = getApplicationContext();
+        // 0.2.2：无通知权限时跳过（不抛 SecurityException）。
+        if (!NotificationPermission.canPostNotifications(context)) {
+            Log.d(TAG, "Skipping summary notification: POST_NOTIFICATIONS not granted");
+            return;
+        }
         int totalCount = 0;
         for (List<NotificationThread> list : notificationsPerRepo) {
             totalCount += list.size();

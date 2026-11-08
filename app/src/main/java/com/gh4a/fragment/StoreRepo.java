@@ -35,9 +35,9 @@ public class StoreRepo {
     public final int assetCount;
     /**
      * 后端公式字段（0.1.57）：三者均为可空——缺字段即“没有”，不是 0。
-     * trendingScore 仅镜像条目有；popularityScore 后端补算（缺失时
-     * popularityScoreOrComputed() 用星标 + 2×fork 现算）；starsPerDay
-     * 仅生成器条目有。旧缓存／实时接口三者均为 null，排序回落到星标。
+     * trendingScore 仅镜像条目有；popularityScore 后端补算（仅作数据保留，
+     * 榜单排序一律按星标，不用此分）；starsPerDay 仅生成器条目有。
+     * 旧缓存／实时接口三者均为 null，排序回落到星标。
      */
     public final Double trendingScore;
     public final Double popularityScore;
@@ -84,11 +84,6 @@ public class StoreRepo {
     /** 用途分类：后端 category 为空（旧数据／实时接口）时一律归“其他”。 */
     public String categoryOrOther() {
         return category != null && !category.isEmpty() ? category : "other";
-    }
-
-    /** 最热门分：后端给 popularityScore 就用它；缺失时现算 星标 + 2×fork（Komi 公式）。 */
-    public double popularityScoreOrComputed() {
-        return popularityScore != null ? popularityScore : stars + 2.0 * forks;
     }
 
     /**

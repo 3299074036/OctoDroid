@@ -59,39 +59,32 @@ public class StoreApi {
     private static final long CHART_TTL_MS = 24L * 60 * 60 * 1000;
     private static final String CACHE_DIR = "store-cache";
 
+    /** B-L5：后端拉取共用的 OkHttpClient（只建一次，连接池可复用）。 */
+    private static final OkHttpClient sFetchClient = ServiceFactory.getHttpClientBuilder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build();
+
     /**
      * 后端取回的一组数据：offline=true 表示来自过期缓存或离线镜像；
-     * mirror=true 表示来自离线镜像（Komi 的 isOffline 同款，不写缓存）；
-     * hasMore 只对发现分页有意义（Komi 的 BackendFeedResponse 同款）。
+     * mirror=true 表示来自离线镜像（Komi 的 isOffline 同款，不写缓存）。
      */
     public static class StoreData {
         public final List<StoreRepo> items;
         public final boolean offline;
         public final boolean mirror;
         public final String generatedAt;
-        public final boolean hasMore;
 
         public StoreData(List<StoreRepo> items, boolean offline, String generatedAt) {
-            this(items, offline, false, generatedAt, false);
-        }
-
-        public StoreData(List<StoreRepo> items, boolean offline, String generatedAt,
-                boolean hasMore) {
-            this(items, offline, false, generatedAt, hasMore);
+            this(items, offline, false, generatedAt);
         }
 
         public StoreData(List<StoreRepo> items, boolean offline, boolean mirror,
                 String generatedAt) {
-            this(items, offline, mirror, generatedAt, false);
-        }
-
-        public StoreData(List<StoreRepo> items, boolean offline, boolean mirror,
-                String generatedAt, boolean hasMore) {
             this.items = items;
             this.offline = offline;
             this.mirror = mirror;
             this.generatedAt = generatedAt;
-            this.hasMore = hasMore;
         }
     }
 
@@ -130,18 +123,6 @@ public class StoreApi {
                 .compose(RxUtils::doInBackground);
     }
 
-    /**
-     * 发现分页（Komi 同款：每页 20 条，hasMore 翻页）：取
-     * feed/{platform}/page{n}.json，缓存与离线链路与整包一致
-     * （新鲜缓存 3 小时 → 主站 → 过期缓存 → 镜像不写缓存 → 失败）。
-     */
-    public static Single<StoreData> loadBackendFeedPage(Context context, String platform, int page) {
-        return Single.fromCallable(() -> loadBackendFileSync(context,
-                "feed_" + platform + "_page" + page, FEED_TTL_MS,
-                "feed/" + platform + "/page" + page + ".json", false))
-                .compose(RxUtils::doInBackground);
-    }
-
     private static StoreData loadBackendFileSync(Context context, String key, long ttl, String path,
             boolean newest) throws IOException {
         File dir = new File(context.getFilesDir(), CACHE_DIR);
@@ -157,14 +138,16 @@ public class StoreApi {
         }
         try {
             String body = fetchUrl(BACKEND_BASE + path);
+            // B-C1：先解析、成功后再写缓存。坏 payload 不覆盖原本可用的缓存，
+            // 解析失败直接进下面的过期缓存 → 镜像链路。
+            StoreData data = parseFile(body, false, newest);
+            if (data == null) {
+                throw new IOException("bad backend payload");
+            }
             dir.mkdirs();
             writeFile(cacheFile, body);
             writeFile(metaFile, String.valueOf(System.currentTimeMillis()));
-            StoreData data = parseFile(body, false, newest);
-            if (data != null) {
-                return data;
-            }
-            throw new IOException("bad backend payload");
+            return data;
         } catch (IOException e) {
             if (cacheFile.exists()) {
                 StoreData stale = parseFile(readFile(cacheFile), true, newest);
@@ -179,7 +162,7 @@ public class StoreApi {
                 StoreData mirrorData = parseFile(mirrorBody, true, newest);
                 if (mirrorData != null) {
                     return new StoreData(mirrorData.items, true, true,
-                            mirrorData.generatedAt, mirrorData.hasMore);
+                            mirrorData.generatedAt);
                 }
             } catch (IOException ignored) {
                 // 镜像失败 → 整组失败
@@ -193,10 +176,9 @@ public class StoreApi {
     }
 
     private static String fetchUrl(String url) throws IOException {
-        OkHttpClient client = ServiceFactory.getHttpClientBuilder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(20, TimeUnit.SECONDS)
-                .build();
+        // B-L5：后端拉取共用一个 OkHttpClient（之前每次 fetchUrl 都新建），
+        // 连接池可复用；超时与拦截器与之前每次从同一 builder 现建一致。
+        OkHttpClient client = sFetchClient;
         // 后端拉取强制走网络，不读 OkHttp 磁盘缓存（Komi 的镜像客户端本身不走缓存）。
         Request request = new Request.Builder()
                 .url(url)
@@ -214,7 +196,6 @@ public class StoreApi {
         try {
             JSONObject root = new JSONObject(json);
             String generatedAt = root.optString("generatedAt", "");
-            boolean hasMore = root.optBoolean("hasMore", false);
             JSONArray arr = root.optJSONArray("items");
             List<StoreRepo> items = new ArrayList<>();
             if (arr != null) {
@@ -226,7 +207,7 @@ public class StoreApi {
                     }
                 }
             }
-            return new StoreData(items, offline, generatedAt, hasMore);
+            return new StoreData(items, offline, generatedAt);
         } catch (Exception e) {
             return null;
         }
@@ -434,8 +415,8 @@ public class StoreApi {
                 downloads,
                 repo.topics(), StoreClassifier.topicCodesFor(repo),
                 tag, publishedAt, platforms, assets.size(),
-                // 实时接口无后端公式字段：最热门分由 popularityScoreOrComputed()
-                // 用星标 + 2×fork 现算；热门排序回落到星标。
+                // 实时接口无后端公式字段（榜单排序一律按星标，不用最热门分）；
+                // 热门排序回落到星标。
                 // 实时接口也无后端 ranks 与 category：ranks 为 null（本地回落），
                 // category 为 null（用途筛时归“其他”）。
                 null, null, null, null, null);

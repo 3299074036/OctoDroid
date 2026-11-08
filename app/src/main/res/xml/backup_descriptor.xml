@@ -14,4 +14,17 @@
     <exclude domain="sharedpref" path="com.gh4a.debug_preferences.xml" />
     <exclude domain="sharedpref" path="Gh4a-secure.xml" />
     <exclude domain="sharedpref" path="Gh4a-secure-plain.xml" />
+    <!-- 0.2.2（S-M2）：以下 shared_prefs 含账号／私有数据，一并排除。
+         recent_history_&lt;login&gt; 与 star_groups_&lt;login&gt; 是按登录名
+         分文件的，备份规则不支持通配符、无法枚举，只能靠文件本身不在
+         排除清单外——这两个文件仍会随备份走，请勿在其中存敏感内容。 -->
+    <exclude domain="sharedpref" path="Gh4a-pref.xml" />
+    <exclude domain="sharedpref" path="drawer_config.xml" />
+    <exclude domain="sharedpref" path="download_records.xml" />
+    <exclude domain="sharedpref" path="user_lists_cache.xml" />
+    <exclude domain="sharedpref" path="radar_cache.xml" />
+    <exclude domain="sharedpref" path="release_radar_notify.xml" />
+    <exclude domain="sharedpref" path="hot_repos_cache.xml" />
+    <exclude domain="sharedpref" path="me_header_cache.xml" />
+    <exclude domain="sharedpref" path="star_update_read.xml" />
 </full-backup-content>

@@ -380,13 +380,15 @@ public abstract class WebViewerActivity extends BaseActivity implements
         // SEC-13: sanitize showdown output before innerHTML — attacker
         // markdown may carry raw HTML. Drops script/style/iframe/object/
         // embed/form/base/link/meta/title elements, on* attributes, and
-        // javascript:/vbscript:/data:text/html URLs; links, images and
-        // formatting survive untouched.
+        // javascript:/vbscript:/data:text/:/data:image/svg URLs; links, images and
+        // formatting survive untouched. S-L2 补：math/mtext/mglyph/
+        // annotation-xml/foreignobject（mXSS 载体，showdown 不生成）也删掉。
         content.append("function sanitizeHtml(html) {"
                 + "var tpl = document.createElement('template');"
                 + "tpl.innerHTML = html;"
                 + "var bad = ['script','style','iframe','object','embed','form',"
-                + "'base','link','meta','title'];"
+                + "'base','link','meta','title','math','mtext','mglyph',"
+                + "'annotation-xml','foreignobject'];"
                 + "var els = tpl.content.querySelectorAll('*');"
                 + "for (var i = 0; i < els.length; i++) {"
                 + "var el = els[i];"
@@ -398,7 +400,7 @@ public abstract class WebViewerActivity extends BaseActivity implements
                 + "var n = attrs[j].name.toLowerCase();"
                 + "var v = (attrs[j].value || '').replace(/[\\s\\u0000-\\u0020]+/g, '').toLowerCase();"
                 + "if (n.indexOf('on') === 0 || v.indexOf('javascript:') === 0"
-                + "|| v.indexOf('vbscript:') === 0 || v.indexOf('data:text/html') === 0) {"
+                + "|| v.indexOf('vbscript:') === 0 || v.indexOf('data:text/') === 0 || v.indexOf('data:image/svg') === 0) {"
                 + "el.removeAttribute(attrs[j].name); } } }"
                 + "return tpl.innerHTML; }\n");
         content.append("document.getElementById('content').innerHTML = sanitizeHtml(html);");
@@ -467,8 +469,9 @@ public abstract class WebViewerActivity extends BaseActivity implements
     // 0.1.20 F-05: Wiki 内容是远端编辑者写的原始 HTML，必须先走与
     // generateMarkdownHtml() 同款 sanitizeHtml 过滤再上屏。做法与 Markdown
     // 路径一致：JS 在 innerHTML 前清洗（去 script/style/iframe/object/
-    // embed/form/base/link/meta/title、on* 属性、javascript:/vbscript:/
-    // data:text/html 链接），链接/图片/排版原样保留；JS 接口与基址不变。
+    // embed/form/base/link/meta/title/math/mtext/mglyph/annotation-xml/
+    // foreignobject、on* 属性、javascript:/vbscript:/data:text/:
+    // data:image/svg 链接），链接/图片/排版原样保留；JS 接口与基址不变。
     // 注意：原始 HTML 不直接拼进页面，而是转义后放进 JS 字符串再清洗，
     // 其中 "</" 写成 "<\/"，避免原始 HTML 里的 </script> 提前截断脚本。
     protected static String wrapWithMarkdownStyling(String html, String cssTheme, String title) {
@@ -484,7 +487,8 @@ public abstract class WebViewerActivity extends BaseActivity implements
                 + "var tpl = document.createElement('template');"
                 + "tpl.innerHTML = html;"
                 + "var bad = ['script','style','iframe','object','embed','form',"
-                + "'base','link','meta','title'];"
+                + "'base','link','meta','title','math','mtext','mglyph',"
+                + "'annotation-xml','foreignobject'];"
                 + "var els = tpl.content.querySelectorAll('*');"
                 + "for (var i = 0; i < els.length; i++) {"
                 + "var el = els[i];"
@@ -496,7 +500,7 @@ public abstract class WebViewerActivity extends BaseActivity implements
                 + "var n = attrs[j].name.toLowerCase();"
                 + "var v = (attrs[j].value || '').replace(/[\\s\\u0000-\\u0020]+/g, '').toLowerCase();"
                 + "if (n.indexOf('on') === 0 || v.indexOf('javascript:') === 0"
-                + "|| v.indexOf('vbscript:') === 0 || v.indexOf('data:text/html') === 0) {"
+                + "|| v.indexOf('vbscript:') === 0 || v.indexOf('data:text/') === 0 || v.indexOf('data:image/svg') === 0) {"
                 + "el.removeAttribute(attrs[j].name); } } }"
                 + "return tpl.innerHTML; }\n");
         String escaped = html == null ? "" : html

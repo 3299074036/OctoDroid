@@ -99,8 +99,13 @@ public class DownloadListFragment extends ListDataBaseFragment<DownloadListFragm
         if (item.status != DownloadManager.STATUS_SUCCESSFUL) {
             return;
         }
-        File file = new File(Environment.getExternalStoragePublicDirectory(
+        File file = new File(getActivity().getExternalFilesDir(
                 Environment.DIRECTORY_DOWNLOADS), item.record.fileName);
+        if (!file.exists()) {
+            // 兼容 0.2.2 之前下载到公共 Downloads/ 的旧记录。
+            file = new File(Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS), item.record.fileName);
+        }
         if (!file.exists()) {
             Toast.makeText(getActivity(), R.string.download_open_failed,
                     Toast.LENGTH_SHORT).show();

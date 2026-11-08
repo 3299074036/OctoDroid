@@ -20,6 +20,7 @@ import android.app.Application;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.content.res.Configuration;
+import android.net.Uri;
 import android.os.Build;
 import android.util.Log;
 import android.util.LongSparseArray;
@@ -503,6 +504,16 @@ public class Gh4Application extends Application implements
     }
 
     /**
+     * Encrypted prefs shared by the GitHub token and the translation
+     * credentials (S-H2): the file on disk never contains a plaintext
+     * credential (same store as the OAuth token).
+     */
+    public static SharedPreferences securePrefs(android.content.Context context) {
+        Gh4Application app = (Gh4Application) context.getApplicationContext();
+        return app.getSecurePrefs();
+    }
+
+    /**
      * SEC-5: when encrypted storage opens successfully, move any token_*
      * keys out of the plaintext fallback file into the encrypted store,
      * then delete the fallback file outright. Runs only on the encrypted
@@ -737,6 +748,22 @@ public class Gh4Application extends Application implements
                 defaultHandler.uncaughtException(thread, throwable);
             }
         });
+    }
+
+    /**
+     * S-L1：日志里的 URL 去 query 再记——GitHub 签名下载 URL 的 query 含时效
+     * token，ChainDownloadHelper 写下载记录时已有同款 clearQuery 处理，
+     * 这里给日志路径复用。解析失败时不输出原串。
+     */
+    public static String redactUrlForLog(String url) {
+        if (url == null) {
+            return null;
+        }
+        try {
+            return Uri.parse(url).buildUpon().clearQuery().build().toString();
+        } catch (Exception ignored) {
+            return "[unparseable-url]";
+        }
     }
 
     /**

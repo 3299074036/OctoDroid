@@ -27,6 +27,7 @@ import androidx.appcompat.widget.PopupMenu;
 import androidx.core.content.ContextCompat;
 import androidx.core.widget.CompoundButtonCompat;
 import androidx.fragment.app.Fragment;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -159,6 +160,11 @@ public class StarMergedFragment extends Fragment {
     private OnBackPressedCallback mBackCallback;
     // 0.1.64：批量移动进度条（dialog_move_progress.xml 的 pb_move）。
     private ProgressBar mMoveProgressBar;
+    // 0.2.2：批量移组状态机（B-M7）——进度与失败存在 ViewModel 里，旋转
+    // 屏幕时 Rx 链不中断；两个对话框由 Fragment 按状态重建，视图销毁时拆掉。
+    private StarBatchMoveViewModel mMoveViewModel;
+    private AlertDialog mMoveProgressDialog;
+    private AlertDialog mMoveResultDialog;
     // Starred state
     private final List<Repository> mStarred = new ArrayList<>();
     private int mStarredPage = 1;
@@ -359,6 +365,12 @@ public class StarMergedFragment extends Fragment {
         loadCurrentTab();
         // 0.1.7：当前页开始加载后，立即在后台并行预取其余两页（不阻塞当前页）。
         prefetchOtherTabs(false);
+        // 0.2.2：观察批量移组状态（B-M7）——ViewModel 在旋转时保留，Fragment
+        // 重建后按最新状态把进度框／结果框重建出来。Fragment 作 LifecycleOwner：
+        // 视图销毁时 Fragment 已 STOP，LiveData 不会向无视图的 Fragment 投递。
+        mMoveViewModel = new ViewModelProvider(this)
+                .get(StarBatchMoveViewModel.class);
+        mMoveViewModel.getState().observe(this, this::onMoveStateChanged);
         return view;
     }
 
@@ -384,6 +396,10 @@ public class StarMergedFragment extends Fragment {
         mMultiSelect = false;
         mSelectedRepos.clear();
         mSortLists = null;
+        // 0.2.2：视图销毁时拆掉批量移组的两个对话框（避免窗口泄漏）；
+        // 移动本身不停，ViewModel 里的 Rx 链继续跑，重建后按状态重建对话框。
+        dismissMoveProgressDialog();
+        dismissMoveResultDialog();
         mList = null;
         mSwipe = null;
         mAdapter = null;
@@ -859,6 +875,14 @@ public class StarMergedFragment extends Fragment {
             st.type = TYPE_STATUS;
             st.title = getString(mListsFailed ? R.string.my_lists_failed : R.string.my_lists_empty);
             mItems.add(st);
+            // 0.2.1：空态也要有“+ 新增分组”入口（多选时不显示），否则首次使用
+            // 在分组页内没有任何办法创建第一个列表。
+            if (!mMultiSelect) {
+                Item add = new Item();
+                add.type = TYPE_ADD_GROUP;
+                add.title = getString(R.string.star_list_add_group);
+                mItems.add(add);
+            }
         } else {
             // BUG-17：失败后仍显示缓存时，按缓存年龄判断是否过期；
             // 超过阈值（或年龄未知）才在顶部放一行可点按重试的提示，
@@ -898,6 +922,12 @@ public class StarMergedFragment extends Fragment {
                 head.title = getString(R.string.star_list_ungrouped);
                 head.subtitle = getResources().getQuantityString(
                         R.plurals.star_group_repo_count, ungrouped.size(), ungrouped.size());
+                // 0.2.2：Star 列表未加载完时，未分组区只反映已加载部分，
+                // 副标题提示“仅显示已加载的 N 条”；加载完则不显示。
+                if (mStarredHasMore) {
+                    head.description = getString(
+                            R.string.star_list_ungrouped_partial, mStarred.size());
+                }
                 head.expanded = mUngroupedExpanded;
                 mItems.add(head);
                 if (mUngroupedExpanded) {
@@ -1026,7 +1056,7 @@ public class StarMergedFragment extends Fragment {
                 mItems.add(r);
             }
         }
-        mAdapter.notifyDataSetChanged();
+        // B-L6：这里不调 notifyDataSetChanged——唯一调用方 rebuild() 末尾已调一次。
     }
 
     private void openRepo(String fullName) {
@@ -1285,15 +1315,14 @@ public class StarMergedFragment extends Fragment {
      * 0.1.64：批量移组——官方无批量接口，N 个仓库 = N 次顺序调用
      * （每仓先取 node id 再 updateListsForItem，见 assignRepo），
      * 带进度与失败重试（只重试失败的）。
+     * 0.2.2：进度与失败存在 ViewModel 里（B-M7），旋转屏幕时 Rx 链不中断；
+     * 这里只把任务交给 ViewModel，对话框由状态观察者按最新状态重建。
      */
     private void startBatchMove(List<String> listIds) {
-        final List<String> repos = new ArrayList<>(mSelectedRepos);
-        final List<String> targetIds = new ArrayList<>(listIds);
-        final List<String> failed = new ArrayList<>();
-        final AlertDialog dialog = buildBatchMoveDialog(repos.size());
-        final boolean[] finished = new boolean[1];
-        dialog.show();
-        moveNext(repos, 0, targetIds, failed, dialog, finished);
+        if (mMoveViewModel == null) {
+            return;
+        }
+        mMoveViewModel.start(new ArrayList<>(mSelectedRepos), listIds);
     }
 
     /** 0.1.64：批量移动进度框（dialog_move_progress.xml，标题随进度更新）。 */
@@ -1310,51 +1339,49 @@ public class StarMergedFragment extends Fragment {
                 .create();
     }
 
-    private void moveNext(List<String> repos, int index, List<String> targetIds,
-            List<String> failed, AlertDialog dialog, boolean[] finished) {
-        if (!isAdded() || finished[0]) {
+    /**
+     * 0.2.2：批量移组状态观察者——按 ViewModel 的最新状态重建对话框。
+     * 进行中：进度框不存在就新建，存在就更新标题与进度条；跑完：拆进度框，
+     * 全部成功弹 Toast，失败弹结果框（完成／只重试失败的）；结果已处理过
+     * （旋转重建）就不再重复弹框。
+     */
+    private void onMoveStateChanged(StarBatchMoveViewModel.State state) {
+        if (state == null) {
+            dismissMoveProgressDialog();
             return;
         }
-        if (index >= repos.size()) {
-            finished[0] = true;
-            showBatchMoveResult(repos.size(), failed, targetIds, dialog);
-            return;
-        }
-        final String fullName = repos.get(index);
-        final int done = index;
-        mDisposables.add(UserListsGraphQL.assignRepo(fullName, targetIds)
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(ok -> {
-                    if (finished[0]) return;
-                    moveNext(repos, index + 1, targetIds, failed, dialog, finished);
-                }, error -> {
-                    failed.add(fullName);
-                    moveNext(repos, index + 1, targetIds, failed, dialog, finished);
-                }));
-        if (dialog.isShowing()) {
-            // 0.1.64：标题与进度条随进度更新（见 dialog_move_progress.xml 注释）。
-            dialog.setTitle(getString(R.string.star_list_moving, done, repos.size()));
-            if (mMoveProgressBar != null) {
-                mMoveProgressBar.setProgress(done);
+        if (!state.finished) {
+            if (mMoveProgressDialog == null || !mMoveProgressDialog.isShowing()) {
+                mMoveProgressDialog = buildBatchMoveDialog(state.total);
+                mMoveProgressDialog.show();
             }
+            // 0.1.64：标题与进度条随进度更新（见 dialog_move_progress.xml 注释）。
+            mMoveProgressDialog.setTitle(
+                    getString(R.string.star_list_moving, state.done, state.total));
+            if (mMoveProgressBar != null) {
+                mMoveProgressBar.setProgress(state.done);
+            }
+            return;
         }
-    }
-
-    private void showBatchMoveResult(int total, List<String> failed,
-            List<String> targetIds, AlertDialog progressDialog) {
-        int moved = total - failed.size();
-        if (progressDialog.isShowing()) {
-            progressDialog.dismiss();
+        dismissMoveProgressDialog();
+        if (mMoveViewModel == null || mMoveViewModel.isResultConsumed(state)) {
+            return;
         }
-        mMoveProgressBar = null;
-        if (failed.isEmpty()) {
+        int moved = state.total - state.failed.size();
+        if (state.failed.isEmpty()) {
             Toast.makeText(getActivity(), getString(R.string.star_list_moved_title,
-                    moved, total), Toast.LENGTH_SHORT).show();
+                    moved, state.total), Toast.LENGTH_SHORT).show();
+            mMoveViewModel.markResultConsumed(state);
             exitMultiSelect();
             refetchLists();
             return;
         }
+        showBatchMoveResult(state, moved);
+    }
+
+    private void showBatchMoveResult(StarBatchMoveViewModel.State state, int moved) {
+        List<String> failed = state.failed;
+        List<String> targetIds = state.targetIds;
         StringBuilder message = new StringBuilder();
         message.append(getString(targetIds.isEmpty()
                 ? R.string.star_list_move_out_note : R.string.star_list_move_done_note, moved));
@@ -1362,22 +1389,42 @@ public class StarMergedFragment extends Fragment {
         List<String> names = failed.size() > 3 ? failed.subList(0, 3) : failed;
         message.append("\n").append(getString(R.string.star_list_move_failed, failed.size(),
                 TextUtils.join("、", names) + (failed.size() > 3 ? "…" : "")));
-        new AlertDialog.Builder(requireActivity())
-                .setTitle(getString(R.string.star_list_moved_title, moved, total))
+        dismissMoveResultDialog();
+        mMoveResultDialog = new AlertDialog.Builder(requireActivity())
+                .setTitle(getString(R.string.star_list_moved_title, moved, state.total))
                 .setMessage(message.toString())
                 .setPositiveButton(R.string.star_list_done, (d, w) -> {
+                    mMoveViewModel.markResultConsumed(state);
                     exitMultiSelect();
                     refetchLists();
                 })
                 .setNegativeButton(R.string.star_list_retry_failed, (d, w) -> {
-                    // 只重试失败的仓库。
-                    List<String> retry = new ArrayList<>(failed);
-                    mSelectedRepos.clear();
-                    mSelectedRepos.addAll(retry);
-                    startBatchMove(targetIds);
+                    // 只重试失败的仓库（失败列表存在 ViewModel 里，不依赖
+                    // 已被 onDestroyView 清掉的 mSelectedRepos）。
+                    mMoveViewModel.retryFailed();
                 })
                 .setCancelable(false)
-                .show();
+                .create();
+        mMoveResultDialog.show();
+    }
+
+    private void dismissMoveProgressDialog() {
+        if (mMoveProgressDialog != null) {
+            if (mMoveProgressDialog.isShowing()) {
+                mMoveProgressDialog.dismiss();
+            }
+            mMoveProgressDialog = null;
+        }
+        mMoveProgressBar = null;
+    }
+
+    private void dismissMoveResultDialog() {
+        if (mMoveResultDialog != null) {
+            if (mMoveResultDialog.isShowing()) {
+                mMoveResultDialog.dismiss();
+            }
+            mMoveResultDialog = null;
+        }
     }
 
     // ---- 0.1.64：长按排序（顺序只存本机）----
@@ -1591,7 +1638,11 @@ public class StarMergedFragment extends Fragment {
                         // 0.1.64：未分组区无身份色（无彩条/首字母圆标/简介）。
                         h.colorBar.setVisibility(View.GONE);
                         h.letter.setVisibility(View.GONE);
-                        h.subtitle.setVisibility(View.GONE);
+                        // 0.2.2：Star 未加载完时副标题显示“仅显示已加载的 N 条”，
+                        // 加载完则隐藏（与 TYPE_LIST 的简介共用同一行）。
+                        h.subtitle.setText(item.description);
+                        h.subtitle.setVisibility(TextUtils.isEmpty(item.description)
+                                ? View.GONE : View.VISIBLE);
                     } else {
                         // 0.1.20 F-24: hashCode()==MIN_VALUE 时 Math.abs 仍为负会越界。
                         int color = GROUP_COLORS[Math.floorMod(item.title.hashCode(),

@@ -32,8 +32,8 @@ android {
     defaultConfig {
         minSdkVersion 23
         targetSdkVersion 35
-        versionCode 200
-        versionName "0.2.0"
+        versionCode 201
+        versionName "0.2.1"
         applicationId "com.gh4a"
         resourceConfigurations += ['en', 'zh-rCN']
 
@@ -52,9 +52,15 @@ android {
             def ks = file("../../keystores/octodroid-debug.keystore")
             if (ks.exists()) {
                 storeFile ks
-                storePassword "android"
+                // S-L6：debug keystore 不再用公开默认值 "android"，密码存
+                // gitignored 的 client.properties（DebugKeystorePassword）；
+                // 无该键时回落默认，保证新检出构建不中断。证书未动，
+                // 覆盖安装不受影响。
+                def debugPw = clientProps.containsKey('DebugKeystorePassword')
+                        ? clientProps['DebugKeystorePassword'] : "android"
+                storePassword debugPw
                 keyAlias "androiddebugkey"
-                keyPassword "android"
+                keyPassword debugPw
             }
         }
     }
@@ -91,6 +97,10 @@ dependencies {
     def okHttpVersion = '4.12.0'
     def retrofitVersion = '3.0.0'
     implementation 'androidx.appcompat:appcompat:1.7.1'
+    // 0.2.2：批量移组进度存 ViewModel（StarBatchMoveViewModel），旋转屏幕
+    // 时 Rx 链不中断；fragment 已间接依赖 lifecycle-viewmodel，这里显式
+    // 声明以便直接引用（2.8.7 与 appcompat 1.7.1 的传递版本一致）。
+    implementation 'androidx.lifecycle:lifecycle-viewmodel:2.8.7'
     implementation 'androidx.cardview:cardview:1.0.0'
     implementation 'androidx.preference:preference:1.2.1'
     implementation 'androidx.browser:browser:1.9.0'

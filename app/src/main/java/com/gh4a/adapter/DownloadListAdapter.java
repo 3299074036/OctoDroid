@@ -48,6 +48,19 @@ public class DownloadListAdapter
         String subtitle = item.record.description != null && !item.record.description.isEmpty()
                 ? status + " · " + item.record.description
                 : status;
+        // 0.2.2：下载完成后显示文件大小与 SHA-256 前 16 位（供人工核对；
+        // 完整哈希在记录里，旧记录没有则不显示）。
+        if (item.status == DownloadManager.STATUS_SUCCESSFUL) {
+            if (item.record.size > 0) {
+                subtitle += " · " + android.text.format.Formatter.formatFileSize(
+                        mContext, item.record.size);
+            }
+            if (item.record.sha256 != null && !item.record.sha256.isEmpty()) {
+                String shortHash = item.record.sha256.length() > 16
+                        ? item.record.sha256.substring(0, 16) + "…" : item.record.sha256;
+                subtitle += " · SHA-256: " + shortHash;
+            }
+        }
         holder.tvSubtitle.setText(subtitle);
         holder.tvTime.setText(StringUtils.formatRelativeTime(mContext, new Date(item.record.time), true));
     }

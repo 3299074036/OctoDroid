@@ -25,14 +25,25 @@ public class DownloadRecordManager {
         public final String url;
         public final String description;
         public final long time;
+        /** 下载完成后的文件大小（字节）；未知为 0。 */
+        public final long size;
+        /** 下载完成后的 SHA-256（小写 hex）；未知为 null。 */
+        public final String sha256;
 
         public Record(long downloadId, String fileName, String url,
                 String description, long time) {
+            this(downloadId, fileName, url, description, time, 0, null);
+        }
+
+        public Record(long downloadId, String fileName, String url,
+                String description, long time, long size, String sha256) {
             this.downloadId = downloadId;
             this.fileName = fileName;
             this.url = url;
             this.description = description;
             this.time = time;
+            this.size = size;
+            this.sha256 = sha256;
         }
     }
 
@@ -51,6 +62,25 @@ public class DownloadRecordManager {
         save(context, records);
     }
 
+    /** 下载完成后补记文件大小与 SHA-256（供下载列表展示、人工核对）。 */
+    public static void updateFileInfo(Context context, long downloadId,
+            long size, String sha256) {
+        List<Record> records = getRecords(context);
+        boolean changed = false;
+        for (int i = 0; i < records.size(); i++) {
+            Record r = records.get(i);
+            if (r.downloadId == downloadId) {
+                records.set(i, new Record(r.downloadId, r.fileName, r.url,
+                        r.description, r.time, size, sha256));
+                changed = true;
+                break;
+            }
+        }
+        if (changed) {
+            save(context, records);
+        }
+    }
+
     public static List<Record> getRecords(Context context) {
         List<Record> records = new ArrayList<>();
         String json = prefs(context).getString(KEY_RECORDS, null);
@@ -66,7 +96,9 @@ public class DownloadRecordManager {
                         o.optString("name"),
                         o.optString("url"),
                         o.optString("desc"),
-                        o.optLong("time")));
+                        o.optLong("time"),
+                        o.optLong("size"),
+                        o.has("sha256") ? o.optString("sha256", null) : null));
             }
         } catch (JSONException ignored) {
         }
@@ -97,6 +129,10 @@ public class DownloadRecordManager {
                 o.put("url", r.url);
                 o.put("desc", r.description);
                 o.put("time", r.time);
+                o.put("size", r.size);
+                if (r.sha256 != null) {
+                    o.put("sha256", r.sha256);
+                }
                 array.put(o);
             }
         } catch (JSONException ignored) {

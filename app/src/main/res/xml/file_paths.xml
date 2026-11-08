@@ -3,6 +3,11 @@
     <external-path
         name="download"
         path="Download/" />
+    <!-- 0.2.2（S-M5）：下载改落应用私有目录（getExternalFilesDir/Download），
+         FileProvider 在此开一个口，供下载列表／自更新安装打开文件。 -->
+    <external-files-path
+        name="private_download"
+        path="Download/" />
     <!-- 0.1.36：深色模式诊断日志导出（临时，定论后连同追踪一并删掉） -->
     <cache-path
         name="trace"

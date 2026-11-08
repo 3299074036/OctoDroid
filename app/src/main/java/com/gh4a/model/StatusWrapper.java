@@ -110,16 +110,15 @@ public class StatusWrapper {
         long seconds = deltaSeconds % 60;
         long minutes = (deltaSeconds % 3600) / 60;
         long hours = deltaSeconds / 3600;
-        int formatStringResId;
 
+        // B-L10：每档只传该格式串实际用的参数（之前恒传 3 个，
+        // 小时档只有 2 个占位符，lint StringFormatMatches 报错）。
         if (hours == 0 && minutes == 0) {
-            formatStringResId = R.string.check_runtime_format_seconds;
+            return context.getString(R.string.check_runtime_format_seconds, seconds);
         } else if (hours == 0) {
-            formatStringResId = R.string.check_runtime_format_minutes;
+            return context.getString(R.string.check_runtime_format_minutes, minutes, seconds);
         } else {
-            formatStringResId = R.string.check_runtime_format_hours;
+            return context.getString(R.string.check_runtime_format_hours, hours, minutes);
         }
-
-        return context.getString(formatStringResId, hours, minutes, seconds);
     }
 }
