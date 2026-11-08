@@ -1,4 +1,5 @@
-# OctoDroid 商店后端：每小时预计算一次静态 JSON，推到 gh-pages 分支。
+# OctoDroid 商店后端：每天 0 点、12 点（北京时间，即 UTC 4 点、16 点）
+# 预计算一次静态 JSON，推到 gh-pages 分支。
 # App 取 https://3299074036.github.io/OctoDroid/store/ 下的现成文件，
 # 不再走实时全量搜索。API 调用走仓库 secret STORE_PAT（细粒度 PAT，
 # 仅公开仓库只读；每小时 5000 次），三榜各取前 1000 候选，完整跑约
@@ -8,12 +9,12 @@
 # gh-pages，下轮读 7 天前的快照算近 7 日均涨星（零新增 API 调用，
 # 攒够 7 天后生成器热门条目切到真·近期日均）。
 # 快照（App 内置离线兜底）不由本工作流更新：只在出 App 包前本地跑
-# 一次生成器、随代码提交，避免每小时往主分支写提交。
+# 一次生成器、随代码提交，避免往主分支写提交。
 name: store-backend
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 4,16 * * *"
   workflow_dispatch:
 
 concurrency:
