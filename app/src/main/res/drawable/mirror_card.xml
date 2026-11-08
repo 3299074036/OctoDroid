@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 镜像源页：白底细边圆角卡片（自动选择卡片、新增/编辑输入卡片、新增按钮共用） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="12dp" />
+    <solid android:color="#FFFFFF" />
+    <stroke android:width="1dp" android:color="#e3e3e3" />
+</shape>
