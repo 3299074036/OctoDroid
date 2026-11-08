@@ -1,32 +1,42 @@
 #!/usr/bin/env python3
-"""OctoDroid 商店后端生成器：Komi 式预计算 + 静态 JSON。
+"""OctoDroid 商店后端生成器：hiwiki 全对上（严格版）。
 
-每小时由 GitHub Actions 跑一遍，把结果推到 gh-pages 分支，App 直接取
-现成 JSON（feed 3 小时缓存、榜单 24 小时缓存），不再走实时全量搜索。
+每天 0 点、12 点（北京时间）由 GitHub Actions 跑一遍，把结果推到
+gh-pages 分支，App 直接取现成 JSON（feed 3 小时缓存、榜单 24 小时
+缓存），不再走实时全量搜索。
 
-数据口径（对标 Komi 的 GitHub 回退查询，2026-11-01 沙箱实测可用）：
-  trending     两条查询各取一半（总数仍 300）：(a) 近 30 天有提交、星标
-               50 以上，按星标排；(b) 90 天内创建、星标 50 以上，按星标排
-  new-releases 近 14 天有提交、星标 10 以上，按更新时间排；验 release 后
-               只留 14 天内真正发过版的，按发版时间排
-  most-popular 一年内有提交、星标 1000 以上，按星标排（2026-11-08 起
-               去掉“半年前创建”限制，年轻大库也可进榜）
-收录规则：只留最新 Release（第 1 页首个非草稿）带可安装附件的仓库，
-附件后缀认平台（与 App 内 StoreClassifier 同表）；平台文件按精确匹配，
-纯压缩包仓库只进 all（与 v4 原型行为一致）。
+严格版（2026-11-08，用户定：全对上）：
+  池子   feed = hiwiki 当次重抓的可安装池（2,457 条，2026-11-08 数）；
+         我方独有的 1,408 条已删。搜索管线与 Komi 镜像整段已删。
+  榜单   每条 item 带 ranks：hiwiki subgroup 在 96 榜内时只进该榜；
+         不在对照表里就是 hiwiki 的权威结论“不给榜”，返回 []，不回
+         落静态表/关键词规则（静态表与规则只对非 hiwiki 来源生效，
+         严格版下不存在，仅作防线）。
+  排序   榜内顺序由 App 按纯星标排（后端不管）；三榜（热门／最新发布
+         ／最热门）由同一份池子数据重算，零新增 API 调用。
+  新鲜度 对照表与池子每轮都重抓（harvest-hiwiki.py）；重抓失败不拦整
+         轮——回落到上一轮留档或提交的兜底对照表。
 
-排序公式（2026-11-08 完整版，见 docs/research/OctoDroid/
-store-formula-complete.html）：
-  最热门 popularityScore = 星标 + 2×fork，降序（照抄 Komi）
-  热门   镜像条目按自带 trendingScore 降序在前；生成器条目无 7 天历史时
-         按 stars_per_day（星标 ÷ 建库天数）排在其后，有 7 天历史时按
-         trendingScore = 20 × 近 7 日均涨星，与镜像同场按分排
-  最新发布 只留 14 天内发过版的，按发版时间降序
-镜像字段原样保留：热门镜像的 trendingScore、最热门镜像的
-popularityScore、发现 feed 文件里两者皆有则皆留；镜像缺
-popularityScore 时后端按星标 + 2×fork 补算，不留给 App 算。
-生成器条目必带 stars_per_day 与 popularityScore；无 7 天历史时不写
-trendingScore（App 靠“有没有这个字段”区分镜像/生成器条目）。
+数据口径：
+  收录规则：只留 release 里带可安装附件的仓库。release 取最新非
+    prerelease 且带 ≥1 可安装附件的那一个（按 releases[] 最新在前
+    扫描；全部 release 都没有可安装附件时丢弃该仓并记日志）。附件
+    后缀认平台（与 App 内 StoreClassifier 同表）；纯压缩包仓库只进
+    all。
+  三榜规则（现行口径平移）：热门 星标>50 且 pushedAt 在 30 天内；
+    最新发布 星标>10 且 14 天内真正发过版（按条目 latestDate 判断，
+    即所取 release 的发布时间）；最热门 星标>1000 且 pushedAt 在
+    1 年内。
+  排序公式：最热门 popularityScore = 星标 + 2×fork；热门 有
+    trendingScore 的按分降序在前，没有的按 stars_per_day 降序排其
+    后，缺 stars_per_day 的按星标顶替；最新发布按发版时间降序。
+
+hiwiki 字段（payload 实测）：星标／语言／简介／头像／推送时间／
+release（含附件文件名与下载量）全部信 hiwiki，0 次 GitHub API 调
+用；只补三个 hiwiki 没有的字段——forks／topics／created_at：上一
+轮 feed 里有的直接沿用，没有的调 1 次 GET /repos/{full}，硬上限
+--metadata-cap（默认 4500）触顶后剩余新仓以残缺字段进 feed
+（forks=0、topics=[]、无 created_at），整轮不失败。
 
 历史快照（7 天冷启动，零新增 API 调用）：每轮把输出仓库的当前星标数
 写成 history/<当天日期>.json（--history-dir 指定目录）；下轮读 7 天前
@@ -34,34 +44,30 @@ trendingScore（App 靠“有没有这个字段”区分镜像/生成器条目�
 store/history/，git 拉取不占 API 额度；攒够 7 天前生成器热门条目切到
 真·近期日均，之前用 stars_per_day 顶替，新库无历史时同样顶替。
 
-扩量（2026-11-07）：每轮另并 Komi 公开离线镜像
-（komi-store/komi-store-backend-data/cached-data/，raw 直链、无需鉴权、
-不占 GitHub API 额度）17 个文件：feed 的 all/android/linux/macos/
-windows.json，三榜 trending/most-popular/new-releases 各 android/linux/
-macos/windows.json。按 fullName（小写）去重，生成器实时验过的优先；
-镜像拉不到时只出生成器数据，整轮不失败。
-
-分类（FeedCategory，Komi 同款）：按仓库 topics 命中，见 TOPIC_TO_CODE。
-
-用法：
-  GITHUB_TOKEN=... python3 generate.py --max-candidates 300 \
-      --max-items 300 \
-      --out store-backend/output \
-      --history-dir store-backend/history \
-      --snapshot-dir app/src/main/assets/store-snapshot
-无 token 时请用小 --max-candidates（未认证限速 60 次/小时）；
-Actions 里用 GITHUB_TOKEN（每小时 1000 次；300 候选 × 3 榜约 900 次
-release 检查＋约 10 次搜索分页，逼近上限，故候选数不设 1000）。
---max-candidates 是每榜总数：热门两条查询平分（如 300 -> 150+150）。
---max-items 只 cap 生成器自产的每榜条数；并入镜像后的三榜与发现不
-再 cap（镜像三榜去重后已有 490/580/460 条，cap 住就白并了），
-发现 = 三榜并集去重＋镜像 feed 文件的独有条目，按星标排。
+用法（工作流）：
+  GITHUB_TOKEN=<STORE_PAT> python3 generate.py \
+      --hiwiki-pool hiwiki-data/hiwiki-pool.json \
+      --hiwiki-ranks hiwiki-data/hiwiki-ranks.json \
+      --prev-feed prev-feed.json \
+      --metadata-cap 4500 --harvest-status ok \
+      --history-dir store-history \
+      --out store-output --snapshot-dir /dev/null
+离线模拟（核数用，不调 api.github.com）：
+  python3 generate.py --simulate \
+      --hiwiki-pool <分类 JSON> --hiwiki-ranks <对照表> \
+      --prev-feed <上一轮 feed/all.json> \
+      --out /tmp/sim-out --snapshot-dir /dev/null
+  模拟下新仓元数据一律残缺（forks=0、topics=[]、无 created_at），
+  无 release 数据的记录降级拼条目（平台沿用上一轮 feed、没有则空）；
+  计数（feed／ranked／unranked／非空榜）与榜单归属仍可核对。
 
 输出（out 下）：
   feed/{all,android,macos,windows,linux,ios}.json
   feed/{all,android,macos,windows,linux,ios}/page<n>.json（20 条一页）
   categories/{trending,new-releases,most-popular}/{platform}.json
-  meta.json
+  meta.json（含 poolSize / hiwikiItems / ranked / unranked /
+  mappingDate / harvestStatus / apiCalls / droppedNoInstallable /
+  metadataDegraded）
 历史快照（history-dir 下，文件名 <YYYY-MM-DD>.json）：
   {"date": ..., "generatedAt": ..., "stars": {"owner/repo": 星标数}}
   当天快照只写、不读；读的是 7 天前的那一份。
@@ -70,8 +76,9 @@ release 检查＋约 10 次搜索分页，逼近上限，故候选数不设 1000
   chart_most-popular_all.json
 每个文件：{"generatedAt": ISO, "items": [...]}；单条含 fullName / owner /
 avatarUrl / description / stars / forks / language / topics / topicCodes /
-latestTag / latestDate / downloadCount / platforms。
-只打数量日志，不打仓库名以外的任何内容。
+latestTag / latestDate / pushedAt / downloadCount / platforms / source /
+ranks（createdAt 仅后端复用时写，App 不读）。只打数量日志，不打仓库名
+以外的任何内容。
 """
 
 import argparse
@@ -82,19 +89,12 @@ import re
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 
 API = "https://api.github.com"
 
-# Komi 公开离线镜像根地址（raw 直链，无需鉴权，不占 API 额度）。
-KOMI_BASE = ("https://raw.githubusercontent.com/komi-store/"
-             "komi-store-backend-data/main/cached-data/")
-KOMI_CHARTS = ["trending", "most-popular", "new-releases"]
-KOMI_PLATFORMS = ["android", "linux", "macos", "windows"]
-KOMI_FEED_PLATFORMS = ["all", "android", "linux", "macos", "windows"]
-# 镜像里只有这四个分平台文件；iOS 只从生成器自产数据里出。
-MIRROR_PLATFORMS = ["android", "windows", "macos", "linux"]
+# 三榜顺序（输出文件与 meta.json 的榜序与现行一致）。
+CHARTS = ["trending", "new-releases", "most-popular"]
 
 PLATFORMS = ["all", "android", "macos", "windows", "linux", "ios"]
 
@@ -107,8 +107,6 @@ TRENDING_FACTOR = 20
 # 最新发布：只留该天数内真正发过版的。
 NEW_RELEASES_DAYS = 14
 
-# release 检查之间的延迟（秒）：平滑调用节奏，避开次级限速。
-RELEASE_DELAY = 0.05
 # 403/429 限速重试：最多 3 次，按 Retry-After / X-RateLimit-Reset 退避，
 # 单次等待上限 300 秒。
 RATE_LIMIT_RETRIES = 3
@@ -170,6 +168,107 @@ def topic_codes(topics):
             if t in members:
                 codes.add(code)
     return sorted(codes)
+
+
+# ---------------------------------------------------------------------------
+# 排行榜分组（96 榜）：静态表 + hiwiki 覆盖（2026-11-08）。
+#
+# 来源：App 端 StoreRankGroups.java（v4，0.1.60；该文件只在工作树，未进
+# master），本段由脚本从该文件逐字转写，未手抄。静态表 155 条、关键词
+# 规则 131 条；榜单结构 7 大类 96 榜与之一致。
+# 规则：静态表优先于关键词规则（与 App 的 build() 一致）；一个仓库可进
+# 多个榜（静态表 44 条是多榜，关键词规则 3 条是多榜）。
+# ---------------------------------------------------------------------------
+RANK_GROUP_NAMES = ["AI", "媒体", "网络", "工具", "效率", "开发", "游戏"]
+
+RANK_LIST_NAMES = [["AI Agent框架", "AI聊天客户端/助手", "LLM推理/微调工具", "AI第二大脑/知识库", "AI图像工具", "AI语音工具", "MCP连接器/工具"], ["视频播放器", "音乐播放器", "影视/追剧应用", "B站客户端", "IPTV/电视直播", "媒体库/流媒体服务器", "音乐流媒体服务", "电台/播客/有声"], ["代理/VPN客户端", "下载管理器", "即时通讯软件", "网络监控/抓包工具", "内网穿透工具", "网络爬虫工具", "网络隧道工具"], ["弹幕/直播工具", "电子书阅读器", "浏览器", "浏览器扩展", "漫画阅读器", "命令行工具", "视频下载工具", "数据库管理工具", "投屏/手机连接工具", "文件传输工具", "文件管理器", "系统增强工具", "小说阅读器", "语音转文字工具", "终端模拟器", "屏幕录制工具", "系统监控工具", "远程桌面/控制工具", "壁纸工具", "截图工具", "图像处理工具", "系统清理工具", "网页翻译工具", "输入法", "自动化工具", "PDF工具", "云存储同步工具", "音频编辑工具", "视频转码工具", "压缩解压工具", "密码管理工具", "书签工具", "图片查看器", "虚拟机/容器工具", "剪贴板管理", "资源抓取工具", "字幕工具", "窗口管理器", "调试/分析工具", "番茄钟/专注工具", "广告拦截工具", "视频编辑工具", "文档工具", "Docker工具"], ["笔记工具", "任务/待办管理", "效率启动器", "记账/财务管理", "日历工具", "时间追踪工具", "知识库工具"], ["后端开发工具", "开发库/框架", "AI编程助手", "代码编辑器", "代码质量工具", "编程语言", "机器学习框架", "Markdown编辑器", "数据库系统", "跨平台应用框架", "逆向工程工具", "CI/CD工具", "包管理器", "构建工具", "语言工具链", "API开发工具", "Kubernetes工具"], ["Minecraft启动器/工具", "游戏模拟器", "游戏", "游戏辅助工具", "游戏启动器", "游戏引擎"]]
+
+# 静态覆写表：小写 fullName -> [(组下标, 榜下标), ...]。
+RANK_ASSIGN_MAP = {"1jehuang/jcode": [[5, 3]], "2dust/v2rayn": [[2, 0]], "3150481853/molly-qq-whale": [[0, 1], [0, 6]], "3proxy/3proxy": [[2, 0]], "alishahryar1/free-claude-code": [[5, 2]], "arthursonzogni/ftxui": [[5, 1]], "astrbotdevs/astrbot": [[0, 1]], "burntsushi/ripgrep": [[3, 5]], "cherryhq/cherry-studio": [[0, 1], [0, 2]], "clementtsang/bottom": [[3, 16]], "colorlibhq/adminlte": [[5, 1]], "comfy-org/comfyui": [[0, 0], [0, 4]], "fcl-team/foldcraftlauncher": [[6, 0], [6, 4]], "genymobile/scrcpy": [[3, 8]], "graphify-labs/graphify": [[0, 3], [4, 6]], "ipf-sinon/dsh-folk": [[0, 6], [5, 2]], "icewhaletech/casaos": [[3, 11]], "incarnamind/incarnamind": [[0, 3], [4, 6]], "josefnemec/playnite": [[6, 4]], "juliusbrussee/caveman": [[0, 6], [5, 2]], "kong/insomnia": [[5, 15]], "kriscris/palworld-pal-editor": [[6, 3]], "lizardbyte/sunshine": [[6, 3]], "maaassistantarknights/maaassistantarknights": [[6, 3]], "mariocatuogno/panzaui": [[6, 3]], "metacubex/metacubexd": [[2, 0]], "nickemanarin/screentogif": [[3, 15]], "opencut-app/opencut": [[3, 41]], "pcl-community/pcl-ce": [[6, 0], [6, 4]], "panniantong/agent-reach": [[0, 0]], "parricidium/mwcoop": [[6, 2], [6, 3]], "prismlauncher/prismlauncher": [[6, 0], [6, 4]], "pumpkin-mc/pumpkin": [[6, 0]], "qwenlm/qwen-code": [[0, 6], [5, 2]], "raven-scout/scout": [[0, 3], [4, 6]], "routstr/routstrd": [[2, 6]], "sermilion/skillbill": [[0, 6], [5, 2]], "stirling-tools/stirling-pdf": [[3, 25]], "tauricresearch/tradingagents": [[0, 0]], "the-vibe-company/quivr": [[0, 3], [4, 6]], "thinkflowlab/flybot": [[0, 1]], "ajeetdsouza/zoxide": [[3, 5]], "alexpasmantier/television": [[3, 5]], "alibaba/arthas": [[3, 38]], "alibaba/nacos": [[5, 0]], "anomalyco/opencode": [[0, 6], [5, 2]], "ant-design/ant-design": [[5, 1]], "anthropics/claude-code": [[0, 6], [5, 2]], "aquasecurity/trivy": [[3, 38]], "audacity/audacity": [[3, 27]], "axisvela/praxo-core": [[0, 0], [0, 6]], "b-editor/beutl": [[3, 41]], "bee-san/rustscan": [[2, 3]], "binary-husky/gpt_academic": [[0, 1]], "budcribar/remoteblazorwebview": [[5, 1]], "ccch1mneyyy/dsh-go": [[0, 1], [5, 2]], "clash-verge-rev/clash-verge-rev": [[2, 0]], "cli/cli": [[3, 5]], "cline/cline": [[5, 2]], "cloudfoundry/stratos": [[5, 16]], "code-yeongyu/oh-my-openagent": [[0, 2]], "coder/code-server": [[5, 3]], "cr0hn/dockerscan": [[3, 38], [3, 43]], "cyanide-burnout/turbojedi": [[3, 5], [3, 16]], "davidkarlsen/flyway-operator": [[5, 8], [5, 16]], "donetick/donetick": [[4, 1]], "dorakyuraduang/whitealbum2-android": [[6, 2]], "ducaale/xh": [[3, 5]], "earendil-works/pi": [[0, 0], [5, 2]], "electron/electron": [[5, 1], [5, 9]], "farion1231/cc-switch": [[5, 2]], "fastfetch-cli/fastfetch": [[3, 16]], "fatedier/frp": [[2, 4]], "fish-shell/fish-shell": [[3, 5]], "fleetdm/fleet": [[3, 16]], "fluentci-io/fluentci": [[5, 11]], "gadievron/raptor": [[0, 0], [3, 38]], "ggml-org/llama.cpp": [[0, 2], [5, 6]], "godotengine/godot": [[6, 5]], "gogs/gogs": [[5, 0]], "google-gemini/gemini-cli": [[5, 2]], "h3pdesign/neon-vision-editor": [[3, 41]], "h5bp/html5-boilerplate": [[5, 1]], "hacan359/xerabora": [[6, 3]], "harry0703/moneyprinterturbo": [[0, 4], [3, 41]], "headroomlabs-ai/headroom": [[5, 2]], "hydralauncher/hydra": [[6, 4]], "immich-app/immich": [[1, 5]], "infiniflow/ragflow": [[0, 3]], "janhq/jan": [[0, 1], [0, 2]], "kjk-engine/kjk": [[6, 1], [6, 5]], "labring/sealos": [[5, 16]], "langchain-ai/langchain": [[0, 0], [0, 2], [5, 6]], "langflow-ai/langflow": [[0, 2]], "langgenius/dify": [[0, 0]], "lobehub/lobehub": [[0, 1]], "lollipopkit/flutter_server_box": [[3, 16]], "louislam/uptime-kuma": [[3, 16]], "magenta-maple/wubi-dict-editor": [[3, 23]], "mapeditor/tiled": [[6, 3]], "marcinz606/negpy": [[3, 20]], "matthart1983/netwatch": [[2, 3]], "mayneyao/eidos": [[4, 0], [4, 6]], "mbrock/filnix": [[5, 13], [5, 14]], "microsoft/powertoys": [[3, 11]], "mifi/lossless-cut": [[3, 41]], "mirceanton/kubectl-switch": [[3, 5], [5, 16]], "movieclaw/movieclaw": [[1, 2]], "mpvnet-player/mpv.net": [[1, 0]], "neovim/neovim": [[5, 3]], "netdata/netdata": [[3, 16]], "niakw/prosperoeden-encore": [[6, 1]], "odin-lang/odin": [[5, 5]], "ollama/ollama": [[0, 1], [0, 2]], "openai/codex": [[0, 2], [5, 2]], "openclaw/openclaw": [[0, 0]], "oven-sh/bun": [[5, 12]], "paytaca/paytaca-app": [[4, 3]], "pbek/qownnotes": [[4, 0]], "pierre-emmanuelj/iptv-proxy": [[1, 4]], "protocolbuffers/protobuf": [[5, 1]], "react/react-native": [[5, 1], [5, 9]], "rustdesk/rustdesk": [[3, 17]], "seyed-ali-002/dana-mcp-server": [[0, 6]], "sharkdp/bat": [[3, 5]], "sharkdp/fd": [[3, 5]], "sharkdp/hyperfine": [[3, 5]], "sharkdp/pastel": [[3, 5]], "siyuan-note/siyuan": [[4, 0], [4, 6]], "songquanpeng/one-api": [[5, 15]], "sostenesfreitas/ocarina-recomp": [[6, 2]], "stablyai/orca": [[5, 2]], "storytold/craft-launcher": [[6, 0], [6, 4]], "suhang12332/swift-craft-launcher": [[6, 0], [6, 4]], "sxyazi/yazi": [[3, 10]], "tldr-pages/tldr": [[3, 5]], "topjohnwu/magisk": [[3, 11]], "tw93/pake": [[5, 9]], "twbs/bootstrap": [[5, 1]], "ultraworkers/claw-code": [[0, 0]], "unslothai/unsloth": [[0, 2], [5, 6]], "usememos/memos": [[4, 0]], "vale-cli/vale": [[3, 5], [5, 4]], "ventoy/ventoy": [[3, 11]], "vercel-labs/agent-browser": [[0, 0]], "vicanso/cyberapi": [[5, 15]], "vnotex/vnote": [[4, 0]], "weifuwan/yak-ops": [[5, 8]], "wlejon/bro": [[5, 9], [6, 5]], "woodpecker-ci/woodpecker": [[5, 11]], "x6nux-oss/zed-globalization": [[5, 3]], "xopcai/xopc": [[0, 1]], "yt-dlp/yt-dlp": [[2, 1], [3, 5], [3, 6]], "ytdl-org/youtube-dl": [[2, 1], [3, 6]], "zarf-dev/zarf": [[5, 16]]}
+
+# 关键词规则：[(关键字, [(组下标, 榜下标), ...]), ...]。仅对静态表里
+# 没有的仓库生效；关键字命中 = topics 里有同名 topic，或仓库名小写后
+# 包含该关键字；"a+b" 表示两部分都要命中（简介不再参与匹配）。
+RANK_RULES = [["mcp", [[0, 6]]], ["llm", [[0, 2]]], ["chat", [[0, 1]]], ["chatbot", [[0, 1]]], ["knowledge-base", [[0, 3], [4, 6]]], ["second-brain", [[0, 3], [4, 6]]], ["image-generation", [[0, 4]]], ["text-to-image", [[0, 4]]], ["stable-diffusion", [[0, 4]]], ["text-to-speech", [[0, 5]]], ["tts", [[0, 5]]], ["voice", [[0, 5]]], ["music", [[1, 1]]], ["music-player", [[1, 1]]], ["audio-player", [[1, 1]]], ["music-streaming", [[1, 6]]], ["video+player", [[1, 0]]], ["video-player", [[1, 0]]], ["movie", [[1, 2]]], ["anime", [[1, 2]]], ["bilibili", [[1, 3]]], ["iptv", [[1, 4]]], ["podcast", [[1, 7]]], ["vpn", [[2, 0]]], ["proxy", [[2, 0]]], ["tunnel", [[2, 4]]], ["downloader", [[2, 1], [3, 6]]], ["crawler", [[2, 5]]], ["spider", [[2, 5]]], ["scraper", [[2, 5]]], ["web-scraping", [[2, 5]]], ["instant-messaging", [[2, 2]]], ["messenger", [[2, 2]]], ["packet-capture", [[2, 3]]], ["network-monitoring", [[2, 3]]], ["remote-desktop", [[3, 17]]], ["docker", [[3, 43]]], ["password", [[3, 30]]], ["password-manager", [[3, 30]]], ["editor", [[5, 3]]], ["code-editor", [[5, 3]]], ["text-editor", [[5, 3]]], ["browser", [[3, 2]]], ["browser-extension", [[3, 3]]], ["extension", [[3, 3]]], ["ebook", [[3, 1]]], ["reader", [[3, 1]]], ["manga", [[3, 4]]], ["comic", [[3, 4]]], ["novel", [[3, 12]]], ["terminal", [[3, 14]]], ["shell", [[3, 5]]], ["screenshot", [[3, 19]]], ["wallpaper", [[3, 18]]], ["clipboard", [[3, 34]]], ["pdf", [[3, 25]]], ["translation", [[3, 22]]], ["translate", [[3, 22]]], ["input-method", [[3, 23]]], ["automation", [[3, 24]]], ["subtitle", [[3, 36]]], ["compress", [[3, 29]]], ["bookmark", [[3, 31]]], ["image-viewer", [[3, 32]]], ["image-editor", [[3, 20]]], ["virtual-machine", [[3, 33]]], ["container", [[3, 33]]], ["adblock", [[3, 40]]], ["video-editor", [[3, 41]]], ["audio-editor", [[3, 27]]], ["transcode", [[3, 28]]], ["video-converter", [[3, 28]]], ["speech-to-text", [[3, 13]]], ["file-manager", [[3, 10]]], ["file-transfer", [[3, 9]]], ["file-sharing", [[3, 9]]], ["screen-recording", [[3, 15]]], ["screencast", [[3, 15]]], ["system-monitor", [[3, 16]]], ["monitoring", [[3, 16]]], ["database-management", [[3, 7]]], ["cleaner", [[3, 21]]], ["system-cleaner", [[3, 21]]], ["cloud-storage", [[3, 26]]], ["synchronization", [[3, 26]]], ["window-manager", [[3, 37]]], ["pomodoro", [[3, 39]]], ["documentation", [[3, 42]]], ["diagnosis", [[3, 38]]], ["diagnostic", [[3, 38]]], ["danmaku", [[3, 0]]], ["live-streaming", [[3, 0]]], ["emulator", [[6, 1]]], ["minecraft", [[6, 0]]], ["game", [[6, 2]]], ["game-launcher", [[6, 4]]], ["game-engine", [[6, 5]]], ["note", [[4, 0]]], ["note-taking", [[4, 0]]], ["notes", [[4, 0]]], ["todo", [[4, 1]]], ["task-manager", [[4, 1]]], ["launcher", [[4, 2]]], ["calendar", [[4, 4]]], ["time-tracking", [[4, 5]]], ["finance", [[4, 3]]], ["accounting", [[4, 3]]], ["markdown", [[5, 7]]], ["kubernetes", [[5, 16]]], ["database", [[5, 8]]], ["machine-learning", [[5, 6]]], ["computer-vision", [[5, 6]]], ["data-science", [[5, 1]]], ["backend", [[5, 0]]], ["web-server", [[5, 0]]], ["web-framework", [[5, 1]]], ["css-framework", [[5, 1]]], ["code-quality", [[5, 4]]], ["static-analysis", [[5, 4]]], ["linter", [[5, 4]]], ["programming-language", [[5, 5]]], ["reverse-engineering", [[5, 10]]], ["cicd", [[5, 11]]], ["continuous-integration", [[5, 11]]], ["package-manager", [[5, 12]]], ["packaging", [[5, 12]]], ["build-tool", [[5, 13]]], ["build-system", [[5, 13]]], ["language-server", [[5, 14]]], ["compiler", [[5, 14]]], ["http-client", [[5, 15]]]]
+
+# 96 个榜单名集合：hiwiki 覆盖只认这些名字（subgroup 须恰好是其中之一）。
+RANK_NAME_SET = {name for lists in RANK_LIST_NAMES for name in lists}
+
+
+def load_hiwiki_ranks(path=None):
+    """读 hiwiki 分类对照表 {小写 fullName: 细分榜中文名}。
+
+    默认找 generate.py 同目录下的 hiwiki-ranks.json（即本任务交付的
+    hiwiki-merge-mapping.json 改名后）；文件缺失或损坏时返回空表并只记
+    一行日志，整轮不失败（退化为纯静态表行为）。
+    """
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "hiwiki-ranks.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print("hiwiki ranks %s 读不到（按无覆盖处理）：%s" % (path, e))
+        return {}
+    if not isinstance(data, dict):
+        print("hiwiki ranks %s 结构异常（按无覆盖处理）" % path)
+        return {}
+    table = {}
+    for full, sub in data.items():
+        if isinstance(full, str) and isinstance(sub, str) and sub in RANK_NAME_SET:
+            table[full.lower()] = sub
+    print("hiwiki ranks: %s 条（文件 %d 条，%d 条不在 96 榜内已丢弃）"
+          % (len(table), len(data), len(data) - len(table)))
+    return table
+
+
+def match_rank_rules(item):
+    """关键词规则（App StoreRankGroups.matchRules 的逐字移植）。"""
+    out = set()
+    topics = set()
+    for topic in item.get("topics") or []:
+        if topic:
+            topics.add(str(topic).lower())
+    haystack = (item.get("fullName") or "").lower()
+    for keyword, dests in RANK_RULES:
+        hit = True
+        for part in keyword.split("+"):
+            if part not in topics and part not in haystack:
+                hit = False
+                break
+        if hit:
+            out.update(tuple(d) for d in dests)  # dests 是 JSON 转来的 list，需转 tuple 才能进 set
+    return out
+
+
+def assign_ranks(item, hiwiki_map):
+    """给一条 feed 条目定 96 榜归属，返回榜单中文名列表（可为空）。
+
+    优先级（用户 2026-11-08 定）：hiwiki 覆盖 > 静态表 > 关键词规则。
+    hiwiki 覆盖：仓库在对照表里且 subgroup 恰好是 96 榜之一时，只进
+    该榜（hiwiki 一仓一榜），静态表（含多榜）整体让路；否则回落到
+    静态表（命中则可能多榜），静态表没有时再走关键词规则。
+    """
+    full = (item.get("fullName") or "").lower()
+    # 全对上（严格版）：hiwiki 来源的条目只信对照表——在表里进该榜，
+    # 不在表里就是 hiwiki 的权威结论“不给榜”，返回 []，不回落静态
+    # 表/关键词规则（回落会凭空造出 hiwiki 没有的归属）。非 hiwiki
+    # 来源（严格版下不存在，留作防线）才走老逻辑。
+    if item.get("source") == "hiwiki":
+        sub = (hiwiki_map or {}).get(full)
+        return [sub] if sub else []
+    sub = (hiwiki_map or {}).get(full)
+    if sub:
+        return [sub]
+    cells = RANK_ASSIGN_MAP.get(full)
+    if cells is None:
+        cells = match_rank_rules(item)
+    names = []
+    for gi, li in sorted(cells):
+        if 0 <= gi < len(RANK_LIST_NAMES) and 0 <= li < len(RANK_LIST_NAMES[gi]):
+            names.append(RANK_LIST_NAMES[gi][li])
+    return names
 
 
 def normalize_date(value):
@@ -284,7 +383,6 @@ class Api:
     def __init__(self, token):
         self.token = token
         self.calls = 0
-        self.release_cache = {}
 
     def get(self, path):
         url = API + path
@@ -345,245 +443,6 @@ class Api:
                 raise SystemExit("GitHub API %s 失败：%s" % (path, e))
         raise SystemExit("GitHub API %s 失败：%s" % (path, last_error))
 
-    def search(self, query, sort, max_candidates, offset=0):
-        """搜索翻页取满：per_page=100，翻到 max_candidates 或 10 页为止。
-
-        GitHub 搜索每查询最多返回 1000 条，故最多 10 页；offset 在
-        跨页拼接后的流上跳过。
-        """
-        collected = []
-        want = offset + max_candidates
-        for page in range(1, 11):
-            if len(collected) >= want:
-                break
-            data = self.get("/search/repositories?q=%s&sort=%s&order=desc"
-                            "&per_page=100&page=%d"
-                            % (urllib.parse.quote(query), sort, page))
-            items = (data or {}).get("items", [])
-            if not items:
-                break
-            collected.extend(items)
-            if len(items) < 100:
-                break
-        return collected[offset:offset + max_candidates]
-
-    def latest_release(self, full_name):
-        key = full_name.lower()
-        if key in self.release_cache:
-            return self.release_cache[key]
-        time.sleep(RELEASE_DELAY)
-        data = self.get("/repos/%s/releases?per_page=5" % full_name)
-        rel = None
-        if data:
-            for r in data:
-                if r and not r.get("draft"):
-                    rel = r
-                    break
-        self.release_cache[key] = rel
-        return rel
-
-
-def build_item(api, repo, now=None, history_old=None):
-    """生成器自产条目：验最新 release、可安装才留。
-
-    必带 stars_per_day（终身日均涨星）与 popularityScore（星标+2×fork，
-    数据现成、零新增调用）；7 天历史快照里有该仓库时才写 trendingScore
-    = 20 × 近 7 日均涨星，无历史时不写该字段（App 靠有无此字段区分
-    镜像/生成器条目），新库无历史时用 stars_per_day 顶替排序。
-    """
-    full = repo.get("full_name", "")
-    rel = api.latest_release(full)
-    if rel is None:
-        return None
-    platforms = set()
-    downloads = 0
-    installable = 0
-    for asset in rel.get("assets") or []:
-        plats = platforms_for_asset(asset.get("name", ""))
-        if plats:
-            platforms.update(plats)
-            downloads += asset.get("download_count") or 0
-            installable += 1
-    if not platforms:
-        return None
-    owner = repo.get("owner") or {}
-    stars = repo.get("stargazers_count") or 0
-    forks = repo.get("forks_count") or 0
-    item = {
-        "fullName": full,
-        "owner": owner.get("login", ""),
-        "name": repo.get("name", ""),
-        "avatarUrl": owner.get("avatar_url", ""),
-        "description": repo.get("description") or "",
-        "stars": stars,
-        "forks": forks,
-        "language": repo.get("language") or "",
-        "topics": repo.get("topics") or [],
-        "topicCodes": topic_codes(repo.get("topics") or []),
-        "latestTag": rel.get("tag_name") or "",
-        "latestDate": rel.get("published_at") or "",
-        "downloadCount": downloads,
-        "assetCount": installable,
-        "platforms": sorted(platforms),
-        "stars_per_day": round(stars_per_day(
-            stars, repo.get("created_at"), now or datetime.datetime.now(
-                datetime.timezone.utc)), 4),
-        "popularityScore": popularity_score(stars, forks),
-    }
-    if history_old is not None:
-        old = history_old.get(full.lower())
-        if isinstance(old, (int, float)):
-            recent = max(0.0, (stars - old) / HISTORY_WINDOW_DAYS)
-            item["trendingScore"] = round(TRENDING_FACTOR * recent, 2)
-    return item
-
-
-def komi_item(repo):
-    """把一条 Komi 镜像仓库映射到咱们的 item 结构；无安装包则返回 None。
-
-    字段映射：fullName / stargazersCount->stars / forksCount->forks /
-    latestReleaseTag->latestTag（榜单文件里没有，从 platformReleases
-    里取发布时间最晚的 tag）/ latestReleaseDate->latestDate（归一化
-    成 ISO Z）/ downloadCount 原样 / owner 头像->avatarUrl /
-    topics/topicCodes 原样（榜单文件里没有 topicCodes 时按 topics
-    用咱们的 TOPIC_TO_CODE 现算）/ hasInstallers* 与 platformReleases
-    并集 -> platforms（只取 android/windows/macos/linux 四值）/
-    assetCount：镜像不给附件数，按平台数计。
-    注意 downloadCount 口径与生成器不同：镜像是累计量，生成器是
-    最新 Release 可安装附件量之和。
-    """
-    full = repo.get("fullName", "")
-    if not full:
-        return None
-    platforms = set()
-    for p in MIRROR_PLATFORMS:
-        if repo.get("hasInstallers" + p.capitalize()):
-            platforms.add(p)
-    releases = repo.get("platformReleases") or {}
-    for p in MIRROR_PLATFORMS:
-        if p in releases:
-            platforms.add(p)
-    if not platforms:
-        return None
-    tag = repo.get("latestReleaseTag") or ""
-    if not tag and releases:
-        latest = max(releases.values(),
-                     key=lambda r: (r or {}).get("publishedAt") or "")
-        tag = (latest or {}).get("tag") or ""
-    topics = repo.get("topics") or []
-    codes = repo.get("topicCodes")
-    if not isinstance(codes, list):
-        codes = topic_codes(topics)
-    owner = repo.get("owner") or {}
-    stars = repo.get("stargazersCount") or 0
-    forks = repo.get("forksCount") or 0
-    item = {
-        "fullName": full,
-        "owner": owner.get("login", ""),
-        "name": repo.get("name") or full.split("/")[-1],
-        "avatarUrl": owner.get("avatarUrl", ""),
-        "description": repo.get("description") or "",
-        "stars": stars,
-        "forks": forks,
-        "language": repo.get("language") or "",
-        "topics": topics,
-        "topicCodes": codes,
-        "latestTag": tag,
-        "latestDate": normalize_date(repo.get("latestReleaseDate")),
-        "downloadCount": repo.get("downloadCount") or 0,
-        "assetCount": len(platforms),
-        "platforms": sorted(platforms),
-    }
-    # 镜像分数原样保留，有什么留什么，绝不丢字段（实测：热门文件带
-    # trendingScore、最热门文件带 popularityScore、发现 feed 文件两者
-    # 皆有、最新发布文件两者皆无）。镜像缺 popularityScore 时后端按
-    # 星标 + 2×fork 补算，不留给 App 算。
-    if isinstance(repo.get("trendingScore"), (int, float)):
-        item["trendingScore"] = repo["trendingScore"]
-    if isinstance(repo.get("popularityScore"), (int, float)):
-        item["popularityScore"] = repo["popularityScore"]
-    else:
-        item["popularityScore"] = popularity_score(stars, forks)
-    return item
-
-
-def fetch_komi_file(base, path):
-    """拉一个镜像文件；失败只记日志、返回空列表，绝不抛错。"""
-    url = base + path
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "OctoDroid-Store-Backend",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.load(resp)
-    except Exception as e:
-        print("komi mirror %s 拉取失败（跳过此文件）：%s" % (path, e))
-        return None
-    if not isinstance(data, dict):
-        print("komi mirror %s 结构异常（跳过此文件）" % path)
-        return None
-    return data.get("repositories") or []
-
-
-def fetch_komi(base):
-    """拉 17 个镜像文件，返回（每榜去重字典，每榜一个；feed 去重字典；
-    拉到的文件数；文件总数）。任一文件失败只跳过该文件，整轮不失败。"""
-    mirror_charts = {c: {} for c in KOMI_CHARTS}
-    mirror_feed = {}
-    total_files = 0
-    ok_files = 0
-    if not base:
-        print("komi mirror 已禁用（--komi-base 为空），只出生成器数据")
-        return mirror_charts, mirror_feed, ok_files, total_files
-    if not base.endswith("/"):
-        base += "/"
-    for chart in KOMI_CHARTS:
-        for platform in KOMI_PLATFORMS:
-            total_files += 1
-            repos = fetch_komi_file(base, "%s/%s.json" % (chart, platform))
-            if repos is None:
-                continue
-            ok_files += 1
-            for repo in repos:
-                item = komi_item(repo)
-                if item is not None:
-                    mirror_charts[chart].setdefault(
-                        item["fullName"].lower(), item)
-    for platform in KOMI_FEED_PLATFORMS:
-        total_files += 1
-        repos = fetch_komi_file(base, "feed/%s.json" % platform)
-        if repos is None:
-            continue
-        ok_files += 1
-        for repo in repos:
-            item = komi_item(repo)
-            if item is not None:
-                mirror_feed.setdefault(item["fullName"].lower(), item)
-    print("komi mirror: %d/%d 文件拉到" % (ok_files, total_files))
-    return mirror_charts, mirror_feed, ok_files, total_files
-
-
-def chart_queries(today):
-    """每榜一条或多条（查询，排序）。
-
-    热门两条查询平分候选数：(a) 原查询（30 天内有更新）抓稳态热门，
-    (b) 90 天内创建抓年轻快涨的库；最热门去掉 created 半年限制。
-    """
-    def d(days):
-        return (today - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
-    return {
-        "trending": [
-            ("stars:>50 archived:false pushed:>%s" % d(30), "stars"),
-            ("stars:>50 archived:false created:>%s" % d(90), "stars"),
-        ],
-        "new-releases": [
-            ("stars:>10 archived:false pushed:>%s" % d(14), "updated"),
-        ],
-        "most-popular": [
-            ("stars:>1000 archived:false pushed:>%s" % d(365), "stars"),
-        ],
-    }
-
 
 def sort_chart(chart, items):
     if chart == "new-releases":
@@ -618,31 +477,290 @@ def write_json(path, payload):
     print("wrote %s (%d items)" % (path, len(payload.get("items", []))))
 
 
+def select_installable_release(releases):
+    """Release 选择（补丁规则，方案 §2.1）：按 releases[] 最新在前扫
+    描，取首个非 prerelease 且带 ≥1 可安装附件的 release；没有则返
+    回 None（调用方丢弃该仓并记日志）。
+    hiwiki 只保证“某版本”能装（连续多版无安装包才下架），不保证最
+    新版有——只取最新版会漏掉最新版无安装包、旧版有的仓。
+    返回 (release, platforms, downloads, installable) 或 None。
+    """
+    for rel in releases or []:
+        if not isinstance(rel, dict) or rel.get("prerelease"):
+            continue
+        platforms = set()
+        downloads = 0
+        installable = 0
+        for asset in rel.get("assets") or []:
+            if not isinstance(asset, dict):
+                continue
+            plats = platforms_for_asset(asset.get("fileName") or "")
+            if plats:
+                platforms.update(plats)
+                downloads += asset.get("downloadCount") or 0
+                installable += 1
+        if platforms:
+            return rel, platforms, downloads, installable
+    return None
+
+
+def load_hiwiki_pool(path):
+    """读 harvest 产出的全量分类 JSON，返回 (records, meta)。
+
+    文件格式 {"generatedAt", "buildId", "poolSize", "records": [...]}；
+    为方便离线模拟也接受裸 list。文件缺失/损坏返回 (None, {})——调用
+    方走回落（上一轮 feed 的 hiwiki 条目），不直接失败。记录按小写
+    fullName 去重（保留首次出现）。
+    """
+    if not path or not os.path.isfile(path):
+        return None, {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print("hiwiki pool %s 读不到（走回落）：%s" % (path, e))
+        return None, {}
+    if isinstance(data, dict):
+        records = data.get("records")
+        meta = {k: data.get(k) for k in
+                ("generatedAt", "buildId", "poolSize", "ok", "failed")}
+    elif isinstance(data, list):
+        records = data
+        meta = {}
+    else:
+        print("hiwiki pool %s 结构异常（走回落）" % path)
+        return None, {}
+    if not isinstance(records, list):
+        print("hiwiki pool %s 无 records（走回落）" % path)
+        return None, {}
+    seen = set()
+    deduped = []
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        key = (r.get("fullName") or "").lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+    if len(deduped) != len(records):
+        print("hiwiki pool: 去重 %d 条重复记录" % (len(records) - len(deduped)))
+    print("hiwiki pool: %d 条记录（文件 %s）" % (len(deduped), path))
+    return deduped, meta
+
+
+def load_prev_feed(path):
+    """读上一轮 feed/all.json，返回 ({小写 fullName: item}, generatedAt)。
+    文件缺失/损坏返回 ({}, "")。"""
+    if not path or not os.path.isfile(path):
+        return {}, ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print("prev feed %s 读不到（按无上一轮处理）：%s" % (path, e))
+        return {}, ""
+    items = (data or {}).get("items") or []
+    prev = {}
+    for item in items:
+        if isinstance(item, dict) and item.get("fullName"):
+            prev[item["fullName"].lower()] = item
+    print("prev feed: %d 条（%s）"
+          % (len(prev), (data or {}).get("generatedAt") or "?"))
+    return prev, (data or {}).get("generatedAt") or ""
+
+
+def fetch_repo_meta(api, full):
+    """1 次 GET /repos/{full} 补 forks/topics/created_at；404 返回 None。"""
+    data = api.get("/repos/%s" % full)
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def build_hiwiki_item(record, prev, api, metadata_cap, stats,
+                      now=None, history_old=None, simulate=False):
+    """由一条 hiwiki 池记录拼 feed 条目；无可用 release 时返回 None
+    （调用方丢弃并计数，见 select_installable_release）。
+
+    forks/topics/created_at：上一轮 feed 里有的直接沿用（0 次调用），
+    没有的调 1 次 GET /repos/{full}；api.calls 触及 metadata_cap 或
+    遇上限速后，剩余新仓以残缺字段进 feed（forks=0、topics=[]、无
+    created_at，记入 stats["degraded"]），整轮不失败。simulate=True
+    时不调任何 API、无 release 数据的记录降级拼条目（离线核数用）。
+    stats: {"degraded": 需补字段仍缺失的条目数, "dropped": 丢弃数}。
+    """
+    full = (record.get("fullName") or "").strip()
+    key = full.lower()
+    if not full or "/" not in full:
+        stats["dropped"] += 1
+        print("drop: 无 fullName 的记录")
+        return None
+    owner, name = full.split("/", 1)
+    prev_item = (prev or {}).get(key)
+
+    releases = record.get("releases")
+    if isinstance(releases, list) and releases:
+        selected = select_installable_release(releases)
+        if selected is None:
+            stats["dropped"] += 1
+            print("drop %s: 无可安装 release" % full)
+            return None
+        rel, platforms, downloads, installable = selected
+        latest_tag = rel.get("tag") or ""
+        latest_date = normalize_date(rel.get("publishAt") or "")
+    elif simulate:
+        # 离线模拟：2026-11-08 抓数没有 release 数据，降级拼条目。
+        platforms = set((prev_item or {}).get("platforms") or [])
+        downloads = (prev_item or {}).get("downloadCount") or 0
+        installable = (prev_item or {}).get("assetCount") or 0
+        latest_tag = record.get("latestTag") or ""
+        latest_date = normalize_date(record.get("lastReleaseTime") or "")
+    else:
+        stats["dropped"] += 1
+        print("drop %s: 记录无 releases 数据" % full)
+        return None
+
+    forks = None
+    topics = None
+    created_at = None
+    if prev_item is not None:
+        if isinstance(prev_item.get("forks"), (int, float)):
+            forks = prev_item["forks"]
+        if isinstance(prev_item.get("topics"), list):
+            topics = prev_item["topics"]
+        if prev_item.get("createdAt"):
+            created_at = prev_item["createdAt"]
+    need_meta = forks is None or topics is None or created_at is None
+    if need_meta and not simulate:
+        if api is not None and not stats.get("meta_dead") \
+                and api.calls < metadata_cap:
+            try:
+                meta = fetch_repo_meta(api, full)
+            except SystemExit:
+                # 限速（通常是 token 不是 5000 次的 STORE_PAT）：剩余
+                # 新仓全部降级，整轮不失败。
+                stats["meta_dead"] = True
+                meta = None
+            if meta is not None:
+                if forks is None:
+                    forks = meta.get("forks_count") or 0
+                if topics is None:
+                    topics = meta.get("topics") or []
+                if created_at is None:
+                    created_at = meta.get("created_at") or None
+    if need_meta and (forks is None or topics is None
+                      or created_at is None):
+        stats["degraded"] += 1
+    if forks is None:
+        forks = 0
+    if topics is None:
+        topics = []
+
+    stars = record.get("stars") or 0
+    description = record.get("description")
+    if description is None and prev_item is not None:
+        description = prev_item.get("description") or ""
+    avatar = record.get("ownerAvatar") or ""
+    if not avatar and prev_item is not None:
+        avatar = prev_item.get("avatarUrl") or ""
+    pushed_at = (record.get("pushedAt") or "").strip()
+    if len(pushed_at) == 10:
+        pushed_at += "T00:00:00Z"
+
+    item = {
+        "fullName": full,
+        "owner": owner,
+        "name": name,
+        "avatarUrl": avatar,
+        "description": description or "",
+        "stars": stars,
+        "forks": forks,
+        "language": record.get("language") or "",
+        "topics": topics,
+        "topicCodes": topic_codes(topics),
+        "latestTag": latest_tag,
+        "latestDate": latest_date,
+        "pushedAt": normalize_date(pushed_at) if pushed_at else "",
+        "downloadCount": downloads,
+        "assetCount": installable,
+        "platforms": sorted(platforms),
+        "popularityScore": popularity_score(stars, forks),
+        "source": "hiwiki",
+    }
+    if created_at:
+        # 存进条目供下轮复用（App 不读该字段，org.json 会忽略）。
+        item["createdAt"] = created_at
+        item["stars_per_day"] = round(stars_per_day(
+            stars, created_at,
+            now or datetime.datetime.now(datetime.timezone.utc)), 4)
+    if history_old is not None:
+        old = history_old.get(key)
+        if isinstance(old, (int, float)):
+            recent = max(0.0, (stars - old) / HISTORY_WINDOW_DAYS)
+            item["trendingScore"] = round(TRENDING_FACTOR * recent, 2)
+    return item
+
+
+def compute_charts(feed, now_utc):
+    """三榜由同一份池子数据重算（方案 §5），零新增 API 调用。
+
+    热门：星标>50 且 pushedAt 在 30 天内；最新发布：星标>10 且 14 天
+    内真正发过版（按条目 latestDate，即所取 release 的发布时间）；
+    最热门：星标>1000 且 pushedAt 在 1 年内。排序沿用 sort_chart。
+    """
+    trending_cutoff = now_utc - datetime.timedelta(days=30)
+    popular_cutoff = now_utc - datetime.timedelta(days=365)
+    release_cutoff = now_utc - datetime.timedelta(days=NEW_RELEASES_DAYS)
+
+    def pushed_after(item, cutoff):
+        d = parse_iso_datetime(item.get("pushedAt"))
+        return d is not None and d >= cutoff
+
+    trending = [i for i in feed
+                if (i.get("stars") or 0) > 50
+                and pushed_after(i, trending_cutoff)]
+    new_releases = [i for i in feed
+                    if (i.get("stars") or 0) > 10
+                    and is_recent_release(i, release_cutoff)]
+    most_popular = [i for i in feed
+                    if (i.get("stars") or 0) > 1000
+                    and pushed_after(i, popular_cutoff)]
+    return {
+        "trending": sort_chart("trending", trending),
+        "new-releases": sort_chart("new-releases", new_releases),
+        "most-popular": sort_chart("most-popular", most_popular),
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--max-candidates", type=int, default=100)
-    ap.add_argument("--offset", type=int, default=0,
-                    help="跳过搜索结果前 N 个（头部仓库大多无安装包时用）")
-    ap.add_argument("--max-items", type=int, default=100,
-                    help="只 cap 生成器自产的每榜条数；并入镜像后的三榜与"
-                         "发现不再 cap")
-    ap.add_argument("--komi-base", default=KOMI_BASE,
-                    help="Komi 镜像根地址；传空字符串表示不并镜像")
+    ap.add_argument("--hiwiki-pool", default=None,
+                    help="hiwiki 全量分类 JSON 路径（harvest 产物）；不传或文件缺失/损坏时走回落：用上一轮 feed 里 source==hiwiki 的条目")
+    ap.add_argument("--hiwiki-ranks", default=None,
+                    help="hiwiki 分类对照表 JSON 路径；不传则用 generate.py 同目录的 hiwiki-ranks.json")
+    ap.add_argument("--prev-feed", default=None,
+                    help="上一轮 feed/all.json 路径；供元数据复用与回落池子")
+    ap.add_argument("--metadata-cap", type=int, default=4500,
+                    help="GitHub API 元数据调用硬上限；触顶后剩余新仓以残缺字段进 feed，整轮不失败")
+    ap.add_argument("--harvest-status", default="ok",
+                    help="ok / fallback / simulate，写入 meta.json")
+    ap.add_argument("--simulate", action="store_true",
+                    help="离线模拟：不调 api.github.com；无 release 数据的记录降级拼条目（核数用，不用于生产）")
     ap.add_argument("--history-dir", default=None,
-                    help="历史快照目录：读 7 天前的星标快照，写当天的；"
-                         "不传则不读写快照，生成器条目不写 trendingScore")
+                    help="历史快照目录：读 7 天前的星标快照，写当天的；不传则不读写快照，生成器条目不写 trendingScore")
     ap.add_argument("--out", default="store-backend/output")
     ap.add_argument("--snapshot-dir",
                     default="app/src/main/assets/store-snapshot")
     args = ap.parse_args()
 
-    api = Api(os.environ.get("GITHUB_TOKEN", ""))
+    api = None if args.simulate else Api(os.environ.get("GITHUB_TOKEN", ""))
     today = datetime.date.today()
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     generated_at = now_utc.isoformat().replace("+00:00", "Z")
 
-    # 历史快照：只读 7 天前那一份（没有则本轮生成器条目不写
-    # trendingScore，用 stars_per_day 顶替排序）。
+    # 历史快照：只读 7 天前那一份（没有则本轮条目不写 trendingScore，
+    # 用 stars_per_day 顶替排序）。
     history_old_date = today - datetime.timedelta(days=HISTORY_WINDOW_DAYS)
     history_old = load_history_snapshot(args.history_dir, history_old_date)
     print("history: %s %s (%d repos)"
@@ -650,96 +768,63 @@ def main():
              "found" if history_old is not None else "missing",
              len(history_old) if history_old is not None else 0))
 
-    # 先并镜像（公开 raw 直链，不占 API 额度；失败只出生成器数据）。
-    mirror_charts, mirror_feed, mirror_ok, mirror_total = \
-        fetch_komi(args.komi_base)
-    mirror_union = set()
-    for chart in KOMI_CHARTS:
-        mirror_union |= set(mirror_charts[chart])
-    mirror_union |= set(mirror_feed)
+    # 上一轮 feed：元数据复用（forks/topics/createdAt）与回落池子。
+    prev_items, prev_generated_at = load_prev_feed(args.prev_feed)
 
-    charts = {}
-    gen_union = set()
-    for chart, queries in chart_queries(today).items():
-        # --max-candidates 是每榜总数，多条查询平分（余数给前面的查询；
-        # 热门 300 -> 150+150，试跑 15 -> 8+7）。
-        nq = len(queries)
-        per_query = [args.max_candidates // nq] * nq
-        for i in range(args.max_candidates % nq):
-            per_query[i] += 1
-        repos_all = []
-        for (query, sort), limit in zip(queries, per_query):
-            got = api.search(query, sort, limit, args.offset)
-            print("chart %s query %s -> %d candidates"
-                  % (chart, query, len(got)))
-            repos_all.extend(got)
-        # 两条查询去重后验 release（release 缓存按 fullName 去重，
-        # 调用数不翻倍）。
-        seen = set()
-        repos = []
-        for repo in repos_all:
-            key = (repo.get("full_name") or "").lower()
-            if key and key not in seen:
-                seen.add(key)
-                repos.append(repo)
-        items = []
-        for repo in repos:
-            item = build_item(api, repo, now=now_utc,
-                              history_old=history_old)
-            if item is not None:
-                items.append(item)
-        if chart == "new-releases":
-            # 只留 14 天内真正发过版的（用最新 release 发布时间判断；
-            # “有更新”不等于“发了新版”）。
-            cutoff = now_utc - datetime.timedelta(days=NEW_RELEASES_DAYS)
-            before = len(items)
-            items = [i for i in items if is_recent_release(i, cutoff)]
-            print("chart new-releases: 14-day release filter dropped %d"
-                  % (before - len(items)))
-        items = sort_chart(chart, items)[:args.max_items]
-        for item in items:
-            gen_union.add(item["fullName"].lower())
-        # 并镜像：生成器实时验过的优先（同名覆盖镜像条目），但镜像的
-        # trendingScore 必须保留：Komi 分与生成器自算分窗口不同（Komi
-        # 窗口未知，生成器是 20×近 7 日均涨星），不能混用；镜像有分
-        # 的以镜像为准，生成器自算分只留给镜像里没有的仓库。
-        merged = dict(mirror_charts[chart])
-        for item in items:
-            key = item["fullName"].lower()
-            mirror_item = merged.get(key)
-            if (mirror_item is not None
-                    and isinstance(mirror_item.get("trendingScore"),
-                                   (int, float))):
-                item["trendingScore"] = mirror_item["trendingScore"]
-            merged[key] = item
-        merged_items = list(merged.values())
-        if chart == "new-releases":
-            # 合并后的输出同样只留 14 天内发过版的，保证输出里没有
-            # 14 天前发版的条目。
-            cutoff = now_utc - datetime.timedelta(days=NEW_RELEASES_DAYS)
-            before = len(merged_items)
-            merged_items = [i for i in merged_items
-                            if is_recent_release(i, cutoff)]
-            print("chart new-releases merged: 14-day filter dropped %d"
-                  % (before - len(merged_items)))
-        merged_items = sort_chart(chart, merged_items)
-        charts[chart] = merged_items
-        print("chart %s: %d candidates (%d unique) -> %d installable "
-              "(generator) + %d mirror -> %d merged (api calls %d)"
-              % (chart, len(repos_all), len(repos), len(items),
-                 len(mirror_charts[chart]), len(merged_items), api.calls))
+    # 池子：harvest 产物优先；没有则回落到上一轮 feed 的 hiwiki 条目。
+    pool_records, pool_meta = load_hiwiki_pool(args.hiwiki_pool)
+    fallback_pool = False
+    if pool_records is None:
+        fallback_pool = True
+        pool_records = [item for item in prev_items.values()
+                        if item.get("source") == "hiwiki"]
+        print("hiwiki pool: harvest 产物缺失，回落到上一轮 feed 的 "
+              "hiwiki 条目 %d 条" % len(pool_records))
+    else:
+        print("hiwiki pool: %d 条（harvest %s）"
+              % (len(pool_records), pool_meta.get("generatedAt") or "?"))
 
-    # 发现 = 三榜合并去重，按星标排；再补镜像 feed 文件里的独有条目。
-    merged = {}
-    for items in charts.values():
-        for item in items:
-            merged.setdefault(item["fullName"].lower(), item)
-    for key, item in mirror_feed.items():
-        merged.setdefault(key, item)
-    feed = sorted(merged.values(), key=lambda i: i["stars"], reverse=True)
-    print("feed: %d items (generator %d unique, mirror %d unique, "
+    hiwiki_map = load_hiwiki_ranks(args.hiwiki_ranks)
+    mapping_date = pool_meta.get("generatedAt") or prev_generated_at or ""
+    harvest_status = args.harvest_status
+    if fallback_pool:
+        harvest_status = "fallback"
+
+    stats = {"degraded": 0, "dropped": 0}
+    feed = []
+    if fallback_pool:
+        # 回落：上一轮条目原样复用，只按回落对照表重算 ranks。
+        for item in pool_records:
+            item["ranks"] = assign_ranks(item, hiwiki_map)
+            feed.append(item)
+    else:
+        for record in pool_records:
+            item = build_hiwiki_item(record, prev_items, api,
+                                     args.metadata_cap, stats, now=now_utc,
+                                     history_old=history_old,
+                                     simulate=args.simulate)
+            if item is None:
+                continue
+            item["ranks"] = assign_ranks(item, hiwiki_map)
+            feed.append(item)
+    feed = sorted(feed, key=lambda i: i["stars"], reverse=True)
+    if not feed:
+        print("ERROR: feed 为空（池子 0 条或全部被丢弃），拒绝写出空商店")
+        sys.exit(1)
+    ranked = sum(1 for i in feed if i.get("ranks"))
+    print("feed: %d items (pool %d, dropped %d, degraded metadata %d, "
           "api calls %d)"
-          % (len(feed), len(gen_union), len(mirror_union), api.calls))
+          % (len(feed), len(pool_records), stats["dropped"],
+             stats["degraded"], api.calls if api else 0))
+    print("ranks: %d/%d items ranked (hiwiki override %d)"
+          % (ranked, len(feed),
+             sum(1 for i in feed
+                 if hiwiki_map.get((i.get("fullName") or "").lower()))))
+
+    # 三榜由同一份池子数据重算（App 不读这三个文件，零 UI 影响）。
+    charts = compute_charts(feed, now_utc)
+    for chart in CHARTS:
+        print("chart %s: %d items" % (chart, len(charts[chart])))
 
     # 写当天星标快照（供 7 天后算近 7 日均涨星）；只写当天、不读当天。
     history_stars = {i["fullName"].lower(): i["stars"] for i in feed}
@@ -779,10 +864,15 @@ def main():
             "feed": len(feed),
             "feedPages": feed_pages,
             "charts": {c: len(v) for c, v in charts.items()},
-            "apiCalls": api.calls,
-            "mirrorFilesOk": "%d/%d" % (mirror_ok, mirror_total),
-            "mirrorItems": len(mirror_union),
-            "generatorItems": len(gen_union),
+            "apiCalls": api.calls if api else 0,
+            "poolSize": len(pool_records),
+            "hiwikiItems": len(feed),
+            "ranked": ranked,
+            "unranked": len(feed) - ranked,
+            "mappingDate": mapping_date,
+            "harvestStatus": harvest_status,
+            "droppedNoInstallable": stats["dropped"],
+            "metadataDegraded": stats["degraded"],
             "historyDate": today.isoformat(),
             "historyOldDate": history_old_date.isoformat(),
             "historyOldFound": history_old is not None,
@@ -796,7 +886,7 @@ def main():
             write_json(os.path.join(args.snapshot_dir,
                                     "chart_%s_all.json" % chart),
                        {"generatedAt": generated_at, "items": items})
-    print("done, total api calls %d" % api.calls)
+    print("done, total api calls %d" % (api.calls if api else 0))
 
 
 if __name__ == "__main__":
