@@ -920,6 +920,10 @@ public abstract class BaseActivity extends AppCompatActivity implements
 
     private void setupSwipeToRefresh() {
         mSwipeLayout = findViewById(R.id.swipe_container);
+        // 0.1.60：触发距离 64dp（AndroidX 默认）→ 约 120dp，顶部短促
+        // 下拉不再误触刷新；真正想刷新时仍可在顶部下拉触发。
+        mSwipeLayout.setDistanceToTriggerSync(
+                (int) (120 * getResources().getDisplayMetrics().density + 0.5f));
         if (canSwipeToRefresh()) {
             mSwipeLayout.setOnRefreshListener(this);
             mSwipeLayout.setColorSchemeColors(
