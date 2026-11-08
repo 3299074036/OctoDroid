@@ -36,6 +36,7 @@ jobs:
           if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
             git worktree add /tmp/gh-pages-history gh-pages
             cp /tmp/gh-pages-history/store/history/*.json store-history/ 2>/dev/null || true
+            git worktree remove --force /tmp/gh-pages-history
           fi
       - name: Generate store JSON
         env:
