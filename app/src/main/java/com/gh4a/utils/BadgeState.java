@@ -28,18 +28,6 @@ public class BadgeState {
         }
     }
 
-    public void removeListener(Listener listener) {
-        mListeners.remove(listener);
-    }
-
-    public int getNotificationCount() {
-        return mNotificationCount;
-    }
-
-    public int getStarUpdateCount() {
-        return mStarUpdateCount;
-    }
-
     /** 发布新的未读通知数（不变时不通知，避免无谓刷新）。 */
     public void setNotificationCount(int count) {
         if (mNotificationCount != count) {
@@ -54,16 +42,6 @@ public class BadgeState {
             mStarUpdateCount = count;
             notifyListeners();
         }
-    }
-
-    /** 失效通知角标：计数本身不变，强制订阅者重新落一次底栏（底栏重建后用）。 */
-    public void invalidateNotifications() {
-        notifyListeners();
-    }
-
-    /** 失效 Star 角标：同上。 */
-    public void invalidateStarUpdates() {
-        notifyListeners();
     }
 
     private void notifyListeners() {

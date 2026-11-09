@@ -12,6 +12,8 @@ import com.gh4a.R;
 import com.gh4a.fragment.SettingsFragment;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -118,16 +120,45 @@ public class MirrorHelper {
         if (!norm.regionMatches(true, 0, "https://", 0, 8)) {
             return false;
         }
-        String host;
-        try {
-            host = Uri.parse(norm).getHost();
-        } catch (Exception e) {
-            return false;
-        }
+        String host = extractHost(norm);
         if (host == null || host.isEmpty()) {
             return false;
         }
         return !isLoopbackOrPrivateHost(host);
+    }
+
+    /**
+     * 56：从 URL 里取 host。不能用 Uri.getHost()——旧版本
+     * （minSdk 23 的 API 23）不认 IPv6 方括号，"https://[::1]/x" 的
+     * host 取出来是 "["，校验路径上后续 getByName 抛异常被吞、回环
+     * 地址被放行（真机老设备同样中招，不只是测试问题）。
+     * 这里按 authority 手工取：方括号内是 IPv6 字面量（去括号），
+     * 否则截到 ':'（端口）为止；含 userinfo 时取最后一个 '@' 之后。
+     */
+    private static String extractHost(String url) {
+        if (url == null) {
+            return null;
+        }
+        String rest = url;
+        int scheme = rest.indexOf("://");
+        if (scheme >= 0) {
+            rest = rest.substring(scheme + 3);
+        }
+        int slash = rest.indexOf('/');
+        String authority = slash >= 0 ? rest.substring(0, slash) : rest;
+        int at = authority.lastIndexOf('@');
+        if (at >= 0) {
+            authority = authority.substring(at + 1);
+        }
+        if (authority.startsWith("[")) {
+            int close = authority.indexOf(']');
+            if (close < 0) {
+                return null; // 未闭合的 IPv6 字面量，非法
+            }
+            return authority.substring(1, close);
+        }
+        int colon = authority.indexOf(':');
+        return colon >= 0 ? authority.substring(0, colon) : authority;
     }
 
     /** host 是回环／内网地址时返回 true（IPv4、IPv6 与 localhost；域名一律放行）。 */
@@ -136,55 +167,138 @@ public class MirrorHelper {
             return true;
         }
         if (host.contains(":")) {
-            // IPv6（Uri.getHost() 已去括号）：::1、fe80::/10、fc00::/7；
-            // ::ffff:a.b.c.d 是 IPv4 映射地址，按内层 IPv4 再判一次。
-            String h = host.toLowerCase(java.util.Locale.US);
-            if (h.equals("::1")) {
-                return true;
+            // IPv6 字面量：InetAddress.getByName 对含 ':' 的串只做字面解析
+            // 不发 DNS；归一化后判回环/链路本地/站点本地，并处理内嵌 IPv4
+            //（::ffff:a.b.c.d 映射形与 ::a.b.c.d 兼容形，含展开写法）。
+            try {
+                InetAddress addr = InetAddress.getByName(host);
+                if (addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                        || addr.isSiteLocalAddress()
+                        || isUniqueLocalIPv6(addr.getAddress())) {
+                    return true;
+                }
+                Long embedded = embeddedIPv4(addr.getAddress());
+                return embedded != null && isPrivateIPv4Value(embedded);
+            } catch (UnknownHostException e) {
+                return false; // 非法 IPv6 字面量，连不上，交由后续连接失败
             }
-            if (h.startsWith("::ffff:")) {
-                return isLoopbackOrPrivateHost(h.substring("::ffff:".length()));
-            }
-            // fe80::/10：首组 fe80-febf；fc00::/7：首组 fc00-fdff。
-            return h.startsWith("fe8") || h.startsWith("fe9")
-                    || h.startsWith("fea") || h.startsWith("feb")
-                    || h.startsWith("fc") || h.startsWith("fd");
         }
-        // IPv4：127/8、10/8、172.16/12、192.168/16、169.254/16。
-        String[] parts = host.split("\\.");
-        if (parts.length != 4) {
-            return false; // 不是 IPv4，是域名
+        // IPv4：按 inet_aton 规则手写解析（1-4 段，十进制/0x十六进制/0八进制），
+        // 不调 InetAddress.getByName——域名一旦解析失败会回落 DNS，
+        // 而 isValidMirrorUrl 可能跑在主线程（UI 保存路径），不能阻塞查 DNS。
+        // 56：旧代码只认点分十进制标准形，2130706433（=127.0.0.1）、
+        // 0177.0.0.1（八进制）、0x7f.0.0.1（十六进制）全部放行。
+        Long addr = parseNumericIPv4(host);
+        if (addr == null) {
+            return false; // 不是数字 IPv4，是域名
         }
-        try {
-            int b0 = Integer.parseInt(parts[0]);
-            int b1 = Integer.parseInt(parts[1]);
-            if (b0 == 127 || b0 == 10) {
-                return true;
-            }
-            if (b0 == 172 && b1 >= 16 && b1 <= 31) {
-                return true;
-            }
-            if (b0 == 192 && b1 == 168) {
-                return true;
-            }
-            if (b0 == 169 && b1 == 254) {
-                return true;
-            }
-        } catch (NumberFormatException e) {
-            return false; // 不是纯数字 IPv4，是域名
+        return isPrivateIPv4Value(addr);
+    }
+
+    /** 32 位 IPv4 值是否在回环/内网段：0/8、127/8、10/8、172.16/12、192.168/16、169.254/16。 */
+    private static boolean isPrivateIPv4Value(long addr) {
+        int b0 = (int) ((addr >>> 24) & 0xFF);
+        int b1 = (int) ((addr >>> 16) & 0xFF);
+        return b0 == 0 || b0 == 127 || b0 == 10
+                || (b0 == 172 && b1 >= 16 && b1 <= 31)
+                || (b0 == 192 && b1 == 168)
+                || (b0 == 169 && b1 == 254);
+    }
+
+    /**
+     * 按 inet_aton 规则解析 IPv4 字面量（1-4 段，每段十进制/0x十六进制/0八进制），
+     * 返回 32 位值；不是数字 IPv4（域名或非法形）返回 null。
+     */
+    private static Long parseNumericIPv4(String host) {
+        String[] parts = host.split("\\.", -1);
+        if (parts.length < 1 || parts.length > 4) {
+            return null;
         }
-        return false;
+        long[] vals = new long[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            String p = parts[i];
+            if (p.isEmpty()) {
+                return null;
+            }
+            try {
+                long v;
+                if (p.length() > 2 && (p.startsWith("0x") || p.startsWith("0X"))) {
+                    v = Long.parseLong(p.substring(2), 16);
+                } else if (p.length() > 1 && p.charAt(0) == '0') {
+                    v = Long.parseLong(p.substring(1), 8);
+                } else {
+                    if (!p.matches("[0-9]+")) {
+                        return null;
+                    }
+                    v = Long.parseLong(p, 10);
+                }
+                vals[i] = v;
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        // inet_aton 语义：a / a.b / a.b.c / a.b.c.d（后段占满剩余位）。
+        switch (parts.length) {
+            case 1:
+                if (vals[0] > 0xFFFFFFFFL) {
+                    return null;
+                }
+                return vals[0];
+            case 2:
+                if (vals[0] > 255 || vals[1] > 0xFFFFFFL) {
+                    return null;
+                }
+                return (vals[0] << 24) | vals[1];
+            case 3:
+                if (vals[0] > 255 || vals[1] > 255 || vals[2] > 0xFFFFL) {
+                    return null;
+                }
+                return (vals[0] << 24) | (vals[1] << 16) | vals[2];
+            default:
+                for (long v : vals) {
+                    if (v > 255) {
+                        return null;
+                    }
+                }
+                return (vals[0] << 24) | (vals[1] << 16) | (vals[2] << 8) | vals[3];
+        }
+    }
+
+    /**
+     * IPv6 地址内嵌的 IPv4（::ffff:a.b.c.d 映射形与 ::a.b.c.d 兼容形，
+     * 前 80 位为 0，第 81-96 位为 1 或 0）；其余返回 null。
+     */
+    /** fc00::/7 唯一本地地址（ULA）：Java 的 isSiteLocalAddress 只认已废弃的
+     * fec0::/10，不含 ULA，须显式判（首字节 0xfc/0xfd）。 */
+    private static boolean isUniqueLocalIPv6(byte[] b) {
+        return b.length == 16 && (b[0] & 0xFE) == 0xFC;
+    }
+
+    private static Long embeddedIPv4(byte[] b) {
+        if (b.length != 16) {
+            return null;
+        }
+        for (int i = 0; i < 10; i++) {
+            if (b[i] != 0) {
+                return null;
+            }
+        }
+        boolean mapped = b[10] == (byte) 0xFF && b[11] == (byte) 0xFF;
+        boolean compatible = b[10] == 0 && b[11] == 0;
+        if (!mapped && !compatible) {
+            return null;
+        }
+        return ((b[12] & 0xFFL) << 24) | ((b[13] & 0xFFL) << 16)
+                | ((b[14] & 0xFFL) << 8) | (b[15] & 0xFFL);
     }
 
     /** 列表里显示的名字：取 URL 的 host，解析失败就显示原串。 */
     public static String displayHost(String url) {
-        try {
-            String host = Uri.parse(url).getHost();
-            if (host != null && !host.isEmpty()) {
-                return host;
-            }
-        } catch (Exception ignored) {
-            // 解析失败就原样显示
+        // 56：与校验路径同款 extractHost——Uri.getHost() 在老版本上
+        // 把 IPv6 字面量取成 "["，显示会错。
+        String host = extractHost(url);
+        if (host != null && !host.isEmpty()) {
+            return host;
         }
         return url == null ? "" : url;
     }

@@ -188,7 +188,11 @@ public class AvatarHandler {
             @Override
             protected void entryRemoved(boolean evicted, Long key, Bitmap oldValue, Bitmap newValue) {
                 super.entryRemoved(evicted, key, oldValue, newValue);
-                oldValue.recycle();
+                // 69：逐出时不再 recycle()——缓存里的同一 Bitmap 可能正被
+                // 某个 ImageView 的 RoundedBitmapDrawable 持有（同用户头像
+                // 刷新替换、长列表快速滚动时），回收后下次绘制抛
+                // "Canvas: trying to use a recycled bitmap"。头像小、缓存
+                // 上限 10% 堆内存已控内存，交给 GC 即可。
             }
 
             @Override

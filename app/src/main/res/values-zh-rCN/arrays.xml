@@ -1,5 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string-array name="translation_provider_items">
+        <item>Google</item>
+        <item>有道</item>
+        <item>百度翻译</item>
+        <item>DeepL</item>
+    </string-array>
+    <string-array name="accent_color_items">
+        <item>@string/accent_green</item>
+        <item>@string/accent_blue</item>
+        <item>@string/accent_red</item>
+        <item>@string/accent_orange</item>
+        <item>@string/accent_purple</item>
+        <item>@string/accent_teal</item>
+    </string-array>
+    <string-array name="language_items">
+        <item>@string/language_system_default</item>
+        <item>@string/language_chinese</item>
+        <item>@string/language_english</item>
+    </string-array>
     <string-array name="text_size_items">
         <item>最小</item>
         <item>较小</item>

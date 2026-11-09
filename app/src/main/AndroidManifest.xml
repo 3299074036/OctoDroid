@@ -224,31 +224,37 @@
              忽略 ManifestResource 检查以通过 release 构建 -->
         <activity
             android:name=".activities.SettingsActivity"
+            android:exported="false"
             android:title="@string/settings"
             tools:ignore="ManifestResource" />
 
         <activity
             android:name=".activities.TranslationSettingsActivity"
+            android:exported="false"
             android:title="@string/translation_settings"
             tools:ignore="ManifestResource" />
 
         <activity
             android:name=".activities.DrawerEditActivity"
+            android:exported="false"
             android:title="@string/customize_drawer"
             tools:ignore="ManifestResource" />
 
         <activity
             android:name=".activities.AccountManageActivity"
+            android:exported="false"
             android:title="@string/account_manage"
             tools:ignore="ManifestResource" />
 
         <activity
             android:name=".activities.DiagnosticLogActivity"
+            android:exported="false"
             android:title="@string/diagnostic_log"
             tools:ignore="ManifestResource" />
 
         <activity
             android:name=".activities.MirrorSourceActivity"
+            android:exported="false"
             android:title="@string/mirror_preset"
             android:windowSoftInputMode="adjustResize"
             tools:ignore="ManifestResource" />

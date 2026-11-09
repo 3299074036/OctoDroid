@@ -164,12 +164,9 @@ public class Gh4Application extends Application implements
         mPt = new PrettyTime();
         ServiceFactory.initClient(this);
 
-        // 0.1.10：启动时后台预取热门建议（仅已登录且缓存不新鲜时发请求，
-        // 静默写盘），进搜索页时多数情况下已有缓存可秒出。
-        if (isAuthorized()) {
-            SearchFragment.prefetchHotSuggestions(this);
-        }
-
+        // P4：启动预取热门建议已删——之前冷启动即发 1 次搜索 API，即使用户
+        // 从不打开搜索。热门建议改为懒加载：首次打开搜索页时 loadHotRepos
+        // 本来就会拉（有缓存先显示缓存、无缓存骨架屏后填），无需提前热缓存。
         updateNotificationWorker(prefs);
     }
 
@@ -233,10 +230,15 @@ public class Gh4Application extends Application implements
     }
 
     public void setActiveLogin(String login) {
-        if (getPrefs().getStringSet(KEY_ALL_LOGINS, null).contains(login)) {
+        // 68：KEY_ALL_LOGINS 缺失/损坏时 getStringSet 返回 null，直接 contains
+        // 会 NPE（启动/切账号路径）；正常首启迁移保证非 null，这里是边缘设防。
+        java.util.Set<String> allLogins = getPrefs().getStringSet(KEY_ALL_LOGINS, null);
+        if (allLogins != null && allLogins.contains(login)) {
             getPrefs().edit()
                     .putString(KEY_ACTIVE_LOGIN, login)
                     .apply();
+            // P1：切账号后未读数缓存属于旧账号，单例跨切换存活，必须失效。
+            com.gh4a.utils.NotificationCountProvider.getInstance().invalidate();
             rescheduleWorkers();
         }
     }
@@ -247,7 +249,12 @@ public class Gh4Application extends Application implements
 
     public LongSparseArray<String> getAccounts() {
         LongSparseArray<String> accounts = new LongSparseArray<>();
-        for (String login : getPrefs().getStringSet(KEY_ALL_LOGINS, null)) {
+        // 68：同 setActiveLogin，键缺失时返回空列表而非 NPE。
+        java.util.Set<String> allLogins = getPrefs().getStringSet(KEY_ALL_LOGINS, null);
+        if (allLogins == null) {
+            return accounts;
+        }
+        for (String login : allLogins) {
             long id = getPrefs().getLong(KEY_PREFIX_USER_ID + login, -1);
             if (id > 0) {
                 accounts.put(id, login);

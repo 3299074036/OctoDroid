@@ -41,7 +41,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
                 android:text="@string/mirror_stats_mirrors"
-                android:textColor="#757575"
+                android:textColor="?android:attr/textColorSecondary"
                 android:textSize="16sp" />
 
             <View
@@ -55,7 +55,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="6dp"
-                android:textColor="#1e9e6a"
+                android:textColor="@color/mirror_ok_green"
                 android:textSize="20sp"
                 android:textStyle="bold" />
 
@@ -64,7 +64,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
                 android:text="@string/mirror_stats_ok"
-                android:textColor="#757575"
+                android:textColor="?android:attr/textColorSecondary"
                 android:textSize="16sp" />
 
             <View
@@ -78,7 +78,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="6dp"
-                android:textColor="#e5484d"
+                android:textColor="@color/mirror_error_red"
                 android:textSize="20sp"
                 android:textStyle="bold" />
 
@@ -87,7 +87,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
                 android:text="@string/mirror_source_unavailable"
-                android:textColor="#757575"
+                android:textColor="?android:attr/textColorSecondary"
                 android:textSize="16sp" />
         </LinearLayout>
 
@@ -99,7 +99,7 @@
             android:drawablePadding="6dp"
             android:gravity="end"
             app:drawableStartCompat="@drawable/ic_mirror_clock"
-            android:textColor="#757575"
+            android:textColor="?android:attr/textColorSecondary"
             android:textSize="14sp" />
     </LinearLayout>
 
@@ -152,7 +152,7 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginTop="12dp"
-            android:background="#EEEEEE" />
+            android:background="@color/mirror_divider" />
 
         <TextView
             android:id="@+id/current_line"

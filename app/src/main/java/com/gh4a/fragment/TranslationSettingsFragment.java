@@ -46,8 +46,15 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
                 if (getContext() == null) {
                     return false;
                 }
-                TranslationManager.setApiKey(getContext(), currentProvider(),
+                // 52：加密失败时 setApiKey 返回 false，toast 提示并拒绝新值，
+                // 输入框保持旧值，不再假装已保存。
+                boolean saved = TranslationManager.setApiKey(getContext(), currentProvider(),
                         newValue == null ? "" : String.valueOf(newValue));
+                if (!saved) {
+                    Toast.makeText(getContext(),
+                            R.string.translation_credential_save_failed, Toast.LENGTH_LONG).show();
+                    return false;
+                }
                 return true;
             });
         }
@@ -57,8 +64,14 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
                 if (getContext() == null) {
                     return false;
                 }
-                TranslationManager.setApiSecret(getContext(), currentProvider(),
+                // 52：同 key 逻辑，加密失败时 toast 提示并拒绝新值。
+                boolean saved = TranslationManager.setApiSecret(getContext(), currentProvider(),
                         newValue == null ? "" : String.valueOf(newValue));
+                if (!saved) {
+                    Toast.makeText(getContext(),
+                            R.string.translation_credential_save_failed, Toast.LENGTH_LONG).show();
+                    return false;
+                }
                 return true;
             });
         }

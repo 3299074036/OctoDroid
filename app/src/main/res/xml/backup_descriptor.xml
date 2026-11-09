@@ -6,9 +6,16 @@
          生效的 fullBackupContent 语义下才起作用，且 exclude 对未包含
          的文件是无害的 no-op；Android 12+ 的实际规则见 backup_rules.xml
          （dataExtractionRules），两处排除对象一致。
-         Gh4a-pref 等 shared_prefs 保持原状：本文件从不 include 它们。 -->
+         Gh4a-pref 等 shared_prefs 保持原状：本文件从不 include 它们。
+         Gh4a-secure-plain.xml 的排除不是死配置：0.2.3 起 securePrefs()
+         同时存 GitHub token 与翻译凭据（S-H2），KeyStore 不可用时仍写
+         明文回落文件 Gh4a-secure-plain（SEC-5），排除须保留。 -->
     <exclude domain="database" path="gh4adb.db" />
     <exclude domain="database" path="suggestions.db" />
+    <!-- 83：WorkManager 调度库（任务规格/定时，无凭据），不随系统备份上云。 -->
+    <exclude domain="database" path="androidx.work.workdb" />
+    <exclude domain="database" path="androidx.work.workdb-wal" />
+    <exclude domain="database" path="androidx.work.workdb-shm" />
     <!-- 0.1.20 F-04: 与 backup_rules.xml 同一排除清单（Android 11 及以下语义）。 -->
     <exclude domain="sharedpref" path="com.gh4a_preferences.xml" />
     <exclude domain="sharedpref" path="com.gh4a.debug_preferences.xml" />

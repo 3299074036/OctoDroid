@@ -41,6 +41,8 @@ import androidx.core.content.ContextCompat;
 import androidx.core.util.ObjectsCompat;
 import androidx.viewpager.widget.PagerAdapter;
 import androidx.appcompat.app.AlertDialog;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import android.os.Parcel;
 import android.os.Parcelable;
@@ -986,39 +988,19 @@ public class IssueEditActivity extends BasePagerActivity implements
             LayoutInflater inflater = getLayoutInflater();
             final List<Label> selectedLabels = getArguments().getParcelableArrayList("selected");
             final List<Label> allLabels = getArguments().getParcelableArrayList("all");
-            View labelContainerView = inflater.inflate(R.layout.generic_linear_container, null);
-            ViewGroup container = labelContainerView.findViewById(R.id.container);
-
-            View.OnClickListener clickListener = view -> {
-                Label label = (Label) view.getTag();
-                if (selectedLabels.contains(label)) {
-                    selectedLabels.remove(label);
-                    setLabelSelection((TextView) view, false);
-                } else {
-                    selectedLabels.add(label);
-                    setLabelSelection((TextView) view, true);
-                }
-            };
-
-            for (final Label label : allLabels) {
-                final View rowView = inflater.inflate(R.layout.row_issue_create_label, container, false);
-                View viewColor = rowView.findViewById(R.id.view_color);
-                viewColor.setBackgroundColor(ApiHelpers.colorForLabel(label));
-
-                final TextView tvLabel = rowView.findViewById(R.id.tv_title);
-                tvLabel.setText(EmojiParser.parseToUnicode(label.name()));
-                tvLabel.setOnClickListener(clickListener);
-                tvLabel.setTag(label);
-
-                setLabelSelection(tvLabel, selectedLabels.contains(label));
-                container.addView(rowView);
-            }
+            // P5：之前用 ScrollView + LinearLayout，打开即 inflate 全部标签行
+            // （标签数无上限）；改成 RecyclerView，只创建可见行，外观与
+            // 选中行为不变（点行内标题切换选中，OK 时回传同一 selectedLabels）。
+            View dialogView = inflater.inflate(R.layout.dialog_label_list, null);
+            RecyclerView labelList = dialogView.findViewById(R.id.label_list);
+            labelList.setLayoutManager(new LinearLayoutManager(getContext()));
+            labelList.setAdapter(new LabelAdapter(allLabels, selectedLabels));
 
             IssueEditActivity activity = (IssueEditActivity) getContext();
             return new AlertDialog.Builder(activity)
                     .setCancelable(true)
                     .setTitle(R.string.issue_labels)
-                    .setView(labelContainerView)
+                    .setView(dialogView)
                     .setNegativeButton(R.string.cancel, null)
                     .setPositiveButton(R.string.ok, (dialog, which) -> {
                         activity.updateLabels(selectedLabels);
@@ -1027,6 +1009,59 @@ public class IssueEditActivity extends BasePagerActivity implements
                         activity.manageLabels();
                     })
                     .create();
+        }
+
+        /** P5：标签行按需创建的适配器（行布局仍复用 row_issue_create_label）。 */
+        private class LabelAdapter extends RecyclerView.Adapter<LabelAdapter.ViewHolder> {
+            private final List<Label> mAllLabels;
+            private final List<Label> mSelectedLabels;
+
+            LabelAdapter(List<Label> allLabels, List<Label> selectedLabels) {
+                mAllLabels = allLabels;
+                mSelectedLabels = selectedLabels;
+            }
+
+            static class ViewHolder extends RecyclerView.ViewHolder {
+                final View colorView;
+                final TextView titleView;
+
+                ViewHolder(View itemView) {
+                    super(itemView);
+                    colorView = itemView.findViewById(R.id.view_color);
+                    titleView = itemView.findViewById(R.id.tv_title);
+                }
+            }
+
+            @NonNull
+            @Override
+            public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+                View row = LayoutInflater.from(parent.getContext())
+                        .inflate(R.layout.row_issue_create_label, parent, false);
+                return new ViewHolder(row);
+            }
+
+            @Override
+            public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
+                final Label label = mAllLabels.get(position);
+                holder.colorView.setBackgroundColor(ApiHelpers.colorForLabel(label));
+                holder.titleView.setText(EmojiParser.parseToUnicode(label.name()));
+                holder.titleView.setTag(label);
+                holder.titleView.setOnClickListener(view -> {
+                    if (mSelectedLabels.contains(label)) {
+                        mSelectedLabels.remove(label);
+                        setLabelSelection((TextView) view, false);
+                    } else {
+                        mSelectedLabels.add(label);
+                        setLabelSelection((TextView) view, true);
+                    }
+                });
+                setLabelSelection(holder.titleView, mSelectedLabels.contains(label));
+            }
+
+            @Override
+            public int getItemCount() {
+                return mAllLabels.size();
+            }
         }
 
         private void setLabelSelection(TextView view, boolean selected) {

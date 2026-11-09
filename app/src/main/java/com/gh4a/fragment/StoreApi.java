@@ -59,11 +59,42 @@ public class StoreApi {
     private static final long CHART_TTL_MS = 24L * 60 * 60 * 1000;
     private static final String CACHE_DIR = "store-cache";
 
-    /** B-L5：后端拉取共用的 OkHttpClient（只建一次，连接池可复用）。 */
-    private static final OkHttpClient sFetchClient = ServiceFactory.getHttpClientBuilder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .build();
+    /**
+     * B-L5：后端拉取共用的 OkHttpClient（只建一次，连接池可复用）。
+     * 67：懒加载（双重检查锁）——静态初始化调 ServiceFactory.getHttpClientBuilder()
+     * 依赖 Gh4Application.initClient 先行设置 sApiHttpClient；类加载时机若早于
+     * initClient，一次 NPE 即 ExceptionInInitializerError，后续所有 StoreApi
+     * 调用变 NoClassDefFoundError 且进程内无法恢复。当前无早入口触碰 StoreApi，
+     * 但懒加载后该风险彻底消失；初始化失败时回落为每次现建。
+     */
+    private static volatile OkHttpClient sFetchClient;
+
+    private static OkHttpClient fetchClient() {
+        OkHttpClient client = sFetchClient;
+        if (client != null) {
+            return client;
+        }
+        synchronized (StoreApi.class) {
+            client = sFetchClient;
+            if (client != null) {
+                return client;
+            }
+            try {
+                client = ServiceFactory.getHttpClientBuilder()
+                        .connectTimeout(15, TimeUnit.SECONDS)
+                        .readTimeout(20, TimeUnit.SECONDS)
+                        .build();
+            } catch (Exception e) {
+                // 初始化依赖未就绪：回落为每次现建，失败只影响当次调用。
+                return ServiceFactory.getHttpClientBuilder()
+                        .connectTimeout(15, TimeUnit.SECONDS)
+                        .readTimeout(20, TimeUnit.SECONDS)
+                        .build();
+            }
+            sFetchClient = client;
+            return client;
+        }
+    }
 
     /**
      * 后端取回的一组数据：offline=true 表示来自过期缓存或离线镜像；
@@ -178,7 +209,8 @@ public class StoreApi {
     private static String fetchUrl(String url) throws IOException {
         // B-L5：后端拉取共用一个 OkHttpClient（之前每次 fetchUrl 都新建），
         // 连接池可复用；超时与拦截器与之前每次从同一 builder 现建一致。
-        OkHttpClient client = sFetchClient;
+        // 67：经 fetchClient() 懒加载（见类头注释），不用静态初始化。
+        OkHttpClient client = fetchClient();
         // 后端拉取强制走网络，不读 OkHttp 磁盘缓存（Komi 的镜像客户端本身不走缓存）。
         Request request = new Request.Builder()
                 .url(url)

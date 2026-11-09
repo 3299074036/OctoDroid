@@ -41,10 +41,11 @@ public class ThemeTrace {
             }
             String time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
                     .format(new Date());
-            BufferedWriter w = new BufferedWriter(new FileWriter(f, true));
-            w.write(time + " " + tag + " " + detail);
-            w.newLine();
-            w.close();
+            // 70：同 DiagTrace.log()，try-with-resources。
+            try (BufferedWriter w = new BufferedWriter(new FileWriter(f, true))) {
+                w.write(time + " " + tag + " " + detail);
+                w.newLine();
+            }
         } catch (Exception ignored) {
         }
     }

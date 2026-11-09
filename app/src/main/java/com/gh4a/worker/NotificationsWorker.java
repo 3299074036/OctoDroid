@@ -1,5 +1,6 @@
 package com.gh4a.worker;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -52,6 +53,9 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class NotificationsWorker extends Worker {
@@ -153,6 +157,13 @@ public class NotificationsWorker extends Worker {
     @NonNull
     @Override
     public Result doWork() {
+        // 53：无通知权限时直接成功返回，不拉取、不推进 lastCheck。
+        // 否则权限关闭期间到达的通知会被记为"已检查"，授权后只进托盘、
+        // 无提示音/振动。notify() 处的守卫保留作第二道防线。
+        if (!NotificationPermission.canPostNotifications(getApplicationContext())) {
+            Log.d(TAG, "Notifications disabled, skipping fetch");
+            return Result.success();
+        }
         List<List<NotificationThread>> notifsGroupedByRepo = new ArrayList<>();
         try {
             Log.d(TAG, "Starting notification fetch in background");
@@ -212,6 +223,9 @@ public class NotificationsWorker extends Worker {
                     NotificationManagerCompat.from(getApplicationContext());
 
             showSummaryNotification(nm, notifsGroupedByRepo, hasNewNotification);
+            // P6：先并行预热各组 owner 头像（见 prefetchRepoAvatars），
+            // 再逐组显示——显示时 loadUserAvatarSynchronously 命中 LRU。
+            prefetchRepoAvatars(notifsGroupedByRepo);
             for (List<NotificationThread> list : notifsGroupedByRepo) {
                 showRepoNotification(nm, list, lastCheck);
                 String repoId = String.valueOf(list.get(0).repository().id());
@@ -253,6 +267,10 @@ public class NotificationsWorker extends Worker {
         return false;
     }
 
+    // 22：MissingPermission 压制附理由——权限已由 NotificationPermission
+    // .canPostNotifications() 检查（本方法开头 + doWork() 开头），lint
+    // 不认抽进 helper 的间接检查，故此处显式压制。
+    @SuppressLint("MissingPermission")
     private void showRepoNotification(NotificationManagerCompat nm,
             List<NotificationThread> notifications, long lastCheck) {
         final Context context = getApplicationContext();
@@ -332,6 +350,9 @@ public class NotificationsWorker extends Worker {
         nm.notify(id, builder.build());
     }
 
+    // 22：MissingPermission 压制附理由——同 showRepoNotification，权限已由
+    // NotificationPermission.canPostNotifications() 检查，lint 不认间接检查。
+    @SuppressLint("MissingPermission")
     private void showSummaryNotification(NotificationManagerCompat nm,
             List<List<NotificationThread>> notificationsPerRepo, boolean hasNewNotification) {
         final Context context = getApplicationContext();
@@ -424,6 +445,51 @@ public class NotificationsWorker extends Worker {
         return new NotificationCompat.Builder(getApplicationContext(), CHANNEL_GITHUB_NOTIFICATIONS)
                 .setSmallIcon(R.drawable.notification)
                 .setColor(ContextCompat.getColor(getApplicationContext(), R.color.octodroid));
+    }
+
+    /**
+     * P6：通知循环前并行预热各仓库组 owner 头像。冷缓存时逐组
+     * showRepoNotification 会在 loadUserAvatarSynchronously 里顺序各做
+     * 一次网络往返（Worker 耗时随组数线性增长）；先并行拉一遍，逐组显示
+     * 时即命中 AvatarHandler LRU。已在缓存中的组不发网；预热失败静默
+     * （单组显示时 loadUserAvatarSynchronously 仍会再试一次，最坏退化
+     * 为现状）。最多 8 路并行、最多等 30 秒，挂住的拉取不拖死 Worker。
+     */
+    private void prefetchRepoAvatars(List<List<NotificationThread>> grouped) {
+        final Context context = getApplicationContext();
+        List<User> owners = new ArrayList<>();
+        Set<Long> seenOwnerIds = new HashSet<>();
+        for (List<NotificationThread> list : grouped) {
+            if (list == null || list.isEmpty() || list.get(0).repository() == null) {
+                continue;
+            }
+            User owner = list.get(0).repository().owner();
+            if (owner != null && seenOwnerIds.add(owner.id())) {
+                owners.add(owner);
+            }
+        }
+        if (owners.isEmpty()) {
+            return;
+        }
+        ExecutorService executor = Executors.newFixedThreadPool(Math.min(owners.size(), 8));
+        CountDownLatch latch = new CountDownLatch(owners.size());
+        for (User owner : owners) {
+            executor.execute(() -> {
+                try {
+                    AvatarHandler.loadUserAvatarSynchronously(context, owner);
+                } catch (Exception ignored) {
+                    // 预热失败静默：单组显示时仍会再试一次。
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+        executor.shutdown();
+        try {
+            latch.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private Bitmap loadRoundUserAvatar(User user) {

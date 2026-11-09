@@ -1,5 +1,6 @@
 package com.gh4a.fragment;
 
+import android.app.Activity;
 import android.app.DownloadManager;
 import android.content.Intent;
 import android.net.Uri;
@@ -99,27 +100,45 @@ public class DownloadListFragment extends ListDataBaseFragment<DownloadListFragm
         if (item.status != DownloadManager.STATUS_SUCCESSFUL) {
             return;
         }
-        File file = new File(getActivity().getExternalFilesDir(
-                Environment.DIRECTORY_DOWNLOADS), item.record.fileName);
-        if (!file.exists()) {
-            // 兼容 0.2.2 之前下载到公共 Downloads/ 的旧记录。
+        // 57：校验中的记录不让点开——APK 签名还没比对完，点开即装上未验包。
+        if (DownloadRecordManager.isVerifying(item.record.downloadId)) {
+            Toast.makeText(getActivity(), R.string.download_verifying,
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // 64：外置存储未挂载时 getExternalFilesDir() 返回 null，
+        // getActivity() 也可能为 null，先判空再用。
+        Activity activity = getActivity();
+        if (activity == null) {
+            return;
+        }
+        File file = null;
+        File dir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (dir != null) {
+            file = new File(dir, item.record.fileName);
+        }
+        if (file == null || !file.exists()) {
+            // 兼容 0.2.2 之前下载到公共 Downloads/ 的旧记录；外置存储
+            // 未挂载（dir 为 null）时也走这条分支。
+            // TODO(2027-01，见 file_paths.xml 第 77 项)：旧记录基本消亡后
+            // 删掉本回落分支与 file_paths.xml 的 external-path。
             file = new File(Environment.getExternalStoragePublicDirectory(
                     Environment.DIRECTORY_DOWNLOADS), item.record.fileName);
         }
         if (!file.exists()) {
-            Toast.makeText(getActivity(), R.string.download_open_failed,
+            Toast.makeText(activity, R.string.download_open_failed,
                     Toast.LENGTH_SHORT).show();
             return;
         }
-        Uri uri = FileProvider.getUriForFile(getActivity(),
-                getActivity().getPackageName() + ".fileprovider", file);
+        Uri uri = FileProvider.getUriForFile(activity,
+                activity.getPackageName() + ".fileprovider", file);
         Intent intent = new Intent(Intent.ACTION_VIEW)
                 .setDataAndType(uri, getMimeType(item.record.fileName))
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        if (intent.resolveActivity(getActivity().getPackageManager()) != null) {
+        if (intent.resolveActivity(activity.getPackageManager()) != null) {
             startActivity(intent);
         } else {
-            Toast.makeText(getActivity(), R.string.download_open_failed,
+            Toast.makeText(activity, R.string.download_open_failed,
                     Toast.LENGTH_SHORT).show();
         }
     }

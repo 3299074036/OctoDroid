@@ -235,7 +235,7 @@ public class MarkdownPreviewWebView extends WebView implements NestedScrollingCh
                 + "tpl.innerHTML = html;"
                 + "var bad = ['script','style','iframe','object','embed','form',"
                 + "'base','link','meta','title','math','mtext','mglyph',"
-                + "'annotation-xml','foreignobject'];"
+                + "'annotation-xml','foreignobject','animate','set'];"
                 + "var els = tpl.content.querySelectorAll('*');"
                 + "for (var i = 0; i < els.length; i++) {"
                 + "var el = els[i];"

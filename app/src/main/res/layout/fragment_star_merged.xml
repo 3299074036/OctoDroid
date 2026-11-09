@@ -45,7 +45,7 @@
             android:paddingTop="8dp"
             android:paddingBottom="8dp"
             android:text="@string/star_tab_list"
-            android:textColor="#666666"
+            android:textColor="?android:attr/textColorSecondary"
             android:textSize="14sp" />
 
         <TextView
@@ -59,7 +59,7 @@
             android:paddingTop="8dp"
             android:paddingBottom="8dp"
             android:text="@string/star_tab_updates"
-            android:textColor="#666666"
+            android:textColor="?android:attr/textColorSecondary"
             android:textSize="14sp" />
 
     </LinearLayout>

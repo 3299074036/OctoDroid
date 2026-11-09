@@ -63,8 +63,12 @@ public class ChainDownloadHelper {
                 // 私有目录不需要 WRITE_EXTERNAL_STORAGE，任何 API 级别都不用申请。
                 .setDestinationInExternalFilesDir(context,
                         Environment.DIRECTORY_DOWNLOADS, safeName)
+                // 57：系统下载完成通知只在校验通过后才由应用自己发（见
+                // DownloadUtils.notifyDownloadComplete）——这里只显示下载中
+                // 进度，不在完成瞬间弹系统通知，否则用户一点就装上还没验过
+                // 签名的 APK（校验是事后异步的，见 DownloadUtils）。
                 .setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                        DownloadManager.Request.VISIBILITY_VISIBLE)
                 .setAllowedOverRoaming(false);
         if (customizer != null) {
             customizer.customize(request);

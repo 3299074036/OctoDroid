@@ -1,5 +1,6 @@
 package com.gh4a.worker;
 
+import android.annotation.SuppressLint;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -92,12 +93,23 @@ public class ReleaseRadarWorker extends Worker {
         super(context, workerParams);
     }
 
+    // 22：MissingPermission 压制附理由——两处 notify() 前已有
+    // NotificationPermission.canPostNotifications() 检查（doWork() 开头
+    // 的短路 + 通知前的守卫），lint 不认抽进 helper 的间接检查。
+    @SuppressLint("MissingPermission")
     @NonNull
     @Override
     public Result doWork() {
         final Context context = getApplicationContext();
         final String login = Gh4Application.get().getAuthLogin();
         if (login == null) {
+            return Result.success();
+        }
+        // 54：无通知权限时直接成功返回，不拉取、不写 known_tags、不写
+        // RadarCache。否则权限关闭期间的新发布会被记成"已知 tag"，
+        // 授权后永不再提醒。notify() 处的守卫保留作第二道防线。
+        if (!NotificationPermission.canPostNotifications(context)) {
+            Log.d(TAG, "Notifications disabled, skipping radar check");
             return Result.success();
         }
 
@@ -171,6 +183,9 @@ public class ReleaseRadarWorker extends Worker {
         return false;
     }
 
+    // 22：MissingPermission 压制附理由——本方法开头已由
+    // NotificationPermission.canPostNotifications() 检查，lint 不认间接检查。
+    @SuppressLint("MissingPermission")
     private void notifyAuthFailed(Context context) {
         // 无通知权限时不打扰（同时避免 MissingPermission lint error）
         if (!NotificationPermission.canPostNotifications(context)) {

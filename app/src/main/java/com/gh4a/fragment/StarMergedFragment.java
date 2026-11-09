@@ -57,6 +57,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.gh4a.utils.RxUtils;
+
+import io.reactivex.Single;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.schedulers.Schedulers;
@@ -318,22 +321,38 @@ public class StarMergedFragment extends Fragment {
         }
         if (getActivity() != null && mLogin != null) {
             mReadUpdateKeys = StarReadState.getReadKeys(getActivity(), mLogin);
-            // 0.1.3：进分组先即时显示本地缓存（有缓存才不空白），再后台刷新。
-            List<UserListsGraphQL.UserList> cached = UserListsCache.load(getActivity(), mLogin);
-            if (cached != null) {
-                // 0.1.38：Star 数据链埋点（只记条数，不记列表与仓库名）。
-                com.gh4a.utils.DiagTrace.log(getActivity(), "STAR",
-                        "lists=cached count=" + cached.size());
-                mOfficialLists = cached;
-                // 0.1.64：按本机保存的顺序展示（新列表排最后）。
-                applySavedListOrder();
-                mListsFailed = false;
-                // BUG-18/BUG-27：旋转恢复时缓存能接住列表数据，才恢复 loaded
-                // 标志（否则仍按未加载处理，loadCurrentTab 会重拉）。
-                if (mRestoredListsLoaded) {
-                    mListsLoaded = true;
-                }
-            }
+            // P3：官方列表缓存 JSON 解析（全部列表＋全部成员仓库）移出主线程。
+            // 之前在 onCreateView 同步解析，列表 500+ 项时首开卡顿；现在后台
+            // 解析、主线程回填。回填时若网络拉取已完成（mListsLoaded 已真）
+            // 则不再用旧缓存覆盖新鲜数据；视图销毁时订阅随 mDisposables
+            // 释放，回调里仍判 isAdded() 设防。解析失败不影响主流程，
+            // loadCurrentTab 会走网络拉取。
+            final android.content.Context appContext =
+                    getActivity().getApplicationContext();
+            final String login = mLogin;
+            mDisposables.add(Single.fromCallable(
+                            () -> UserListsCache.load(appContext, login))
+                    .compose(RxUtils::doInBackground)
+                    .subscribe(cached -> {
+                        if (!isAdded() || cached == null || mListsLoaded) return;
+                        // 0.1.38：Star 数据链埋点（只记条数，不记列表与仓库名）。
+                        com.gh4a.utils.DiagTrace.log(getActivity(), "STAR",
+                                "lists=cached count=" + cached.size());
+                        mOfficialLists = cached;
+                        // 0.1.64：按本机保存的顺序展示（新列表排最后）。
+                        applySavedListOrder();
+                        mListsFailed = false;
+                        // BUG-18/BUG-27：旋转恢复时缓存能接住列表数据，才恢复 loaded
+                        // 标志（否则仍按未加载处理，loadCurrentTab 会重拉）。
+                        if (mRestoredListsLoaded) {
+                            mListsLoaded = true;
+                        }
+                        if (mCurrentTab == TAB_LISTS) {
+                            rebuild();
+                        }
+                    }, error -> {
+                        // 缓存解析失败：不置失败态，网络拉取会接手。
+                    }));
             // BUG-27：更新同样有 RadarCache，旋转恢复时能接住才恢复 loaded。
             if (mRestoredUpdatesLoaded) {
                 List<ReleaseRadarFragment.RadarItem> cachedUpdates =
@@ -366,11 +385,16 @@ public class StarMergedFragment extends Fragment {
         // 0.1.7：当前页开始加载后，立即在后台并行预取其余两页（不阻塞当前页）。
         prefetchOtherTabs(false);
         // 0.2.2：观察批量移组状态（B-M7）——ViewModel 在旋转时保留，Fragment
-        // 重建后按最新状态把进度框／结果框重建出来。Fragment 作 LifecycleOwner：
-        // 视图销毁时 Fragment 已 STOP，LiveData 不会向无视图的 Fragment 投递。
+        // 重建后按最新状态把进度框／结果框重建出来。
+        // 0.2.4（59）：必须用 getViewLifecycleOwner() 观察——Fragment 的生命
+        // 周期长于视图，视图销毁后、Fragment 销毁前的窗口内观察者仍可收到
+        // 投递，onMoveStateChanged 操作已销毁的视图／Activity 会崩溃。
         mMoveViewModel = new ViewModelProvider(this)
                 .get(StarBatchMoveViewModel.class);
-        mMoveViewModel.getState().observe(this, this::onMoveStateChanged);
+        mMoveViewModel.getState().observe(getViewLifecycleOwner(), this::onMoveStateChanged);
+        // 0.2.4（58）：单发操作（入组单发／改名／删组）结果，同上用
+        // getViewLifecycleOwner() 观察。
+        mMoveViewModel.getSingleOp().observe(getViewLifecycleOwner(), this::onSingleOpChanged);
         return view;
     }
 
@@ -1105,21 +1129,13 @@ public class StarMergedFragment extends Fragment {
     }
 
     private void assignToOfficialLists(String fullName, List<String> listIds) {
-        mDisposables.add(UserListsGraphQL.assignRepo(fullName, listIds)
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(ok -> {
-                    if (!isAdded()) return;
-                    Toast.makeText(getActivity(), R.string.assign_official_success,
-                            Toast.LENGTH_SHORT).show();
-                    // BUG-4：官方路径无条件重拉（先取消在途请求，见 force 分支）。
-                    refetchLists();
-                }, error -> {
-                    if (isAdded()) {
-                        Toast.makeText(getActivity(), R.string.assign_official_failed,
-                                Toast.LENGTH_LONG).show();
-                    }
-                }));
+        // 0.2.4（58）：单发入组走 ViewModel，旋转不中断；结果经 LiveData
+        // 回到重建后的 Fragment（Toast＋重拉），不再挂 Fragment 的 mDisposables。
+        if (mMoveViewModel == null) {
+            return;
+        }
+        mMoveViewModel.runSingleOp(UserListsGraphQL.assignRepo(fullName, listIds),
+                R.string.assign_official_success, R.string.assign_official_failed, null);
     }
 
     /** 0.1.64：无条件重拉官方列表（复用 BUG-4 的 force 语义）。 */
@@ -1166,20 +1182,12 @@ public class StarMergedFragment extends Fragment {
         com.gh4a.utils.TextInputDialogHelper.show(requireActivity(),
                 R.string.star_list_rename_title, list.name, name -> {
                     if (name.isEmpty() || name.equals(list.name)) return;
-                    mDisposables.add(UserListsGraphQL.renameList(list.id, name)
-                            .subscribeOn(Schedulers.io())
-                            .observeOn(AndroidSchedulers.mainThread())
-                            .subscribe(ok -> {
-                                if (!isAdded()) return;
-                                Toast.makeText(getActivity(), R.string.star_list_renamed,
-                                        Toast.LENGTH_SHORT).show();
-                                refetchLists();
-                            }, error -> {
-                                if (isAdded()) {
-                                    Toast.makeText(getActivity(), R.string.star_list_rename_failed,
-                                            Toast.LENGTH_LONG).show();
-                                }
-                            }));
+                    // 0.2.4（58）：同 assignToOfficialLists，改名走 ViewModel。
+                    if (mMoveViewModel == null) {
+                        return;
+                    }
+                    mMoveViewModel.runSingleOp(UserListsGraphQL.renameList(list.id, name),
+                            R.string.star_list_renamed, R.string.star_list_rename_failed, null);
                 });
     }
 
@@ -1191,23 +1199,13 @@ public class StarMergedFragment extends Fragment {
                         R.plurals.star_list_delete_message,
                         list.repos.size(), list.repos.size()))
                 .setPositiveButton(R.string.ok, (dialog, which) -> {
-                    mDisposables.add(UserListsGraphQL.deleteList(list.id)
-                            .subscribeOn(Schedulers.io())
-                            .observeOn(AndroidSchedulers.mainThread())
-                            .subscribe(ok -> {
-                                if (!isAdded()) return;
-                                Toast.makeText(getActivity(), R.string.star_list_deleted,
-                                        Toast.LENGTH_SHORT).show();
-                                if (TextUtils.equals(mExpandedOfficialId, list.id)) {
-                                    mExpandedOfficialId = null;
-                                }
-                                refetchLists();
-                            }, error -> {
-                                if (isAdded()) {
-                                    Toast.makeText(getActivity(), R.string.star_list_delete_failed,
-                                            Toast.LENGTH_LONG).show();
-                                }
-                            }));
+                    // 0.2.4（58）：同 assignToOfficialLists，删组走 ViewModel；
+                    // 成功后清掉已展开的该组 id（在结果回调里做，见 onSingleOpChanged）。
+                    if (mMoveViewModel == null) {
+                        return;
+                    }
+                    mMoveViewModel.runSingleOp(UserListsGraphQL.deleteList(list.id),
+                            R.string.star_list_deleted, R.string.star_list_delete_failed, list.id);
                 })
                 .setNegativeButton(R.string.cancel, null)
                 .show();
@@ -1377,6 +1375,27 @@ public class StarMergedFragment extends Fragment {
             return;
         }
         showBatchMoveResult(state, moved);
+    }
+
+    /**
+     * 0.2.4（58）：单发操作（入组单发／改名／删组）结果——ViewModel 里的 Rx 链
+     * 旋转不中断，重建后按结果 Toast＋重拉；已消费的不重复弹。
+     */
+    private void onSingleOpChanged(StarBatchMoveViewModel.SingleOp op) {
+        if (op == null || mMoveViewModel == null || mMoveViewModel.isSingleOpConsumed(op)) {
+            return;
+        }
+        mMoveViewModel.markSingleOpConsumed(op);
+        Toast.makeText(getActivity(), op.messageRes,
+                op.success ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
+        if (!op.success) {
+            return;
+        }
+        if (op.clearExpandedId != null
+                && TextUtils.equals(mExpandedOfficialId, op.clearExpandedId)) {
+            mExpandedOfficialId = null;
+        }
+        refetchLists();
     }
 
     private void showBatchMoveResult(StarBatchMoveViewModel.State state, int moved) {

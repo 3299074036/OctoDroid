@@ -19,14 +19,11 @@ import org.simpleframework.xml.transform.RegistryMatcher;
 import org.simpleframework.xml.transform.Transform;
 
 import java.net.HttpURLConnection;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import io.reactivex.Observable;
@@ -153,13 +150,6 @@ public class SingleFactory {
                 .map(feed -> feed.feed);
     }
 
-    public static Single<List<Feed>> loadBlogFeed() {
-        return RetrofitHelper.feedService()
-                .getBlogFeed()
-                .map(ApiHelpers::throwOnFailure)
-                .map(feed -> feed.feed);
-    }
-
     public static Single<List<Trend>> loadTrends(String type) {
         return RetrofitHelper.trendService()
                 .getTrends(type)
@@ -203,17 +193,17 @@ public class SingleFactory {
         private static void initialize() {
             RegistryMatcher matcher = new RegistryMatcher();
             matcher.bind(Date.class, new Transform<Date>() {
-                private final DateFormat mFormat =
-                        new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
-
                 @Override
                 public Date read(String value) throws Exception {
-                    return mFormat.parse(value);
+                    // 61+72：解析走统一入口（ThreadLocal + UTC）；
+                    // 旧代码是跨线程共享的可变 SimpleDateFormat 且未设 UTC。
+                    // 失败返回 null，不再因一条坏日期拖垮整个 feed 解析。
+                    return Iso8601.parseOrNull(value);
                 }
 
                 @Override
                 public String write(Date value) throws Exception {
-                    return mFormat.format(value);
+                    return Iso8601.formatFeed(value);
                 }
             });
 

@@ -65,6 +65,11 @@ jobs:
             echo "harvest ok"
           else
             echo "harvest failed (rc=$HARVEST_RC), falling back"
+            # 79：harvest 失败时删掉本轮可能已写的 newest（失败率 >5% 时
+            # harvest-hiwiki 仍可能已落盘不完整 newest），生成器改走
+            # stale 路径（上一轮 prev-newest.json），避免 meta 里
+            # harvestStatus=fallback 与 newestStatus=ok 自相矛盾。
+            rm -f hiwiki-data/hiwiki-newest.json
             if [ -f prev-hiwiki/hiwiki-pool.json ] && [ -f prev-hiwiki/hiwiki-ranks.json ]; then
               cp prev-hiwiki/hiwiki-pool.json prev-hiwiki/hiwiki-ranks.json hiwiki-data/
               echo "fallback: previous round artifacts (level 2)"
@@ -77,11 +82,11 @@ jobs:
           fi
       - name: Generate store JSON
         env:
-          GITHUB_TOKEN: ${{ secrets.STORE_PAT }}
+          STORE_PAT: ${{ secrets.STORE_PAT }}
           HARVEST_STATUS: ${{ steps.harvest.outputs.harvestStatus }}
         run: |
           set -e
-          if [ -z "$GITHUB_TOKEN" ]; then echo "STORE_PAT secret is missing or empty"; exit 1; fi
+          if [ -z "$STORE_PAT" ]; then echo "STORE_PAT secret is missing or empty"; exit 1; fi
           python3 store-backend/generate.py \
             --hiwiki-pool hiwiki-data/hiwiki-pool.json \
             --hiwiki-ranks hiwiki-data/hiwiki-ranks.json \
@@ -115,6 +120,8 @@ jobs:
           else:
               pool_names = {r["fullName"].lower() for r in pool_records}
           feed_names = {i["fullName"].lower() for i in feed}
+          # 86：feed 本身不应有重复 fullName（生成器已按 fullName 去重）。
+          assert len(feed_names) == len(feed), "feed has duplicate fullName"
           dropped_names = pool_names - feed_names
           expected_ranked = (
               sum(1 for n in pool_names if n in mapping)
@@ -145,10 +152,16 @@ jobs:
               harvest_newest = json.load(
                   open("hiwiki-data/hiwiki-newest.json"))["items"]
               newest = json.load(open(newest_path))["items"]
-              assert len(newest) == len(harvest_newest), (
-                  len(newest), len(harvest_newest))
-              assert [i["fullName"] for i in newest] == [
-                  i["fullName"] for i in harvest_newest], "newest order mismatch"
+              # 86：newest 须与 harvest 逐条对上（去重后比对：生成器按
+              # fullName 去重保序，harvest 若有重复行则 newest 更短）；
+              # 且 newest 自身无重复 fullName。
+              harvest_names = [i["fullName"].lower()
+                               for i in harvest_newest]
+              deduped = list(dict.fromkeys(harvest_names))
+              newest_names = [i["fullName"].lower() for i in newest]
+              assert newest_names == deduped, "newest order/dedupe mismatch"
+              assert len(set(newest_names)) == len(newest_names), (
+                  "newest has duplicate fullName")
               assert all(set(("fullName", "description", "category",
                               "language", "stars", "latestTag",
                               "lastReleaseTime", "platforms")) <= set(i)
@@ -159,6 +172,9 @@ jobs:
               newest = json.load(open(newest_path))["items"]
               assert [i["fullName"] for i in newest] == [
                   i["fullName"] for i in prev_newest], "stale newest mismatch"
+              # 86：stale 分支同样断言无重复 fullName。
+              assert len({i["fullName"].lower() for i in newest}) == len(newest), (
+                  "stale newest has duplicate fullName")
               print("newest stale: %d items (previous round)" % len(newest))
           else:
               assert newest_status == "missing", meta
@@ -187,6 +203,9 @@ jobs:
           cp -r store-output/* /tmp/gh-pages/store/
           mkdir -p /tmp/gh-pages/store/history
           cp store-history/*.json /tmp/gh-pages/store/history/ 2>/dev/null || true
+          # §6.4：历史快照只留 30 天滚动（生成器只回看 7 天，30 天足够；
+          # 每天 2 轮，不清会一直膨胀）。
+          find /tmp/gh-pages/store/history -name '*.json' -mtime +30 -delete 2>/dev/null || true
           mkdir -p /tmp/gh-pages/store/hiwiki
           cp hiwiki-data/*.json /tmp/gh-pages/store/hiwiki/ 2>/dev/null || true
           touch /tmp/gh-pages/.nojekyll

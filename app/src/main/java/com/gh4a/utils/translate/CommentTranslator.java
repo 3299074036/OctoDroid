@@ -72,13 +72,6 @@ public class CommentTranslator {
     }
 
     /**
-     * Returns true while any translation (single or batch) is in flight.
-     */
-    public boolean isTranslating() {
-        return !mTranslating.isEmpty();
-    }
-
-    /**
      * Returns true while a whole-thread batch is running.
      */
     public boolean isBatchRunning() {

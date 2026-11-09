@@ -238,8 +238,14 @@ def process(full):
         L = json.loads(raw)
     except Exception:
         return {"fullName": full, "error": "bad-json"}
+    # 85：主记录不能只看 owner+repo——payload 扁平列表里可能先出现
+    # 只有这两个键的引用桩/相关条目。要求同时带主记录特征字段
+    # （releases/subgroup/starCount 至少其一）；任一即可，避免
+    # 无 release 的仓库因缺 releases 键被误判为无记录。
     for el in L:
-        if isinstance(el, dict) and "owner" in el and "repo" in el:
+        if (isinstance(el, dict) and "owner" in el and "repo" in el
+                and ("releases" in el or "subgroup" in el
+                     or "starCount" in el)):
             r = hyd(L, el)
             releases = []
             for rel in r.get("releases") or []:

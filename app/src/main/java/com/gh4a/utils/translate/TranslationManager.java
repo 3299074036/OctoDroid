@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
 import android.text.TextUtils;
 import android.util.Base64;
+import android.util.Log;
 
 import com.gh4a.Gh4Application;
 import com.gh4a.R;
@@ -34,6 +35,8 @@ import okhttp3.OkHttpClient;
  * resolves the target language from the app language setting.
  */
 public class TranslationManager {
+    private static final String TAG = "TranslationManager";
+
     public static final String KEY_PROVIDER = "translation_provider";
     public static final String KEY_URL = "translation_url";
     public static final String KEY_API_KEY = "translation_api_key";
@@ -100,7 +103,9 @@ public class TranslationManager {
         return Gh4Application.securePrefs(context);
     }
 
-    private static SecretKey getOrCreateCredKey() throws Exception {
+    // 66：同步——两线程同时在密钥不存在时进入会各 generateKey() 写同一别名，
+    // 后者覆盖前者，先拿到旧密钥的线程加密出的密文用新密钥解不开。
+    private static synchronized SecretKey getOrCreateCredKey() throws Exception {
         KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
         ks.load(null);
         if (ks.containsAlias(CRED_KEY_ALIAS)) {
@@ -136,6 +141,8 @@ public class TranslationManager {
             System.arraycopy(ct, 0, out, iv.length, ct.length);
             return CRED_CIPHER_PREFIX + Base64.encodeToString(out, Base64.NO_WRAP);
         } catch (Exception e) {
+            // 52：加密失败必须记日志，否则调用方静默丢凭据、无从排查。
+            Log.w(TAG, "Failed to encrypt credential", e);
             return null;
         }
     }
@@ -180,7 +187,14 @@ public class TranslationManager {
         migrateCredentialsFromDefaultPrefs(context);
         String stored = getStringSafe(securePrefs(context), key, "");
         if (stored.isEmpty()) {
-            return "";
+            // 52：加密存储为空时，回落读默认 prefs 里的明文残留——迁移失败
+            // （KeyStore 不可用）时明文还留在那里；与 GitHub token 的
+            // Gh4a-secure-plain 回落同款思路。加密恢复后下次迁移再加密存回。
+            String plain = getStringSafe(prefs(context), key, "");
+            if (!plain.isEmpty()) {
+                Log.w(TAG, "Credential read from default prefs fallback (encryption unavailable)");
+            }
+            return plain;
         }
         if (isCiphertext(stored)) {
             String plain = decryptCredential(stored);
@@ -194,8 +208,12 @@ public class TranslationManager {
         return stored;
     }
 
-    /** 写一条凭据（加密后存；空值则删除）。 */
-    private static void setCredential(Context context, String key, String value) {
+    /**
+     * 写一条凭据（加密后存；空值则删除）。
+     * @return true=已保存/已删除；false=加密失败，什么都没写（旧值保留，
+     *         调用方应提示用户）。
+     */
+    private static boolean setCredential(Context context, String key, String value) {
         migrateCredentialsFromDefaultPrefs(context);
         SharedPreferences.Editor editor = securePrefs(context).edit();
         if (value == null || value.isEmpty()) {
@@ -203,13 +221,16 @@ public class TranslationManager {
         } else {
             String cipher = encryptCredential(value);
             if (cipher == null) {
-                return;
+                // 52：加密失败不再静默 return，调用方凭返回值提示用户。
+                Log.w(TAG, "Failed to save credential: encryption unavailable");
+                return false;
             }
             editor.putString(key, cipher);
         }
         editor.apply();
         // 旧版明文残留（若有）一并清掉。
         prefs(context).edit().remove(key).apply();
+        return true;
     }
 
     /** 某 provider 的 API key（解密后）。 */
@@ -217,8 +238,8 @@ public class TranslationManager {
         return getCredential(context, apiKeyPrefKey(provider));
     }
 
-    public static void setApiKey(Context context, String provider, String value) {
-        setCredential(context, apiKeyPrefKey(provider), value);
+    public static boolean setApiKey(Context context, String provider, String value) {
+        return setCredential(context, apiKeyPrefKey(provider), value);
     }
 
     /** 某 provider 的 API secret（解密后）。 */
@@ -226,8 +247,8 @@ public class TranslationManager {
         return getCredential(context, apiSecretPrefKey(provider));
     }
 
-    public static void setApiSecret(Context context, String provider, String value) {
-        setCredential(context, apiSecretPrefKey(provider), value);
+    public static boolean setApiSecret(Context context, String provider, String value) {
+        return setCredential(context, apiSecretPrefKey(provider), value);
     }
 
     /**
@@ -235,13 +256,17 @@ public class TranslationManager {
      * 空表示该 provider 未配凭据。
      */
     public static String getStoredApiKeyCiphertext(Context context, String provider) {
-        migrateCredentialsFromDefaultPrefs(context);
+        // 65：先走一次 getCredential——它会把加密存储里的明文残留（旧版备份
+        // 恢复后躺在这里）就地加密存回；否则"恢复旧备份 → 未翻译过 → 立即
+        // 再导出"会静默丢掉该凭据。加密不可用时仍返回 ""，不明文进备份。
+        getCredential(context, apiKeyPrefKey(provider));
         String stored = getStringSafe(securePrefs(context), apiKeyPrefKey(provider), "");
         return isCiphertext(stored) ? stored : "";
     }
 
     public static String getStoredApiSecretCiphertext(Context context, String provider) {
-        migrateCredentialsFromDefaultPrefs(context);
+        // 65：同 getStoredApiKeyCiphertext。
+        getCredential(context, apiSecretPrefKey(provider));
         String stored = getStringSafe(securePrefs(context), apiSecretPrefKey(provider), "");
         return isCiphertext(stored) ? stored : "";
     }
@@ -374,22 +399,5 @@ public class TranslationManager {
             appLang = Locale.getDefault().getLanguage();
         }
         return appLang.startsWith("zh") ? "zh-CN" : "en";
-    }
-
-    /** Human-readable summary of the current provider config, for settings. */
-    public static String getProviderSummary(Context context) {
-        SharedPreferences prefs = prefs(context);
-        String provider = prefs.getString(KEY_PROVIDER, PROVIDER_GOOGLE);
-        switch (provider) {
-            case PROVIDER_YOUDAO:
-                return "有道";
-            case PROVIDER_BAIDU:
-                return "百度翻译";
-            case PROVIDER_DEEPL:
-                return "DeepL";
-            case PROVIDER_GOOGLE:
-            default:
-                return "Google";
-        }
     }
 }

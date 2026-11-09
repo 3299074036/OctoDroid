@@ -169,6 +169,10 @@
     <string name="download_created">Created %1$s</string>
     <string name="download_failed">Download failed, please check your network connection or access rights</string>
     <string name="download_retry_alt">Download failed, retrying via alternate route…</string>
+    <string name="download_verifying">Verifying download, please wait…</string>
+    <string name="download_complete">Download complete</string>
+    <string name="channel_download_name">Downloads</string>
+    <string name="channel_download_description">Notifications when a download completes.</string>
     <string name="download_mobile_warning_title">Mobile connection download</string>
     <string name="download_mobile_warning_message">Do you want to download this file using your mobile connection?\nYou can also schedule it for download when you\'re using your Wi-Fi connection next time.</string>
     <string name="download_now_button">Download now</string>
@@ -248,7 +252,6 @@
     <string name="repo_sort_order_pushed_asc">Least recently pushed</string>
     <string name="filter_and_sort">Filter and Sort</string>
 
-    <string name="no_blogs_found">No blogs found.</string>
     <string name="no_comments_found">Nobody has commented so far.</string>
     <string name="no_files_found">No files found.</string>
     <string name="no_trends_found">No trending repositories found.</string>
@@ -753,6 +756,7 @@
     <string name="translation_testing">Testing…</string>
     <string name="translation_test_ok">Test succeeded: %1$s</string>
     <string name="translation_test_fail">Test failed: %1$s</string>
+    <string name="translation_credential_save_failed">Failed to save credential: secure storage unavailable</string>
 
     <!-- Recent history -->
     <string name="recent_history">Recent</string>

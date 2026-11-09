@@ -130,8 +130,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
     // 0.1.10：下拉刷新时强制走网络（不先显示缓存），否则 BUG-25 的
     // “刷新真的刷新”会被缓存显示盖掉。
     private boolean mHotForceRefresh;
-    // 0.1.10：App 启动预取用的静态订阅（与 Fragment 生命周期无关）。
-    private static Disposable sPrefetchDisposable;
     private String mQuery;
     private String mSort;
     private String mOrder;
@@ -536,44 +534,6 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             mStoreView = null;
         }
         super.onDestroyView();
-    }
-
-    /**
-     * 0.1.10：App 启动时后台预取热门建议（仅当缓存缺失或已过 24 小时有效期，
-     * 且已有登录授权时才发请求）。静默写盘，不碰任何界面；进搜索页时
-     * 多数情况下缓存已就绪，可直接秒出。
-     */
-    public static void prefetchHotSuggestions(android.content.Context context) {
-        if (context == null || HotReposCache.isFresh(context)) {
-            return;
-        }
-        if (sPrefetchDisposable != null && !sPrefetchDisposable.isDisposed()) {
-            return;
-        }
-        android.content.Context appContext = context.getApplicationContext();
-        SearchService service = ServiceFactory.get(SearchService.class, false);
-        sPrefetchDisposable = service.searchRepositories("stars:>100000", "stars", "desc", 1)
-                .compose(result -> RxUtils.<Repository, Object>searchPageAdapter(result, item -> item))
-                .map(ApiHelpers::throwOnFailure)
-                .compose(RxUtils::doInBackground)
-                .subscribe(page -> {
-                    java.util.List<HotReposCache.HotRepo> repos = new java.util.ArrayList<>();
-                    if (page != null && page.items() != null) {
-                        for (Object o : page.items()) {
-                            if (o instanceof Repository && repos.size() < 10) {
-                                Repository r = (Repository) o;
-                                Integer sc = r.stargazersCount();
-                                repos.add(new HotReposCache.HotRepo(
-                                        r.fullName(), sc != null ? sc : 0));
-                            }
-                        }
-                    }
-                    if (!repos.isEmpty()) {
-                        HotReposCache.save(appContext, repos);
-                    }
-                }, error -> {
-                    // 预取失败静默丢弃：进搜索页时再正常加载，不打扰用户。
-                });
     }
 
     @Override

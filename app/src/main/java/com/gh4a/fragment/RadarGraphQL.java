@@ -6,15 +6,13 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
-import java.util.TimeZone;
 
 import io.reactivex.Single;
+
+import com.gh4a.utils.Iso8601;
 
 /**
  * Fetches the latest releases of the user's starred repositories via a
@@ -144,21 +142,12 @@ public class RadarGraphQL {
         if (iso == null || iso.isEmpty()) {
             return 0;
         }
-        // BUG-26：先试带毫秒格式（GitHub 常返回 …ss.SSS'Z'），再试无毫秒
-        // 格式；都失败才记日志回 0，避免带毫秒时间戳被排到底部。
-        String[] formats = {
-                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-                "yyyy-MM-dd'T'HH:mm:ss'Z'"
-        };
-        for (String format : formats) {
-            try {
-                SimpleDateFormat f = new SimpleDateFormat(format, Locale.US);
-                f.setTimeZone(TimeZone.getTimeZone("UTC"));
-                return f.parse(iso).getTime();
-            } catch (ParseException ignored) {
-            }
+        // 61+72：解析走统一入口（ThreadLocal + UTC）；BUG-26 的毫秒/无毫秒
+        // 两形都在 Iso8601 的格式表里。都失败才记日志回 0，避免带毫秒时间戳被排到底部。
+        long t = Iso8601.parseOrZero(iso);
+        if (t == 0) {
+            Log.w(TAG, "Bad date: " + iso);
         }
-        Log.w(TAG, "Bad date: " + iso);
-        return 0;
+        return t;
     }
 }

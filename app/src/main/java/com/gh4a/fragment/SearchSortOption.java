@@ -88,15 +88,6 @@ public enum SearchSortOption {
         return out;
     }
 
-    public static SearchSortOption fromMenuId(int menuId) {
-        for (SearchSortOption option : values()) {
-            if (option.menuId == menuId) {
-                return option;
-            }
-        }
-        return null;
-    }
-
     /** 按持久化的 (sort, order) 反查菜单 id 对应的选项（无匹配返回 null）。 */
     public static SearchSortOption fromSortOrder(String sort, String order) {
         for (SearchSortOption option : values()) {

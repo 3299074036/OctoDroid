@@ -45,7 +45,7 @@ store/history/，git 拉取不占 API 额度；攒够 7 天前生成器热门条
 真·近期日均，之前用 stars_per_day 顶替，新库无历史时同样顶替。
 
 用法（工作流）：
-  GITHUB_TOKEN=<STORE_PAT> python3 generate.py \
+  STORE_PAT=<STORE_PAT> python3 generate.py \
       --hiwiki-pool hiwiki-data/hiwiki-pool.json \
       --hiwiki-ranks hiwiki-data/hiwiki-ranks.json \
       --prev-feed prev-feed.json \
@@ -81,7 +81,9 @@ store/history/，git 拉取不占 API 额度；攒够 7 天前生成器热门条
 快照（snapshot-dir 下，仅默认 all 视图，供 App 内置离线兜底）：
   feed_all.json, chart_trending_all.json, chart_new-releases_all.json,
   chart_most-popular_all.json
-每个文件：{"generatedAt": ISO, "items": [...]}；单条含 fullName / owner /
+每个文件：{"items": [...]}（80：generatedAt 只写 meta.json，内容不变
+时文件字节不变，gh-pages 不空提交；App 不读 feed 的 generatedAt）；
+单条含 fullName / owner /
 avatarUrl / description / stars / forks / language / topics / topicCodes /
 latestTag / latestDate / pushedAt / downloadCount / platforms / source /
 ranks（createdAt 仅后端复用时写，App 不读）。只打数量日志，不打仓库名
@@ -103,7 +105,25 @@ API = "https://api.github.com"
 # 三榜顺序（输出文件与 meta.json 的榜序与现行一致）。
 CHARTS = ["trending", "new-releases", "most-popular"]
 
-PLATFORMS = ["all", "android", "macos", "windows", "linux", "ios"]
+# 81：harmony/extension 已补（App 端 PLATFORM_KEYS 有这两档）；archive
+# 不出分包——App 无 archive 平台档，archive 条目仍走 all.json 客户端筛。
+PLATFORMS = ["all", "android", "macos", "windows", "linux", "ios",
+             "harmony", "extension"]
+
+# 82：用途 category 白名单（与 App 端 StoreView.FEED_CATS 一致）。
+# hiwiki 若新增/改名大类（如大小写变化），未知值归 "other" 并记日志
+# 告警，避免该类仓库进不了用途网格（仍在"全部"里）。
+CATEGORIES = {"ai", "media", "network", "tools", "productivity",
+              "development", "game", "other"}
+
+
+def normalize_category(value):
+    c = (value or "").strip().lower()
+    if c in CATEGORIES:
+        return c
+    if c:
+        print("category 未知，归 other：%s" % value)
+    return "other"
 
 # 发现页每页条数：Komi 的 BackendApiClient.getFeed limit 默认值。
 PAGE_SIZE = 20
@@ -471,18 +491,29 @@ class Api:
                         "GitHub API 限速（已用 %d 次），请用 token 或等重置后再跑"
                         % self.calls)
                 raise SystemExit("GitHub API %s 失败：%s" % (path, e))
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+                # 60：瞬时网络错误（DNS/连接重置/超时）或响应解析错误只降级
+                # 该仓（返回 None，调用方 fetch_repo_meta 按 404 同款处理），
+                # 不 abort 整轮。限速有 3 次重试 + 降级，瞬时错误此前零容错。
+                # 注意 HTTPError 是 URLError 的子类，本分支在它之后才匹配。
+                print("GitHub API %s 瞬时失败，降级该仓：%s" % (path, e))
+                return None
         raise SystemExit("GitHub API %s 失败：%s" % (path, last_error))
 
 
 def sort_chart(chart, items):
+    # 80：同分（同星标/同分值/同日期）按 fullName 升序作二级键，避免顺序
+    # 依赖输入原序、输入一变就换位（与 feed 排序同款）。
     if chart == "new-releases":
-        return sorted(items, key=lambda i: i["latestDate"], reverse=True)
+        by_name = sorted(items, key=lambda i: i["fullName"].lower())
+        return sorted(by_name, key=lambda i: i["latestDate"], reverse=True)
     if chart == "most-popular":
         return sorted(items,
-                      key=lambda i: i.get("popularityScore")
-                      if isinstance(i.get("popularityScore"), (int, float))
-                      else i["stars"],
-                      reverse=True)
+                      key=lambda i: (-(i.get("popularityScore")
+                                       if isinstance(i.get("popularityScore"),
+                                                    (int, float))
+                                       else i["stars"]),
+                                     i["fullName"].lower()))
     if chart == "trending":
         # 有 trendingScore 的（镜像条目；攒够 7 天历史后的生成器条目）
         # 按分降序在前；没有的（无历史的生成器条目）按 stars_per_day
@@ -491,13 +522,15 @@ def sort_chart(chart, items):
                       if isinstance(i.get("trendingScore"), (int, float))]
         without = [i for i in items
                    if not isinstance(i.get("trendingScore"), (int, float))]
-        with_score.sort(key=lambda i: i["trendingScore"], reverse=True)
-        without.sort(key=lambda i: i.get("stars_per_day")
-                     if isinstance(i.get("stars_per_day"), (int, float))
-                     else i["stars"],
-                     reverse=True)
+        with_score.sort(key=lambda i: (-i["trendingScore"],
+                                       i["fullName"].lower()))
+        without.sort(key=lambda i: (-(i.get("stars_per_day")
+                                      if isinstance(i.get("stars_per_day"),
+                                                   (int, float))
+                                      else i["stars"]),
+                                    i["fullName"].lower()))
         return with_score + without
-    return sorted(items, key=lambda i: i["stars"], reverse=True)
+    return sorted(items, key=lambda i: (-i["stars"], i["fullName"].lower()))
 
 
 def write_json(path, payload):
@@ -542,9 +575,9 @@ def select_installable_release(releases):
 def load_newest(path):
     """读最新入库文件，返回 (items, generatedAt)。
 
-    接受两种同形文件：harvest 产出的 hiwiki-newest.json 与上一轮的
-    feed/newest.json，都是 {"generatedAt", "items": [...]}。文件缺失
-    / 损坏 / 无有效条目返回 ([], "")。顺序原样保留，绝不重排。
+    接受两种文件：harvest 产出的 hiwiki-newest.json（带 generatedAt）与
+    上一轮的 feed/newest.json（80 起不再带 generatedAt，日期返回 ""）。
+    文件缺失 / 损坏 / 无有效条目返回 ([], "")。顺序原样保留，绝不重排。
     """
     if not path or not os.path.isfile(path):
         return [], ""
@@ -570,12 +603,20 @@ def build_newest_items(raw_items, feed_by_name):
     字段一律取 hiwiki 行的新鲜值。返回 (items, in_feed_count)。
     """
     out = []
+    seen = set()
     in_feed = 0
     for raw in raw_items:
         full = (raw.get("fullName") or "").strip()
         if not full:
             continue
-        feed_item = feed_by_name.get(full.lower())
+        # 86：按 fullName 去重保序（hiwiki newest 页若出现重复行，
+        # feed/newest.json 不应原样带重）。
+        key = full.lower()
+        if key in seen:
+            print("newest 去重：%s" % full)
+            continue
+        seen.add(key)
+        feed_item = feed_by_name.get(key)
         if feed_item is not None:
             platforms = sorted(feed_item.get("platforms") or [])
             in_feed += 1
@@ -587,7 +628,7 @@ def build_newest_items(raw_items, feed_by_name):
         out.append({
             "fullName": full,
             "description": raw.get("description") or "",
-            "category": raw.get("category") or "other",
+            "category": normalize_category(raw.get("category")),
             "language": raw.get("language") or "",
             "stars": raw.get("stars") or 0,
             "latestTag": raw.get("latestTag") or "",
@@ -770,7 +811,7 @@ def build_hiwiki_item(record, prev, api, metadata_cap, stats,
         "stars": stars,
         "forks": forks,
         "language": record.get("language") or "",
-        "category": record.get("category") or "other",
+        "category": normalize_category(record.get("category")),
         "topics": topics,
         "topicCodes": topic_codes(topics),
         "latestTag": latest_tag,
@@ -852,7 +893,7 @@ def main():
                     default="app/src/main/assets/store-snapshot")
     args = ap.parse_args()
 
-    api = None if args.simulate else Api(os.environ.get("GITHUB_TOKEN", ""))
+    api = None if args.simulate else Api(os.environ.get("STORE_PAT", ""))
     today = datetime.date.today()
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     generated_at = now_utc.isoformat().replace("+00:00", "Z")
@@ -905,7 +946,8 @@ def main():
                 continue
             item["ranks"] = assign_ranks(item, hiwiki_map)
             feed.append(item)
-    feed = sorted(feed, key=lambda i: i["stars"], reverse=True)
+    # 80：同星标按 fullName 升序作二级键（输入顺序一变就换位的问题）。
+    feed = sorted(feed, key=lambda i: (-i["stars"], i["fullName"].lower()))
     if not feed:
         print("ERROR: feed 为空（池子 0 条或全部被丢弃），拒绝写出空商店")
         sys.exit(1)
@@ -958,13 +1000,11 @@ def main():
 
     for platform in PLATFORMS:
         write_json(os.path.join(args.out, "feed", platform + ".json"),
-                   {"generatedAt": generated_at,
-                    "items": platform_items(feed, platform)})
+                   {"items": platform_items(feed, platform)})
         for chart, items in charts.items():
             write_json(os.path.join(args.out, "categories", chart,
                                     platform + ".json"),
-                       {"generatedAt": generated_at,
-                        "items": platform_items(items, platform)})
+                       {"items": platform_items(items, platform)})
 
     # 发现分页（Komi 同款：每页 20 条，hasMore 翻页）：App 按页取。
     # 整包文件保留（旧版 App 与 Komi 离线镜像快照同款，不打破 0.1.53）。
@@ -977,13 +1017,13 @@ def main():
         for n, chunk in enumerate(pages, start=1):
             write_json(os.path.join(args.out, "feed", platform,
                                     "page%d.json" % n),
-                       {"generatedAt": generated_at, "page": n,
+                       {"page": n,
                         "hasMore": n < len(pages), "items": chunk})
 
     # 最新入库（单文件，不分页；缺失时不写，feed 不受影响）。
     if newest_items:
         write_json(os.path.join(args.out, "feed", "newest.json"),
-                   {"generatedAt": generated_at, "items": newest_items})
+                   {"items": newest_items})
     else:
         print("newest: 无数据，本轮不写 feed/newest.json（feed 不受影响）")
 
@@ -1012,11 +1052,11 @@ def main():
 
     if args.snapshot_dir and args.snapshot_dir != "/dev/null":
         write_json(os.path.join(args.snapshot_dir, "feed_all.json"),
-                   {"generatedAt": generated_at, "items": feed})
+                   {"items": feed})
         for chart, items in charts.items():
             write_json(os.path.join(args.snapshot_dir,
                                     "chart_%s_all.json" % chart),
-                       {"generatedAt": generated_at, "items": items})
+                       {"items": items})
     print("done, total api calls %d" % (api.calls if api else 0))
 
 

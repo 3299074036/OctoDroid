@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.reactivex.Single;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.schedulers.Schedulers;
@@ -102,6 +103,70 @@ public class StarBatchMoveViewModel extends ViewModel {
         start(new ArrayList<>(state.failed), state.targetIds);
     }
 
+    /**
+     * 0.2.4（58）：单次操作（入组单发／改名／删组）的结果。
+     * 批量移组有进度框可重建；单发操作只有一个 Toast＋重拉，结果同样经
+     * LiveData 发给旋转重建后的 Fragment，消费后不再重放。
+     */
+    public static final class SingleOp {
+        /** 轮次 id：区分"新一次"与"已展示过的结果"。 */
+        public final long runId;
+        /** 是否成功。 */
+        public final boolean success;
+        /** 成功／失败时 Fragment 要弹的 Toast 文案（string res id）。 */
+        public final int messageRes;
+        /** 成功后要清掉的已展开官方列表 id（仅删组用，其余为 null）。 */
+        public final String clearExpandedId;
+
+        SingleOp(long runId, boolean success, int messageRes, String clearExpandedId) {
+            this.runId = runId;
+            this.success = success;
+            this.messageRes = messageRes;
+            this.clearExpandedId = clearExpandedId;
+        }
+    }
+
+    private final MutableLiveData<SingleOp> mSingleOp = new MutableLiveData<>();
+    private final CompositeDisposable mSingleOpDisposables = new CompositeDisposable();
+    private long mSingleOpRunId;
+    /** 已被 Fragment 展示／处理过的单发结果（旋转重建后不再重复弹 Toast）。 */
+    private long mSingleOpConsumedRunId = -1;
+
+    public LiveData<SingleOp> getSingleOp() {
+        return mSingleOp;
+    }
+
+    /** 单发结果是否已被 Fragment 处理过。 */
+    public boolean isSingleOpConsumed(SingleOp op) {
+        return op != null && op.runId == mSingleOpConsumedRunId;
+    }
+
+    /** 标记单发结果已处理。 */
+    public void markSingleOpConsumed(SingleOp op) {
+        if (op != null) {
+            mSingleOpConsumedRunId = op.runId;
+        }
+    }
+
+    /**
+     * 跑一次单发操作（入组单发／改名／删组）：Rx 链挂 ViewModel 自有的
+     * CompositeDisposable，旋转不中断；结果经 LiveData 发给重建后的
+     * Fragment（Toast＋重拉）。与批量移组用不同的 disposable 与轮次
+     * 计数，互不干扰。
+     */
+    public void runSingleOp(Single<?> op, int successRes, int failureRes,
+            String clearExpandedId) {
+        mSingleOpRunId++;
+        final long runId = mSingleOpRunId;
+        mSingleOpDisposables.add(op
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(ignored -> mSingleOp.setValue(
+                        new SingleOp(runId, true, successRes, clearExpandedId)),
+                        error -> mSingleOp.setValue(
+                                new SingleOp(runId, false, failureRes, null))));
+    }
+
     private void moveNext(List<String> repos, int index, List<String> targetIds,
             List<String> failed, long runId) {
         if (runId != mRunId) {
@@ -136,6 +201,7 @@ public class StarBatchMoveViewModel extends ViewModel {
     @Override
     protected void onCleared() {
         mDisposables.clear();
+        mSingleOpDisposables.clear();
         super.onCleared();
     }
 }

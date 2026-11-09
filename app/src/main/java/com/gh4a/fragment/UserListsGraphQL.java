@@ -258,10 +258,10 @@ public class UserListsGraphQL {
             vars.put("owner", owner);
             vars.put("name", name);
             String json = execute(REPO_ID_QUERY, vars);
-            JSONObject repo = new JSONObject(json)
-                    .optJSONObject("data") != null
-                    ? new JSONObject(json).optJSONObject("data").optJSONObject("repository")
-                    : null;
+            // 去重-5：之前 new JSONObject(json) 写了两次（条件里一次、
+            // 取值里一次）；一次解析后复用局部变量。
+            JSONObject data = new JSONObject(json).optJSONObject("data");
+            JSONObject repo = data != null ? data.optJSONObject("repository") : null;
             return repo != null ? repo.optString("id", "") : "";
         });
     }

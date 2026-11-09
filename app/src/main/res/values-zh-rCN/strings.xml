@@ -169,6 +169,10 @@
     <string name="download_created">已创建 %1$s</string>
     <string name="download_failed">下载失败，请检查网络连接或访问权限</string>
     <string name="download_retry_alt">下载失败，换条线路重试…</string>
+    <string name="download_verifying">正在校验，请稍候…</string>
+    <string name="download_complete">下载完成</string>
+    <string name="channel_download_name">下载</string>
+    <string name="channel_download_description">下载完成时通知。</string>
     <string name="download_mobile_warning_title">使用移动网络下载</string>
     <string name="download_mobile_warning_message">要使用移动网络下载此文件吗？\n您也可以选择在下次连接 Wi-Fi 时再下载。</string>
     <string name="download_now_button">立即下载</string>
@@ -248,7 +252,6 @@
     <string name="repo_sort_order_pushed_asc">最久未推送</string>
     <string name="filter_and_sort">筛选和排序</string>
 
-    <string name="no_blogs_found">没有找到博客。</string>
     <string name="no_comments_found">还没有人评论。</string>
     <string name="no_files_found">没有找到文件。</string>
     <string name="no_trends_found">没有找到趋势仓库。</string>
@@ -753,6 +756,7 @@
     <string name="translation_testing">测试中…</string>
     <string name="translation_test_ok">测试成功：%1$s</string>
     <string name="translation_test_fail">测试失败：%1$s</string>
+    <string name="translation_credential_save_failed">凭据保存失败：安全存储不可用</string>
 
     <!-- Recent history -->
     <string name="recent_history">最近浏览</string>

@@ -282,11 +282,10 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 NotificationsWorker.createNotificationChannels(getActivity());
                 NotificationsWorker.schedule(getContext(),
                         Integer.valueOf(mNotificationIntervalPref.getValue()));
-                // On Android 13 and up, notification permissions must be granted manually
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        getActivity().checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                    getActivity().requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 0);
-                }
+                // 去重-3：Android 13+ 通知权限统一走 NotificationPermission
+                // 请求入口（版本分支 + 已授权短路在内）；无结果处理是刻意的——
+                // Worker 调度不依赖授权，doWork 开头无权限即跳过。
+                com.gh4a.worker.NotificationPermission.requestIfNeeded(getActivity());
             } else {
                 NotificationsWorker.cancel(getContext());
             }
@@ -303,11 +302,8 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 ReleaseRadarWorker.createNotificationChannels(getActivity());
                 ReleaseRadarWorker.schedule(getContext(),
                         Integer.valueOf(mReleaseRadarIntervalPref.getValue()));
-                // On Android 13 and up, notification permissions must be granted manually
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        getActivity().checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                    getActivity().requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 0);
-                }
+                // 去重-3：同通知开关，走统一请求入口（见上）。
+                com.gh4a.worker.NotificationPermission.requestIfNeeded(getActivity());
             } else {
                 ReleaseRadarWorker.cancel(getContext());
             }

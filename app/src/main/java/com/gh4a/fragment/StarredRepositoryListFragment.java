@@ -134,17 +134,6 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
         super.onDestroy();
     }
 
-    public void setSortOrderAndDirection(String sortOrder, String direction) {
-        if (!TextUtils.equals(sortOrder, mSortOrder) || !TextUtils.equals(mSortDirection, direction)) {
-            mSortOrder = sortOrder;
-            mSortDirection = direction;
-            if (isAdded()) {
-                getActivity().invalidateOptionsMenu();
-            }
-            onRefresh();
-        }
-    }
-
     public String getSortOrder() {
         return mSortOrder;
     }

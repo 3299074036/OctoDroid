@@ -394,6 +394,10 @@ public class NotificationListFragment extends LoadingListFragmentBase implements
     }
 
     private void handleMarkAsRead(Repository repository, NotificationThread notification) {
+        // P1：标记已读成功后失效未读数缓存——否则回 Home 时 onResume 拿到
+        // 读之前的缓存，角标清不掉（updateMeBadge 的 loader force 拦不住
+        // 提供方缓存，只能这里失效）。
+        com.gh4a.utils.NotificationCountProvider.getInstance().invalidate();
         if (mAdapter.markAsRead(repository, notification)) {
             if (!mAll && !mParticipating) {
                 mCallback.setNotificationsIndicatorVisible(false);

@@ -128,10 +128,6 @@ public class Feed implements Parcelable {
         return published;
     }
 
-    public String getLink() {
-        return link;
-    }
-
     @Nullable
     public String getTitle() {
         return title;

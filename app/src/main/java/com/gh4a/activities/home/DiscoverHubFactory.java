@@ -19,10 +19,6 @@ public class DiscoverHubFactory extends FragmentFactory {
         mTrendingFactory = new TrendingFactory(activity);
     }
 
-    public int getTrendRange() {
-        return mTrendingFactory.getRange();
-    }
-
     public void setTrendRange(int range) {
         mTrendingFactory.setRange(range);
     }

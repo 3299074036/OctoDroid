@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- P5：标签选择对话框的列表容器。之前用 generic_linear_container
+     （ScrollView + LinearLayout），打开即 inflate 全部标签行（标签数
+     无上限，100+ 的仓库开对话框卡顿）；改成 RecyclerView，只创建
+     可见行。行布局仍复用 row_issue_create_label，外观不变。 -->
+<androidx.recyclerview.widget.RecyclerView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/label_list"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:scrollbars="vertical" />

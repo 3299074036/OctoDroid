@@ -50,4 +50,11 @@
     <!-- 0.1.10：Star 分组卡片背景与数量胶囊文字色（深色模式） -->
     <color name="star_group_card">#ff2b2b2b</color>
     <color name="star_count_pill_text">#ffd6eec8</color>
+
+    <!-- 75（0.2.4）：深色模式变体（提亮文字/图标，压暗分隔条） -->
+    <color name="store_icon">#E0E0E0</color>
+    <color name="mirror_ok_green">#63c78f</color>
+    <color name="mirror_current_green">#7cc36a</color>
+    <color name="mirror_error_red">#ff8a80</color>
+    <color name="mirror_divider">#2E2E2E</color>
 </resources>

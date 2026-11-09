@@ -64,12 +64,17 @@ public class ApkUpdateDownloader {
                                     Toast.LENGTH_LONG).show();
                             return;
                         }
+                        // 62：自更新同样走 verifyDownloadedFile 补记大小/SHA-256
+                        // （不另发完成通知：自更新有自己的安装提示）。
+                        // 签名门仍在回调里同步判（不等异步校验），通过才放行安装。
+                        DownloadUtils.verifyDownloadedFile(ctx, file, downloadId, false);
                         // 自更新安全门：APK 签名必须与当前已安装应用一致，
                         // 否则可能是镜像站被投毒，拒绝安装并删除文件 (L-3)
                         if (!isSignatureMatch(ctx, file)) {
                             Toast.makeText(ctx, R.string.apk_signature_mismatch,
                                     Toast.LENGTH_LONG).show();
                             file.delete();
+                            DownloadRecordManager.remove(ctx, downloadId);
                             return;
                         }
                         installApk(ctx, file);

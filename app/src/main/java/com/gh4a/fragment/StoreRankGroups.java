@@ -469,8 +469,6 @@ public final class StoreRankGroups {
      * 对已加载的 feed 池子现算 96 榜：ranks 非空用后端归属，ranks 为空列表
      * 信后端为无榜，只有 ranks 缺失（旧数据）才回落本地静态表＋规则；
      * 每榜成员按星标倒序，平局按 fullName 升序；空榜保留空列表。
-     * 隐藏仓库（StorePrefs）不由这里过滤，由调用方在渲染前统一过滤，
-     * 以免榜单计数与列表行不一致——本方法只做分组。
      */
     public static List<Group> build(List<StoreRepo> pool) {
         List<Group> groups = new ArrayList<>();

@@ -9,6 +9,10 @@
     <cloud-backup>
         <exclude domain="database" path="gh4adb.db" />
         <exclude domain="database" path="suggestions.db" />
+        <!-- 83：WorkManager 调度库（任务规格/定时，无凭据），不随系统备份上云。 -->
+        <exclude domain="database" path="androidx.work.workdb" />
+        <exclude domain="database" path="androidx.work.workdb-wal" />
+        <exclude domain="database" path="androidx.work.workdb-shm" />
         <!-- 0.1.20 F-04: Android 12+ 未排除即备份。默认偏好（翻译密钥在内）
              与加密偏好及其明文回退文件一律不随系统自动备份上传。
              默认偏好文件名随 applicationId 而变，debug/release 两名都排除。 -->
@@ -33,6 +37,10 @@
     <device-transfer>
         <exclude domain="database" path="gh4adb.db" />
         <exclude domain="database" path="suggestions.db" />
+        <!-- 83：WorkManager 调度库（任务规格/定时，无凭据），不随系统备份上云。 -->
+        <exclude domain="database" path="androidx.work.workdb" />
+        <exclude domain="database" path="androidx.work.workdb-wal" />
+        <exclude domain="database" path="androidx.work.workdb-shm" />
         <exclude domain="sharedpref" path="com.gh4a_preferences.xml" />
         <exclude domain="sharedpref" path="com.gh4a.debug_preferences.xml" />
         <exclude domain="sharedpref" path="Gh4a-secure.xml" />

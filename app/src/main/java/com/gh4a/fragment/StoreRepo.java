@@ -3,14 +3,13 @@ package com.gh4a.fragment;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
-import java.util.TimeZone;
+
+import com.gh4a.utils.Iso8601;
 
 /**
  * 软件商店的一行数据（扁平字段，不再持有 githubsdk 模型对象）：
@@ -259,22 +258,7 @@ public class StoreRepo {
     }
 
     private static long parseDate(String value) {
-        if (value == null || value.isEmpty()) {
-            return 0;
-        }
-        String[] patterns = {
-            "yyyy-MM-dd'T'HH:mm:ss'Z'",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-            "yyyy-MM-dd",
-        };
-        for (String pattern : patterns) {
-            try {
-                SimpleDateFormat fmt = new SimpleDateFormat(pattern, Locale.US);
-                fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
-                return fmt.parse(value).getTime();
-            } catch (Exception ignored) {
-            }
-        }
-        return 0;
+        // 61+72：解析走统一入口（ThreadLocal + UTC）。
+        return Iso8601.parseOrZero(value);
     }
 }

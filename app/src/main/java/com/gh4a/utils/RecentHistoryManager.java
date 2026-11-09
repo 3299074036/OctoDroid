@@ -1,13 +1,12 @@
 package com.gh4a.utils;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 
 import com.gh4a.Gh4Application;
+import com.gh4a.fragment.JsonCache;
 import androidx.annotation.NonNull;
 
 import org.json.JSONArray;
-import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -16,6 +15,11 @@ import java.util.List;
 /**
  * Keeps a local (per-account) history of recently viewed repositories,
  * issues and pull requests. Newest first, capped at MAX_ITEMS entries.
+ * 去重-1（0.2.4）：手写 JSON 编解码收敛到 JsonCache<List<Entry>>。
+ * 文件名按登录动态拼（recent_history_<login>），JsonCache 实例绑死
+ * 一个文件名，故不能用静态实例——编解码 lambda 静态共用，实例按调用
+ * 构造；文件名、键名、字段名与原先一字不差，损坏文件仍返回已解析的
+ * 部分条目（fromJson 按条容错）。
  */
 public class RecentHistoryManager {
     public static final int TYPE_REPO = 0;
@@ -26,9 +30,42 @@ public class RecentHistoryManager {
     private static final String KEY_ITEMS = "items";
     private static final int MAX_ITEMS = 50;
 
-    private static SharedPreferences prefsFor(Context context) {
+    private static final JsonCache.ToJson<List<Entry>> TO_JSON = entries -> {
+        JSONArray array = new JSONArray();
+        for (Entry e : entries) {
+            JSONObject obj = new JSONObject();
+            obj.put("type", e.type);
+            obj.put("owner", e.owner);
+            obj.put("repo", e.repo);
+            obj.put("number", e.number);
+            obj.put("time", e.time);
+            array.put(obj);
+        }
+        return array.toString();
+    };
+
+    private static final JsonCache.FromJson<List<Entry>> FROM_JSON = json -> {
+        List<Entry> entries = new ArrayList<>();
+        JSONArray array = new JSONArray(json);
+        for (int i = 0; i < array.length(); i++) {
+            try {
+                JSONObject obj = array.getJSONObject(i);
+                entries.add(new Entry(
+                        obj.getInt("type"),
+                        obj.getString("owner"),
+                        obj.getString("repo"),
+                        obj.optInt("number", 0),
+                        obj.getLong("time")));
+            } catch (Exception ignored) {
+                // 单条损坏跳过，其余照收（与原先一致）。
+            }
+        }
+        return entries;
+    };
+
+    private static JsonCache<List<Entry>> cacheFor(Context context) {
         String login = Gh4Application.get().getAuthLogin();
-        return context.getSharedPreferences(PREFS_NAME + "_" + login, Context.MODE_PRIVATE);
+        return new JsonCache<>(PREFS_NAME + "_" + login, TO_JSON, FROM_JSON);
     }
 
     public static class Entry {
@@ -82,47 +119,15 @@ public class RecentHistoryManager {
 
     @NonNull
     public static List<Entry> getEntries(Context context) {
-        List<Entry> entries = new ArrayList<>();
-        SharedPreferences prefs = prefsFor(context);
-        String json = prefs.getString(KEY_ITEMS, null);
-        if (json == null) {
-            return entries;
-        }
-        try {
-            JSONArray array = new JSONArray(json);
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject obj = array.getJSONObject(i);
-                entries.add(new Entry(
-                        obj.getInt("type"),
-                        obj.getString("owner"),
-                        obj.getString("repo"),
-                        obj.optInt("number", 0),
-                        obj.getLong("time")));
-            }
-        } catch (JSONException e) {
-            // Corrupted history; start fresh
-        }
-        return entries;
+        List<Entry> entries = cacheFor(context).load(context, KEY_ITEMS);
+        return entries != null ? entries : new ArrayList<>();
     }
 
     public static void clear(Context context) {
-        prefsFor(context).edit().remove(KEY_ITEMS).apply();
+        cacheFor(context).clear(context, KEY_ITEMS);
     }
 
     private static void saveEntries(Context context, List<Entry> entries) {
-        JSONArray array = new JSONArray();
-        for (Entry e : entries) {
-            try {
-                JSONObject obj = new JSONObject();
-                obj.put("type", e.type);
-                obj.put("owner", e.owner);
-                obj.put("repo", e.repo);
-                obj.put("number", e.number);
-                obj.put("time", e.time);
-                array.put(obj);
-            } catch (JSONException ignored) {
-            }
-        }
-        prefsFor(context).edit().putString(KEY_ITEMS, array.toString()).apply();
+        cacheFor(context).save(context, KEY_ITEMS, null, entries);
     }
 }

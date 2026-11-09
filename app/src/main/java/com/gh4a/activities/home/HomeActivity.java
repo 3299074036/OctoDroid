@@ -375,8 +375,10 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
     /** 0.1.13：用 loader 生命周期的单次请求刷新“我”角标（与我页通知行同一计数口径）。 */
     public void updateMeBadge() {
         if (mBottomNav == null || mUserLogin == null) return;
-        com.gh4a.utils.SingleFactory.getNotifications(false, false, false)
-                // force=true：loader 否则会复用上次结果，读完通知回来角标清不掉。
+        // P1：走 NotificationCountProvider——冷启动 4 次调用（setupBottomNav
+        // + onResume + Me onCreateView + onResume）共享 1 次拉取；loader
+        // 的 force=true 仍每次重跑 Single，但提供方在 TTL 内给缓存、不发网。
+        com.gh4a.utils.NotificationCountProvider.getInstance().getNotifications()
                 .compose(makeLoaderSingle(ID_LOADER_ME_BADGE, true))
                 .subscribe(result -> {
                     // 0.1.20 D-04/Observer: 计数走 countUnread，结果发布到 holder，

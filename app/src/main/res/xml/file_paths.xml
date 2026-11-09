@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- 77：仍暴露公共 Download/，只为兼容 0.2.2 之前下载到公共 Downloads/
+         的旧记录（DownloadListFragment 有回落分支）。文件名写入时已消毒，
+         无 ../ 穿越。TODO(2027-01)：0.2.2 之前（2026-10-14 前）的旧记录
+         基本消亡后，删掉本条 external-path 与 DownloadListFragment 的
+         公共目录回落分支。 -->
     <external-path
         name="download"
         path="Download/" />
@@ -8,8 +13,10 @@
     <external-files-path
         name="private_download"
         path="Download/" />
-    <!-- 0.1.36：深色模式诊断日志导出（临时，定论后连同追踪一并删掉） -->
+    <!-- 78：只放行诊断导出文件 diag-export.txt（DiagnosticLogActivity 分享用）；
+         旧写法 path="." 暴露整个 cacheDir（含 OkHttp 缓存、last_crash.txt）。
+         last_crash.txt 只供应用内读，不走 FileProvider。 -->
     <cache-path
         name="trace"
-        path="." />
+        path="diag-export.txt" />
 </paths>

@@ -374,6 +374,11 @@ public class StoreView extends LinearLayout {
         mExploreShown = PAGE_SIZE;
         mRankGroup = -1;
         mRankList = -1;
+        // 63：排行榜分页状态同样复位——否则重选页签/下拉刷新后 mRankShown
+        // 停在旧页数，再进同一榜单直接展开多页，违背"进榜从第 1 页看"。
+        mRankShown = PAGE_SIZE;
+        mRankShownGroup = -1;
+        mRankShownList = -1;
         for (int i = 0; i < TAB_COUNT; i++) {
             mTabLoaded[i] = false;
         }

@@ -79,4 +79,11 @@
     <!-- 0.1.10：Star 分组卡片背景与数量胶囊文字色 -->
     <color name="star_group_card">#ffffffff</color>
     <color name="star_count_pill_text">#2d501e</color>
+
+    <!-- 75（0.2.4）：商店/镜像页语义色与图标色（白天值 = 原硬编码） -->
+    <color name="store_icon">#000000</color>
+    <color name="mirror_ok_green">#1e9e6a</color>
+    <color name="mirror_current_green">#3f8f2e</color>
+    <color name="mirror_error_red">#e5484d</color>
+    <color name="mirror_divider">#EEEEEE</color>
 </resources>

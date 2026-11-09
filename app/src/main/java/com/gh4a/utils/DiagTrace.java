@@ -53,10 +53,12 @@ public class DiagTrace {
             }
             String time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
                     .format(new Date());
-            BufferedWriter w = new BufferedWriter(new FileWriter(f, true));
-            w.write(time + " " + tag + " " + detail);
-            w.newLine();
-            w.close();
+            // 70：try-with-resources——旧写法 w.write() 抛异常时 w.close()
+            // 走不到（fd 泄漏，文件可能留半行）。
+            try (BufferedWriter w = new BufferedWriter(new FileWriter(f, true))) {
+                w.write(time + " " + tag + " " + detail);
+                w.newLine();
+            }
         } catch (Exception ignored) {
         }
     }
@@ -71,13 +73,14 @@ public class DiagTrace {
             String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US)
                     .format(new Date());
             File f = new File(d, "crash-" + stamp + ".txt");
-            BufferedWriter w = new BufferedWriter(new FileWriter(f));
-            w.write(header);
-            w.newLine();
-            String body = text != null && text.length() > CRASH_COPY_CAP
-                    ? text.substring(0, CRASH_COPY_CAP) : text;
-            w.write(body != null ? body : "");
-            w.close();
+            // 70：同 log()，try-with-resources。
+            try (BufferedWriter w = new BufferedWriter(new FileWriter(f))) {
+                w.write(header);
+                w.newLine();
+                String body = text != null && text.length() > CRASH_COPY_CAP
+                        ? text.substring(0, CRASH_COPY_CAP) : text;
+                w.write(body != null ? body : "");
+            }
             File[] crashes = d.listFiles((dir1, name) ->
                     name.startsWith("crash-") && name.endsWith(".txt"));
             if (crashes != null && crashes.length > MAX_CRASH_FILES) {
@@ -113,11 +116,16 @@ public class DiagTrace {
     }
 
     private static String readCapped(File f, int cap) {
-        try {
+        // 70：循环读满——旧写法只调一次 read()，大文件/慢存储下返回可能
+        // 小于 bytes.length，诊断页展示被截断；close 也进 finally。
+        try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
             byte[] bytes = new byte[(int) Math.min(f.length(), cap)];
-            java.io.FileInputStream in = new java.io.FileInputStream(f);
-            int read = in.read(bytes);
-            in.close();
+            int read = 0;
+            int n;
+            while (read < bytes.length
+                    && (n = in.read(bytes, read, bytes.length - read)) != -1) {
+                read += n;
+            }
             return read > 0 ? new String(bytes, 0, read, "UTF-8") : "";
         } catch (Exception ignored) {
             return "";
@@ -126,9 +134,9 @@ public class DiagTrace {
 
     /** 合成导出文件：诊断追踪 + 主题追踪 + 崩溃历史（最新 3 条）。 */
     public static synchronized File exportFile(Context context) {
-        try {
-            File out = new File(context.getCacheDir(), EXPORT_NAME);
-            BufferedWriter w = new BufferedWriter(new FileWriter(out));
+        // 70：同 log()，try-with-resources（旧写法中途抛异常时不 close）。
+        File out = new File(context.getCacheDir(), EXPORT_NAME);
+        try (BufferedWriter w = new BufferedWriter(new FileWriter(out))) {
             w.write("=== 诊断追踪 diag-trace.txt ===");
             w.newLine();
             File trace = traceFile(context);
@@ -154,7 +162,6 @@ public class DiagTrace {
                 w.write(readCapped(c, CRASH_COPY_CAP));
                 w.newLine();
             }
-            w.close();
             return out;
         } catch (Exception ignored) {
             return null;

@@ -1,17 +1,30 @@
 package com.gh4a.utils;
 
 import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.net.ConnectivityManager;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.webkit.MimeTypeMap;
 import android.widget.Toast;
+
+import androidx.appcompat.app.AlertDialog;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.FileProvider;
 
 import com.gh4a.BaseActivity;
 import com.gh4a.Gh4Application;
 import com.gh4a.R;
 import com.gh4a.ServiceFactory;
+import com.gh4a.worker.NotificationPermission;
 import com.meisolsson.githubsdk.model.Download;
 import com.meisolsson.githubsdk.model.ReleaseAsset;
 
@@ -211,7 +224,9 @@ public class DownloadUtils {
                         return;
                     }
                     if (file != null) {
-                        verifyDownloadedFile(ctx, file, downloadId);
+                        // 57：附件下载校验通过后发完成通知（系统通知已改为仅
+                        // 下载中显示，见 ChainDownloadHelper）。
+                        verifyDownloadedFile(ctx, file, downloadId, true);
                     }
                 });
     }
@@ -222,10 +237,17 @@ public class DownloadUtils {
      * 一致，不一致删文件＋清记录并提示；未安装则提示发布者签名无法验证。
      * 上游（GitHub Release API）不提供文件哈希，无法自动比对。
      * 哈希与签名校验在后台线程做，不卡主线程。
+     * <p>
+     * 57（0.2.4）：校验期间记录标为"校验中"（下载列表点开前拦截），且系统
+     * 下载完成通知改为仅下载中显示——校验通过后由应用自己发完成通知，
+     * 否则用户一点系统通知就装上还没验过签名的 APK。{@code notifyOnComplete}
+     * 为 false 时不发通知（自更新有自己的安装提示，见 ApkUpdateDownloader）。
      */
-    private static void verifyDownloadedFile(Context context, File file, long downloadId) {
+    public static void verifyDownloadedFile(Context context, File file, long downloadId,
+            boolean notifyOnComplete) {
         final Context appContext = context.getApplicationContext();
         final Handler handler = new Handler(Looper.getMainLooper());
+        DownloadRecordManager.setVerifying(downloadId, true);
         new Thread(() -> {
             String sha256 = computeSha256(file);
             long size = file.length();
@@ -236,6 +258,7 @@ public class DownloadUtils {
                     ? ApkUpdateDownloader.checkDownloadedApkSignature(appContext, file)
                     : null;
             handler.post(() -> {
+                DownloadRecordManager.setVerifying(downloadId, false);
                 if (check == ApkUpdateDownloader.ApkSignatureCheck.MISMATCH) {
                     // 签名与已安装的同包名应用不一致：可能是投毒／冒名包，删掉。
                     file.delete();
@@ -243,12 +266,75 @@ public class DownloadUtils {
                     Toast.makeText(appContext,
                             R.string.apk_download_signature_mismatch,
                             Toast.LENGTH_LONG).show();
-                } else if (check == ApkUpdateDownloader.ApkSignatureCheck.NOT_INSTALLED) {
+                    return;
+                }
+                if (check == ApkUpdateDownloader.ApkSignatureCheck.NOT_INSTALLED) {
                     Toast.makeText(appContext, R.string.apk_signature_unverified,
                             Toast.LENGTH_LONG).show();
                 }
+                if (notifyOnComplete) {
+                    notifyDownloadComplete(appContext, file, downloadId);
+                }
             });
         }).start();
+    }
+
+    /** 下载完成通知的渠道（API 26+ 才建，低版本直接发）。 */
+    private static final String CHANNEL_DOWNLOAD_COMPLETE = "download_complete";
+
+    private static void createDownloadChannel(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        NotificationChannel channel = new NotificationChannel(CHANNEL_DOWNLOAD_COMPLETE,
+                context.getString(R.string.channel_download_name),
+                NotificationManager.IMPORTANCE_DEFAULT);
+        channel.setDescription(context.getString(R.string.channel_download_description));
+        NotificationManager nm =
+                (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        nm.createNotificationChannel(channel);
+    }
+
+    /**
+     * 57：校验通过后由应用自己发下载完成通知（点开即用 FileProvider 打开文件）。
+     * 无通知权限时静默跳过（下载列表里仍有记录）。
+     */
+    // 22 同款：MissingPermission 压制附理由——开头已由
+    // NotificationPermission.canPostNotifications() 检查，lint 不认间接检查。
+    @android.annotation.SuppressLint("MissingPermission")
+    private static void notifyDownloadComplete(Context context, File file, long downloadId) {
+        if (!NotificationPermission.canPostNotifications(context)) {
+            return;
+        }
+        createDownloadChannel(context);
+        Uri uri = FileProvider.getUriForFile(context,
+                context.getPackageName() + ".fileprovider", file);
+        Intent intent = new Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, getMimeTypeForFile(file.getName()))
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        PendingIntent contentIntent = PendingIntent.getActivity(context, (int) downloadId,
+                intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        android.app.Notification notification =
+                new NotificationCompat.Builder(context, CHANNEL_DOWNLOAD_COMPLETE)
+                        .setSmallIcon(R.drawable.ic_stat_download)
+                        .setContentTitle(file.getName())
+                        .setContentText(context.getString(R.string.download_complete))
+                        .setContentIntent(contentIntent)
+                        .setAutoCancel(true)
+                        .build();
+        NotificationManagerCompat.from(context).notify((int) downloadId, notification);
+    }
+
+    /** 按扩展名取 MIME（与 DownloadListFragment 同款映射，APK 须显式指定）。 */
+    private static String getMimeTypeForFile(String fileName) {
+        String lower = fileName.toLowerCase(java.util.Locale.US);
+        if (lower.endsWith(".apk")) {
+            return "application/vnd.android.package-archive";
+        }
+        String extension = MimeTypeMap.getFileExtensionFromUrl(lower);
+        String mime = extension != null
+                ? MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) : null;
+        return mime != null ? mime : "*/*";
     }
 
     /** 文件的 SHA-256（小写 hex）；算不出返回 null。 */

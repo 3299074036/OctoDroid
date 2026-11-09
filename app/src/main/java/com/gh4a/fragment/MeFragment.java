@@ -327,7 +327,10 @@ public class MeFragment extends Fragment {
     // unread() 为真的条数），不是首页布尔指示器；0 条时恢复原来的“›”。
     private void loadUnreadNotificationCount() {
         if (mNotificationsValueView == null) return;
-        mDisposables.add(SingleFactory.getNotifications(false, false, false)
+        // P1：走 NotificationCountProvider，与 HomeActivity.updateMeBadge
+        // 共享同一次拉取（TTL 2 分钟 + 在途单飞），冷启动 4 次调用只发 1 次网。
+        mDisposables.add(com.gh4a.utils.NotificationCountProvider.getInstance()
+                .getNotifications()
                 .compose(RxUtils::doInBackground)
                 .subscribe(result -> {
                     if (!isAdded() || mNotificationsValueView == null) return;
