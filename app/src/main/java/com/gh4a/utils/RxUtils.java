@@ -5,12 +5,14 @@ import android.content.Context;
 import android.os.Bundle;
 import android.util.Log;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
 
 import com.google.android.material.snackbar.Snackbar;
 import androidx.fragment.app.DialogFragment;
 import androidx.fragment.app.FragmentActivity;
+import androidx.fragment.app.FragmentTransaction;
 
 import com.gh4a.ApiRequestException;
 import com.gh4a.BaseActivity;
@@ -144,15 +146,23 @@ public class RxUtils {
             }
 
             private void showDialog() {
+                // 123：Fragment.show() 在 state-saved 后抛 IllegalStateException，
+                // 且 Activity 已销毁时不应再弹框；改 commitAllowingStateLoss
+                if (activity.isFinishing() || activity.isDestroyed()) {
+                    return;
+                }
                 Bundle args = new Bundle();
                 args.putInt("message_res", messageResId);
                 mFragment = new ProgressDialogFragment();
                 mFragment.setArguments(args);
-                mFragment.show(activity.getSupportFragmentManager(), "progressdialog");
+                FragmentTransaction ft = activity.getSupportFragmentManager().beginTransaction();
+                ft.add(mFragment, "progressdialog");
+                ft.commitAllowingStateLoss();
             }
 
             private void hideDialog() {
-                if (mFragment.getActivity() != null) {
+                // 123：showDialog 可能因 Activity 已销毁而跳过，mFragment 可为 null
+                if (mFragment != null && mFragment.getActivity() != null) {
                     mFragment.dismissAllowingStateLoss();
                 }
                 mFragment = null;
@@ -181,7 +191,11 @@ public class RxUtils {
                             public void onDismissed(Snackbar snackbar, int event) {
                                 // Propagate error if opportunity to retry isn't used, either
                                 // by dismissing the Snackbar or letting it time out
-                                if (event == DISMISS_EVENT_SWIPE || event == DISMISS_EVENT_TIMEOUT) {
+                                // 123：点“复制”后 snackbar 以 DISMISS_EVENT_ACTION 消失，
+                                // 原来不进任何分支，retryProcessor 既不 onNext 也不
+                                // onError，Single 永久挂起——同样传回错误
+                                if (event == DISMISS_EVENT_SWIPE || event == DISMISS_EVENT_TIMEOUT
+                                        || event == DISMISS_EVENT_ACTION) {
                                     retryProcessor.onError(error);
                                 }
                             }
@@ -241,10 +255,12 @@ public class RxUtils {
     }
 
     public static class ProgressDialogFragment extends DialogFragment {
-        @androidx.annotation.NonNull
+        @Nullable
         @Override
         public Dialog onCreateDialog(Bundle savedInstanceState) {
             int messageResId = getArguments().getInt("message_res", 0);
+            // 136：getActivity() 可为 null，createProgressDialog 对 null 返回 null，
+            // DialogFragment 容忍空 Dialog（仅不显示），不抛 NPE
             return UiUtils.createProgressDialog(getActivity(), messageResId);
         }
     }

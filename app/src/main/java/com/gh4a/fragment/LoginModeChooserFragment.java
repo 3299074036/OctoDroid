@@ -34,6 +34,7 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.DialogFragment;
 import io.reactivex.Single;
+import io.reactivex.disposables.Disposable;
 
 public class LoginModeChooserFragment extends DialogFragment implements
         RadioGroup.OnCheckedChangeListener, View.OnClickListener {
@@ -58,6 +59,9 @@ public class LoginModeChooserFragment extends DialogFragment implements
     private Button mOkButton;
 
     private ParentCallback mCallback;
+
+    // 124：token 校验订阅必须保存，关对话框后成功回调仍会切账号跳页
+    private Disposable mTokenCheckDisposable;
 
     @Override
     public void onAttach(Context context) {
@@ -143,13 +147,29 @@ public class LoginModeChooserFragment extends DialogFragment implements
     }
 
     private void handleTokenCheck(Single<Pair<String, User>> checkSingle) {
-        checkSingle.subscribe(pair -> {
+        // 124：订阅存起来并在 onDestroy 释放；回调里判 isAdded()，
+        // 对话框已关时不再调 onLoginFinished 切账号跳页
+        mTokenCheckDisposable = checkSingle.subscribe(pair -> {
+            if (!isAdded()) {
+                return;
+            }
             mCallback.onLoginFinished(pair.first, pair.second);
             dismissAllowingStateLoss();
         }, error -> {
+            if (!isAdded()) {
+                return;
+            }
             mCallback.onLoginFailed(error);
             dismissAllowingStateLoss();
         });
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        if (mTokenCheckDisposable != null && !mTokenCheckDisposable.isDisposed()) {
+            mTokenCheckDisposable.dispose();
+        }
     }
 
     private void updateContainerVisibility(boolean busy) {

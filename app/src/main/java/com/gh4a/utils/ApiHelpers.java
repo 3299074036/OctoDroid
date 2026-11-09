@@ -92,13 +92,38 @@ public class ApiHelpers {
         return context.getString(R.string.unknown);
     }
 
+    /**
+     * 115：SDK 模型里的装箱数字/布尔字段全可空（javap 核实：Repository
+     * 的 forksCount/stargazersCount/subscribersCount/openIssuesCount 为 Integer，
+     * isFork/hasIssues/isPrivate 为 Boolean，Issue.number 为 Integer、id 为 Long，
+     * SearchPage.totalCount 为 Long）。直接拆箱即 NPE，调用点统一走这里。
+     */
+    public static int orZero(@Nullable Integer value) {
+        return value != null ? value : 0;
+    }
+
+    public static long orZero(@Nullable Long value) {
+        return value != null ? value : 0L;
+    }
+
+    public static boolean orFalse(@Nullable Boolean value) {
+        return value != null ? value : false;
+    }
+
     public static boolean authorEqualsCommitter(Commit commit) {
         if (commit.committer() != null && commit.author() != null) {
             return TextUtils.equals(commit.committer().login(), commit.author().login());
         }
 
+        // 121：commit.commit()/author/committer 均可空，直接解引用即 NPE
+        if (commit.commit() == null) {
+            return false;
+        }
         GitUser author = commit.commit().author();
         GitUser committer = commit.commit().committer();
+        if (author == null || committer == null) {
+            return false;
+        }
         if (author.email() != null && committer.email() != null) {
             return TextUtils.equals(author.email(), committer.email());
         }
@@ -160,6 +185,11 @@ public class ApiHelpers {
     }
 
     public static int colorForLabel(Label label) {
+        // 115：label/color 可空时 "#null" 会让 parseColor 抛 IllegalArgumentException，
+        // 用默认灰色兜底
+        if (label == null || label.color() == null) {
+            return Color.parseColor("#999999");
+        }
         return Color.parseColor("#" + label.color());
     }
 
@@ -187,11 +217,16 @@ public class ApiHelpers {
         }
 
         // Only normalize API links
-        if (!uri.getPath().contains("/api/v3/") && !uri.getAuthority().contains("api.")) {
+        // 121：getPath() 可为 null（如只有 authority 的 URI），先判空
+        String path = uri.getPath();
+        if (path == null) {
+            return uri;
+        }
+        if (!path.contains("/api/v3/") && !uri.getAuthority().contains("api.")) {
             return uri;
         }
 
-        String path = uri.getPath()
+        path = path
                 .replace("/api/v3/", "/")
                 .replace("repos/", "")
                 .replace("commits/", "commit/")
@@ -207,13 +242,27 @@ public class ApiHelpers {
     }
 
     public static Pair<String, String> extractRepoOwnerAndNameFromIssue(Issue issue) {
-        Repository repo = issue.repository();
-        if (repo != null) {
-            String[] splitted = repo.fullName().split("/");
-            return Pair.create(splitted[0], splitted[1]);
+        // 121：fullName/url 可空、split 后长度不足即 NPE/AIOOBE；
+        // 调用方（IssueActivity/PullRequestActivity/EventViewHolder）直接取
+        // .first/.second，故解析失败返回空 Pair 而非 null
+        if (issue == null) {
+            return Pair.create(null, null);
         }
-        String[] urlParts = issue.url().split("/");
-        return Pair.create(urlParts[4], urlParts[5]);
+        Repository repo = issue.repository();
+        if (repo != null && repo.fullName() != null) {
+            String[] splitted = repo.fullName().split("/");
+            if (splitted.length >= 2) {
+                return Pair.create(splitted[0], splitted[1]);
+            }
+        }
+        String url = issue.url();
+        if (url != null) {
+            String[] urlParts = url.split("/");
+            if (urlParts.length >= 6) {
+                return Pair.create(urlParts[4], urlParts[5]);
+            }
+        }
+        return Pair.create(null, null);
     }
 
     private final static char[] HEX_CHARS = "0123456789abcdef".toCharArray();
@@ -345,7 +394,9 @@ public class ApiHelpers {
         public List<D> items() {
             List<U> items = mPage.items();
             if (items == null) {
-                return null;
+                // 134：本方法标 @NonNull，返回 null 会让下游
+                // PagedDataBaseFragment 的 addAll(page.items()) 直接 NPE
+                return new ArrayList<>();
             }
             ArrayList<D> result = new ArrayList<>();
             for (U item : items) {

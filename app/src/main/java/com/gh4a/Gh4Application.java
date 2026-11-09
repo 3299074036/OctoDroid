@@ -36,6 +36,7 @@ import com.tspoon.traceur.Traceur;
 import org.ocpsoft.prettytime.PrettyTime;
 
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -184,17 +185,20 @@ public class Gh4Application extends Application implements
      */
     private static int getNotificationIntervalMinutes(SharedPreferences prefs) {
         Object raw = prefs.getAll().get(SettingsFragment.KEY_NOTIFICATION_INTERVAL);
+        int value = 15;
         if (raw instanceof Number) {
-            return ((Number) raw).intValue();
-        }
-        if (raw instanceof String) {
+            value = ((Number) raw).intValue();
+        } else if (raw instanceof String) {
             try {
-                return Integer.parseInt((String) raw);
+                value = Integer.parseInt((String) raw);
             } catch (NumberFormatException ignored) {
                 // fall through to default
             }
         }
-        return 15;
+        // 103：手写/篡改备份可把间隔写成 <15 或负数；WorkManager 要求
+        // PeriodicWorkRequest 间隔 >= 15 分钟，否则 onCreate 调度时抛
+        // IllegalArgumentException，之后每次冷启动都崩。钳制到 [15, 1440]。
+        return Math.max(15, Math.min(1440, value));
     }
 
     private void updateTheme(SharedPreferences prefs) {
@@ -431,17 +435,20 @@ public class Gh4Application extends Application implements
      */
     private static int getReleaseRadarIntervalMinutes(SharedPreferences prefs) {
         Object raw = prefs.getAll().get(SettingsFragment.KEY_RELEASE_RADAR_INTERVAL);
+        int value = 360;
         if (raw instanceof Number) {
-            return ((Number) raw).intValue();
-        }
-        if (raw instanceof String) {
+            value = ((Number) raw).intValue();
+        } else if (raw instanceof String) {
             try {
-                return Integer.parseInt((String) raw);
+                value = Integer.parseInt((String) raw);
             } catch (NumberFormatException ignored) {
                 // fall through to default
             }
         }
-        return 360;
+        // 103：同通知间隔——篡改备份写 <15 分钟会在 rescheduleWorkers
+        // 调度 ReleaseRadarWorker 时抛 IllegalArgumentException；钳制到
+        // [15, 1440]（合法设置值 360/720/1440 本就在此区间内）。
+        return Math.max(15, Math.min(1440, value));
     }
 
     private SharedPreferences getPrefs() {
@@ -525,12 +532,17 @@ public class Gh4Application extends Application implements
      * keys out of the plaintext fallback file into the encrypted store,
      * then delete the fallback file outright. Runs only on the encrypted
      * path; the fallback path never calls it.
+     * 101: the fallback file can also hold translation credentials
+     * (translation_api_key_<provider> / translation_api_secret_<provider>,
+     * written there while the KeyStore is down - see TranslationManager)
+     * and a pending OAuth login's state/verifier; move those too before
+     * clearing, or they would be deleted along with the tokens.
      */
     private void migratePlaintextTokensFromFallbackFile() {
         SharedPreferences plain = getSharedPreferences(PLAIN_FALLBACK_PREFS, MODE_PRIVATE);
+        SharedPreferences.Editor secureEditor = null;
         Set<String> logins = getPrefs().getStringSet(KEY_ALL_LOGINS, null);
         if (logins != null && !logins.isEmpty()) {
-            SharedPreferences.Editor secureEditor = null;
             for (String login : logins) {
                 String key = KEY_PREFIX_TOKEN + login;
                 if (plain.contains(key)) {
@@ -540,9 +552,32 @@ public class Gh4Application extends Application implements
                     secureEditor.putString(key, plain.getString(key, null));
                 }
             }
-            if (secureEditor != null) {
-                secureEditor.apply();
+        }
+        // 101: translation credentials and pending OAuth keys live in the
+        // same fallback file while the KeyStore is down; migrate them as
+        // well instead of dropping them with clear() below. Translation
+        // values restored from an old backup are plaintext here and are
+        // encrypted in place on next read (TranslationManager.getCredential).
+        // Key prefixes match SettingsBackupManager.isTranslationCredentialKey;
+        // the OAuth key names match Github4AndroidActivity (private there).
+        for (Map.Entry<String, ?> entry : plain.getAll().entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            if (!(value instanceof String)) {
+                continue;
             }
+            if (key.startsWith("translation_api_key")
+                    || key.startsWith("translation_api_secret")
+                    || "oauth_state_pending".equals(key)
+                    || "oauth_verifier_pending".equals(key)) {
+                if (secureEditor == null) {
+                    secureEditor = mSecurePrefs.edit();
+                }
+                secureEditor.putString(key, (String) value);
+            }
+        }
+        if (secureEditor != null) {
+            secureEditor.apply();
         }
         plain.edit().clear().apply();
         deletePrefsFile(PLAIN_FALLBACK_PREFS);
@@ -953,9 +988,18 @@ public class Gh4Application extends Application implements
                 return null;
             }
             byte[] bytes = new byte[(int) f.length()];
-            java.io.FileInputStream in = new java.io.FileInputStream(f);
-            int read = in.read(bytes);
-            in.close();
+            // 109：try-with-resources + 循环读满（70 同款）；单次 read() 大文件/
+            // 慢存储下可能读不全，read() 抛异常时 close() 也走不到。
+            int read = 0;
+            try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
+                while (read < bytes.length) {
+                    int n = in.read(bytes, read, bytes.length - read);
+                    if (n < 0) {
+                        break;
+                    }
+                    read += n;
+                }
+            }
             f.delete();
             return read > 0 ? new String(bytes, 0, read, "UTF-8") : null;
         } catch (Exception e) {

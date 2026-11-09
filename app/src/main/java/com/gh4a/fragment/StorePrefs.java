@@ -6,12 +6,9 @@ import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -163,37 +160,5 @@ public class StorePrefs {
         } catch (Exception ignored) {
         }
         return out;
-    }
-
-    /** 记一条下架：同名已存在则刷新原因与日期，不重复。 */
-    public static void recordRemoved(Context context, String fullName, String reason) {
-        if (fullName == null || fullName.isEmpty()) {
-            return;
-        }
-        List<RemovedEntry> entries = getRemoved(context);
-        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
-        boolean found = false;
-        for (int i = 0; i < entries.size(); i++) {
-            if (entries.get(i).name.equals(fullName)) {
-                entries.set(i, new RemovedEntry(fullName, reason, today));
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            entries.add(0, new RemovedEntry(fullName, reason, today));
-        }
-        try {
-            JSONArray arr = new JSONArray();
-            for (RemovedEntry entry : entries) {
-                JSONObject obj = new JSONObject();
-                obj.put("name", entry.name);
-                obj.put("reason", entry.reason);
-                obj.put("date", entry.date);
-                arr.put(obj);
-            }
-            prefs(context).edit().putString(KEY_REMOVED, arr.toString()).apply();
-        } catch (Exception ignored) {
-        }
     }
 }

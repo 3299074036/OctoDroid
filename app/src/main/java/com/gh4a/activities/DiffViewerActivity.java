@@ -461,18 +461,31 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
 
     @Override
     protected void handleUrlLoad(Uri uri) {
-        if (!uri.getScheme().equals("comment")) {
+        // 118：scheme 可空（getScheme() 直接 equals 即 NPE）；query 参数
+        // 可能缺失/非数字；行号可能越界。任一非法直接忽略本次点击。
+        if (!"comment".equals(uri.getScheme())) {
             super.handleUrlLoad(uri);
             return;
         }
-
-        int line = Integer.parseInt(uri.getQueryParameter("position"));
-        int leftLine = Integer.parseInt(uri.getQueryParameter("l"));
-        int rightLine = Integer.parseInt(uri.getQueryParameter("r"));
-        boolean isRightLine = Boolean.parseBoolean(uri.getQueryParameter("isRightLine"));
+        final int line;
+        final int leftLine;
+        final int rightLine;
+        final boolean isRightLine;
+        final long id;
+        try {
+            line = Integer.parseInt(uri.getQueryParameter("position"));
+            leftLine = Integer.parseInt(uri.getQueryParameter("l"));
+            rightLine = Integer.parseInt(uri.getQueryParameter("r"));
+            isRightLine = Boolean.parseBoolean(uri.getQueryParameter("isRightLine"));
+            String idParam = uri.getQueryParameter("id");
+            id = idParam != null ? Long.parseLong(idParam) : 0L;
+        } catch (NumberFormatException e) {
+            return;
+        }
+        if (line < 0 || mDiffLines == null || line >= mDiffLines.length) {
+            return;
+        }
         String lineText = mDiffLines[line];
-        String idParam = uri.getQueryParameter("id");
-        long id = idParam != null ? Long.parseLong(idParam) : 0L;
 
         CommentActionPopup p = new CommentActionPopup(id, line, lineText, leftLine, rightLine,
                 mLastTouchDown.x, mLastTouchDown.y, isRightLine);

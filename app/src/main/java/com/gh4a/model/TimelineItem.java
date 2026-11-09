@@ -111,6 +111,10 @@ public abstract class TimelineItem {
                 return null;
             }
 
+            // 122：pullRequestUrl() 可空，Pattern.matcher(null) 即 NPE
+            if (reviewComment.pullRequestUrl() == null) {
+                return null;
+            }
             Matcher matcher = PULL_REQUEST_PATTERN.matcher(reviewComment.pullRequestUrl());
             if (matcher.matches()) {
                 String repoOwner = matcher.group(1);
@@ -215,7 +219,8 @@ public abstract class TimelineItem {
                     return;
                 }
 
-                if (diffHunk.getCreatedAt() != null &&
+                // 122：comment.createdAt() 可空，Date.after(null) 即 NPE
+                if (diffHunk.getCreatedAt() != null && comment.createdAt() != null &&
                         diffHunk.getCreatedAt().after(comment.createdAt())) {
                     // Because we are adding all of the comments in order based on their creation
                     // date and also first add only comments from the initial review we know that
@@ -310,17 +315,32 @@ public abstract class TimelineItem {
             ReviewComment comment = getInitialComment();
             ReviewComment otherComment = other.getInitialComment();
 
-            // First sort by filename
-            int byPath = comment.path().compareTo(otherComment.path());
+            // 122：path() 可空，compareTo 即 NPE；originalPosition() 为
+            // Integer 可空，< 比较会拆箱 NPE（null 排最后，与 createdAt 的口径一致）
+            String path = comment.path();
+            String otherPath = otherComment.path();
+            int byPath;
+            if (path == null && otherPath == null) {
+                byPath = 0;
+            } else if (path == null) {
+                byPath = 1;
+            } else if (otherPath == null) {
+                byPath = -1;
+            } else {
+                byPath = path.compareTo(otherPath);
+            }
             if (byPath != 0) {
                 return byPath;
             }
 
             // Then by line numbers
-            if (comment.originalPosition() < otherComment.originalPosition()) {
+            int position = comment.originalPosition() != null ? comment.originalPosition() : Integer.MAX_VALUE;
+            int otherPosition = otherComment.originalPosition() != null
+                    ? otherComment.originalPosition() : Integer.MAX_VALUE;
+            if (position < otherPosition) {
                 return -1;
             }
-            if (comment.originalPosition() > otherComment.originalPosition()) {
+            if (position > otherPosition) {
                 return 1;
             }
 

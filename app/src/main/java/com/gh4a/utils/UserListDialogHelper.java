@@ -154,4 +154,57 @@ public class UserListDialogHelper {
         });
         dialog.show();
     }
+
+    /** 新建确认回调：输入的名称与“设为私密”开关值（调用方自行发起创建请求）。 */
+    public interface OnCreateNameConfirmed {
+        void onConfirmed(String name, boolean isPrivate);
+    }
+
+    /**
+     * “新建列表”对话框（只收集名称）：与 showCreateListDialog 同一套输入
+     * UI 与校验（空名／重名不分大小写），确认后立即关闭并把名称与私密开关
+     * 交回调用方；本身不发起任何网络请求。调用方把创建请求挂在 ViewModel
+     * 里，旋转不中断（126）；原 showCreateListDialog 保持不动（其余调用方
+     * 的“创建中禁用保存／失败重开”行为不变）。
+     */
+    public static void showCreateListNameDialog(Context context,
+            List<UserListsGraphQL.UserList> existingLists,
+            OnCreateNameConfirmed onConfirmed) {
+        View view = LayoutInflater.from(context)
+                .inflate(R.layout.dialog_create_list, null);
+        EditText nameInput = view.findViewById(R.id.et_list_name);
+        SwitchCompat privateSwitch = view.findViewById(R.id.sw_private);
+        AlertDialog dialog = new AlertDialog.Builder(context)
+                .setTitle(R.string.star_list_create_title)
+                .setView(view)
+                .setPositiveButton(R.string.star_list_save, null)
+                .setNegativeButton(R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            save.setOnClickListener(v -> {
+                String name = nameInput.getText().toString().trim();
+                if (name.isEmpty()) {
+                    Toast.makeText(context, R.string.star_list_name_empty,
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (existingLists != null) {
+                    for (UserListsGraphQL.UserList list : existingLists) {
+                        // B-L8：重名校验不分大小写（与 showCreateListDialog 同款）。
+                        if (name.equalsIgnoreCase(list.name)) {
+                            Toast.makeText(context, R.string.star_list_name_dup,
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                    }
+                }
+                dialog.dismiss();
+                if (onConfirmed != null) {
+                    onConfirmed.onConfirmed(name, privateSwitch.isChecked());
+                }
+            });
+        });
+        dialog.show();
+    }
 }

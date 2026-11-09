@@ -33,6 +33,11 @@
         <exclude domain="sharedpref" path="hot_repos_cache.xml" />
         <exclude domain="sharedpref" path="me_header_cache.xml" />
         <exclude domain="sharedpref" path="star_update_read.xml" />
+        <!-- 108：file 域（files/）默认随系统自动备份上云；诊断日志
+             （diagnostic/，含 diag-trace.txt 与 crash-*.txt）与商店
+             feed 缓存（store-cache/）不应占备份配额。 -->
+        <exclude domain="file" path="diagnostic/" />
+        <exclude domain="file" path="store-cache/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="database" path="gh4adb.db" />
@@ -54,5 +59,9 @@
         <exclude domain="sharedpref" path="hot_repos_cache.xml" />
         <exclude domain="sharedpref" path="me_header_cache.xml" />
         <exclude domain="sharedpref" path="star_update_read.xml" />
+        <!-- 108：与 cloud-backup 同一清单，device-transfer 也排除
+             诊断日志与商店缓存。 -->
+        <exclude domain="file" path="diagnostic/" />
+        <exclude domain="file" path="store-cache/" />
     </device-transfer>
 </data-extraction-rules>

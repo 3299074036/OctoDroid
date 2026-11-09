@@ -31,6 +31,8 @@ import com.gh4a.fragment.RadarCache;
 import com.gh4a.fragment.RadarGraphQL;
 import com.gh4a.fragment.ReleaseRadarFragment;
 
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -271,6 +273,21 @@ public class ReleaseRadarWorker extends Worker {
         if (raw == null) {
             return map;
         }
+        // 105：旧的 ;/= 手写序列化会被含 ; 的 tag 打坏（git tag 名允许 ;）；
+        // 新格式走 JSON，旧数据兼容读一次。
+        if (raw.startsWith("{")) {
+            try {
+                JSONObject json = new JSONObject(raw);
+                java.util.Iterator<String> keys = json.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    map.put(key, json.optString(key, ""));
+                }
+                return map;
+            } catch (Exception ignored) {
+                // 损坏的 JSON 回落旧格式解析
+            }
+        }
         for (String entry : raw.split(";")) {
             int eq = entry.indexOf('=');
             if (eq > 0) {
@@ -282,13 +299,17 @@ public class ReleaseRadarWorker extends Worker {
 
     private static void saveKnownTags(SharedPreferences prefs, String login,
             Map<String, String> tags) {
-        StringBuilder sb = new StringBuilder();
+        // 105：JSON 存取，tag 含 ;/= 也不损坏映射
+        JSONObject json = new JSONObject();
         for (Map.Entry<String, String> e : tags.entrySet()) {
-            if (sb.length() > 0) {
-                sb.append(';');
+            if (e.getKey() == null || e.getValue() == null) {
+                continue;
             }
-            sb.append(e.getKey()).append('=').append(e.getValue());
+            try {
+                json.put(e.getKey(), e.getValue());
+            } catch (Exception ignored) {
+            }
         }
-        prefs.edit().putString(KEY_KNOWN_TAGS + login, sb.toString()).apply();
+        prefs.edit().putString(KEY_KNOWN_TAGS + login, json.toString()).apply();
     }
 }

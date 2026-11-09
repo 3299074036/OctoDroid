@@ -51,6 +51,7 @@ import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.DownloadUtils;
 import com.gh4a.utils.IntentUtils;
 import com.gh4a.utils.RxUtils;
+import com.gh4a.utils.StringUtils;
 import com.gh4a.widget.ContextMenuAwareRecyclerView;
 import com.meisolsson.githubsdk.model.Discussion;
 import com.meisolsson.githubsdk.model.Download;
@@ -176,7 +177,9 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
             case CommitCommentEvent: {
                 CommitCommentPayload payload = (CommitCommentPayload) event.payload();
                 GitComment comment = payload.comment();
-                if (comment != null) {
+                // 117：comment.id() 为 Long，InitialCommentMarker(long) 会拆箱，
+                // id 为 null 即 NPE
+                if (comment != null && comment.id() != null) {
                     intentSingle = CommitCommentLoadTask.load(getActivity(),
                             repoOwner, repoName, comment.commitId(),
                             new IntentUtils.InitialCommentMarker(comment.id()));
@@ -208,7 +211,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
             case DownloadEvent: {
                 DownloadPayload payload = (DownloadPayload) event.payload();
                 Download download = payload.download();
-                DownloadUtils.enqueueDownloadWithPermissionCheck((BaseActivity) getActivity(), download);
+                // 117：download 可空，enqueue 内直接解引用即 NPE
+                if (download != null) {
+                    DownloadUtils.enqueueDownloadWithPermissionCheck((BaseActivity) getActivity(), download);
+                }
                 break;
             }
 
@@ -247,14 +253,20 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
             case GistEvent: {
                 GistPayload payload = (GistPayload) event.payload();
+                // 117：gist 可空，gist().id() 即 NPE
+                if (payload.gist() == null) {
+                    break;
+                }
                 intent = GistActivity.makeIntent(getActivity(), payload.gist().id());
                 break;
             }
 
             case GollumEvent: {
                 GollumPayload payload = (GollumPayload) event.payload();
+                // 117：pages() 可空，isEmpty() 即 NPE
+                List<GitHubWikiPage> pages = payload.pages();
                 intent = WikiListActivity.makeIntent(getActivity(), repoOwner, repoName,
-                        payload.pages().isEmpty() ? null : payload.pages().get(0));
+                        pages == null || pages.isEmpty() ? null : pages.get(0));
                 break;
             }
 
@@ -262,9 +274,15 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
                 IssueCommentPayload payload = (IssueCommentPayload) event.payload();
                 Issue issue = payload.issue();
                 PullRequest request = issue != null ? issue.pullRequest() : null;
+                // 117：comment.id() 为 Long，InitialCommentMarker(long) 会拆箱
                 IntentUtils.InitialCommentMarker initialComment = payload.comment() != null
+                        && payload.comment().id() != null
                         ? new IntentUtils.InitialCommentMarker(payload.comment().id()) : null;
 
+                // 117：issue.number() 为 Integer，makeIntent(int) 会拆箱
+                if (issue != null && issue.number() == null) {
+                    break;
+                }
                 if (request != null && request.htmlUrl() != null) {
                     intent = PullRequestActivity.makeIntent(getActivity(),
                             repoOwner, repoName, issue.number(),
@@ -279,6 +297,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
             case IssuesEvent: {
                 IssuesPayload payload = (IssuesPayload) event.payload();
+                // 117：issue/number 可空，number() 即 NPE/拆箱 NPE
+                if (payload.issue() == null || payload.issue().number() == null) {
+                    break;
+                }
                 startActivity(IssueActivity.makeIntent(getActivity(), repoOwner, repoName,
                         payload.issue().number()));
                 break;
@@ -310,6 +332,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
             case PullRequestEvent: {
                 PullRequestPayload payload = (PullRequestPayload) event.payload();
+                // 115：number() 为 Integer，makeIntent(int) 会拆箱
+                if (payload.number() == null) {
+                    break;
+                }
                 intent = PullRequestActivity.makeIntent(getActivity(),
                         repoOwner, repoName, payload.number());
                 break;
@@ -317,6 +343,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
             case PullRequestReviewEvent: {
                 PullRequestReviewPayload payload = (PullRequestReviewPayload) event.payload();
+                // 117：pullRequest/number 可空，number() 即 NPE/拆箱 NPE
+                if (payload.pullRequest() == null || payload.pullRequest().number() == null) {
+                    break;
+                }
                 intent = ReviewActivity.makeIntent(getActivity(), repoOwner, repoName,
                         payload.pullRequest().number(), payload.review(), null);
                 break;
@@ -327,9 +357,15 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
                         (PullRequestReviewCommentPayload) event.payload();
                 PullRequest pr = payload.pullRequest();
                 ReviewComment comment = payload.comment();
+                // 117：comment.id() 为 Long，InitialCommentMarker(long) 会拆箱
                 IntentUtils.InitialCommentMarker initialComment = comment != null
+                        && comment.id() != null
                         ? new IntentUtils.InitialCommentMarker(comment.id()) : null;
 
+                // 117：pr.number() 为 Integer，makeIntent(int) 会拆箱
+                if (pr != null && pr.number() == null) {
+                    break;
+                }
                 if (pr != null) {
                     if (initialComment != null) {
                         intentSingle = PullRequestReviewCommentLoadTask.load(getActivity(),
@@ -368,7 +404,8 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
             case ReleaseEvent: {
                 ReleasePayload payload = (ReleasePayload) event.payload();
                 Release release = payload.release();
-                if (release != null) {
+                // 117：release.id() 为 Long，makeIntent(long) 会拆箱
+                if (release != null && release.id() != null) {
                     intent = ReleaseInfoActivity.makeIntent(getActivity(),
                             repoOwner, repoName, release.id());
                 }
@@ -462,14 +499,22 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
             case CommitCommentEvent:
                 if (repoOwnerAndName != null) {
                     CommitCommentPayload payload = (CommitCommentPayload) event.payload();
+                    // 117：comment/commitId 可空，直接 substring 即 NPE
+                    if (payload.comment() == null) {
+                        break;
+                    }
                     String sha = payload.comment().commitId();
-                    menu.add(getString(R.string.menu_commit, sha.substring(0, 7)))
+                    menu.add(getString(R.string.menu_commit, StringUtils.shortSha(sha)))
                             .setIntent(CommitActivity.makeIntent(getActivity(), repoOwnerAndName.first, repoOwnerAndName.second, sha));
                 }
                 break;
 
             case DownloadEvent: {
                 DownloadPayload payload = (DownloadPayload) event.payload();
+                // 117：download 可空，name() 即 NPE
+                if (payload.download() == null) {
+                    break;
+                }
                 menu.add(Menu.NONE, MENU_DOWNLOAD_START, Menu.NONE,
                         getString(R.string.menu_file, payload.download().name()));
                 break;
@@ -497,6 +542,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
             case GistEvent: {
                 GistPayload payload = (GistPayload) event.payload();
+                // 117：gist 可空，gist().id() 即 NPE
+                if (payload.gist() == null) {
+                    break;
+                }
                 String gistId = payload.gist().id();
                 menu.add(getString(R.string.menu_gist, gistId))
                         .setIntent(GistActivity.makeIntent(getActivity(), gistId));
@@ -515,6 +564,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
             case IssueCommentEvent: {
                 IssueCommentPayload payload = (IssueCommentPayload) event.payload();
+                // 117：issue 可空，pullRequest() 即 NPE
+                if (payload.issue() == null) {
+                    break;
+                }
                 boolean isPullRequest = payload.issue().pullRequest() != null;
                 menu.add(getString(isPullRequest ? R.string.menu_pulls : R.string.menu_issues))
                         .setIntent(IssueListActivity.makeIntent(getActivity(),repoOwner, repoName, isPullRequest));
@@ -523,6 +576,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
             case IssuesEvent: {
                 IssuesPayload payload = (IssuesPayload) event.payload();
+                // 117：issue/number 可空，number() 即 NPE/拆箱 NPE
+                if (payload.issue() == null || payload.issue().number() == null) {
+                    break;
+                }
                 int issueNumber = payload.issue().number();
                 menu.add(getString(R.string.menu_issue, issueNumber))
                         .setIntent(IssueActivity.makeIntent(getActivity(), repoOwner, repoName, issueNumber));
@@ -531,6 +588,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
             case PullRequestEvent: {
                 PullRequestPayload payload = (PullRequestPayload) event.payload();
+                // 117：number() 为 Integer，makeIntent(int) 会拆箱
+                if (payload.number() == null) {
+                    break;
+                }
                 menu.add(getString(R.string.menu_pull, payload.number()))
                         .setIntent(PullRequestActivity.makeIntent(getActivity(),
                                 repoOwner, repoName, payload.number()));
@@ -540,14 +601,19 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
             case PushEvent: {
                 if (repoOwnerAndName != null) {
                     PushPayload payload = (PushPayload) event.payload();
-                    menu.add(getString(R.string.menu_compare, payload.head().substring(0, 7)))
-                            .setIntent(CompareActivity.makeIntent(getActivity(), repoOwner, repoName,
-                                    payload.before(), payload.head()));
+                    // 117：head/commits/sha 均可空，直接 substring/遍历即 NPE
+                    if (payload.head() != null) {
+                        menu.add(getString(R.string.menu_compare, StringUtils.shortSha(payload.head())))
+                                .setIntent(CompareActivity.makeIntent(getActivity(), repoOwner, repoName,
+                                        payload.before(), payload.head()));
+                    }
 
-                    for (GitCommit commit : payload.commits()) {
-                        String sha = commit.sha();
-                        menu.add(getString(R.string.menu_commit, sha.substring(0, 7)))
-                                .setIntent(CommitActivity.makeIntent(getActivity(), repoOwner, repoName, sha));
+                    if (payload.commits() != null) {
+                        for (GitCommit commit : payload.commits()) {
+                            String sha = commit.sha();
+                            menu.add(getString(R.string.menu_commit, StringUtils.shortSha(sha)))
+                                    .setIntent(CommitActivity.makeIntent(getActivity(), repoOwner, repoName, sha));
+                        }
                     }
                 }
                 break;
@@ -555,6 +621,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
             case ReleaseEvent: {
                 ReleasePayload payload = (ReleasePayload) event.payload();
+                // 117：release 可空，assets() 即 NPE
+                if (payload.release() == null) {
+                    break;
+                }
                 List<ReleaseAsset> downloads = payload.release().assets();
                 int count = downloads != null ? downloads.size() : 0;
 
@@ -581,11 +651,20 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
         if (id >= MENU_DOWNLOAD_START && id <= MENU_DOWNLOAD_END) {
             if (event.type() == GitHubEventType.ReleaseEvent) {
                 ReleasePayload payload = (ReleasePayload) event.payload();
+                // 117：release/assets 可空，get() 即 NPE/AIOOBE
+                if (payload.release() == null || payload.release().assets() == null
+                        || id - MENU_DOWNLOAD_START >= payload.release().assets().size()) {
+                    return false;
+                }
                 ReleaseAsset asset = payload.release().assets().get(id - MENU_DOWNLOAD_START);
                 DownloadUtils.enqueueDownloadWithPermissionCheck((BaseActivity) getActivity(), asset);
             } else if (event.type() == GitHubEventType.DownloadEvent) {
                 DownloadPayload payload = (DownloadPayload) event.payload();
                 Download download = payload.download();
+                // 117：download 可空，enqueue 内直接解引用即 NPE
+                if (download == null) {
+                    return false;
+                }
                 DownloadUtils.enqueueDownloadWithPermissionCheck((BaseActivity) getActivity(), download);
                 }
             return true;
@@ -608,7 +687,34 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
         // background after the page is shown, see enrichPullRequestEvents().
         // Push events need no enrichment: the raw payload already carries the commits
         // (sha + message) and the UI only ever shows a few of them.
-        return loadRawPage(page, bypassCache);
+        // 111：GitHub 一加新事件类型，SDK 的 GitHubEventType.valueOf 即抛
+        // IllegalArgumentException，整页解析失败；只对该解析错误降级为空页，
+        // 网络/鉴权等其他错误原样抛出。
+        return loadRawPage(page, bypassCache)
+                .onErrorResumeNext(error -> {
+                    if (isUnknownEventTypeError(error)) {
+                        Log.d(Gh4Application.LOG_TAG,
+                                "Unknown GitHub event type, showing empty page", error);
+                        return Single.just(Response.success(
+                                new ApiHelpers.DummyPage<GitHubEvent>()));
+                    }
+                    return Single.error(error);
+                });
+    }
+
+    /** 111：错误链里是否有未知事件类型导致的解析失败（valueOf 抛出的
+     * IllegalArgumentException，Moshi 可能包一层 JsonDataException）。 */
+    private static boolean isUnknownEventTypeError(Throwable t) {
+        while (t != null) {
+            String message = String.valueOf(t.getMessage());
+            if (message.contains("GitHubEventType")
+                    && (t instanceof IllegalArgumentException
+                            || "JsonDataException".equals(t.getClass().getSimpleName()))) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 
     @Override
@@ -680,6 +786,11 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
             return;
         }
         PullRequestService prService = ServiceFactory.get(PullRequestService.class, false);
+        // 115：number() 为 Integer，直接赋给 int 即拆箱 NPE
+        if (payload.number() == null) {
+            mEnrichmentInFlight.remove(event.id());
+            return;
+        }
         final int prNumber = payload.number();
         final String eventId = event.id();
         mEnrichmentDisposables.add(prService

@@ -83,6 +83,9 @@ store/history/，git 拉取不占 API 额度；攒够 7 天前生成器热门条
   chart_most-popular_all.json
 每个文件：{"items": [...]}（80：generatedAt 只写 meta.json，内容不变
 时文件字节不变，gh-pages 不空提交；App 不读 feed 的 generatedAt）；
+meta.json 本身：数据字段与上一轮逐项相等时沿用上一轮原样写出
+（见 main 末尾 80 注释，generatedAt/mappingDate/apiCalls 为运行期
+量、不参与比较），否则写新 meta。
 单条含 fullName / owner /
 avatarUrl / description / stars / forks / language / topics / topicCodes /
 latestTag / latestDate / pushedAt / downloadCount / platforms / source /
@@ -92,6 +95,7 @@ ranks（createdAt 仅后端复用时写，App 不读）。只打数量日志，�
 
 import argparse
 import datetime
+import http.client
 import json
 import os
 import re
@@ -125,6 +129,24 @@ def normalize_category(value):
         print("category 未知，归 other：%s" % value)
     return "other"
 
+
+def as_int(value, field, full=""):
+    """145：数值字段安全取整。hiwiki 字段类型一变（如 stars 变字符串），
+    直接参与排序/比较会抛 TypeError 中断整轮；数字字符串正常转换，
+    非法值按 0 计并记日志（与 forks/topics/createdAt 的 isinstance
+    检查同款口径）。"""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            pass
+    print("WARN %s: %s=%r 非数值，按 0 计" % (full, field, value))
+    return 0
+
 # 发现页每页条数：Komi 的 BackendApiClient.getFeed limit 默认值。
 PAGE_SIZE = 20
 
@@ -144,10 +166,14 @@ RATE_LIMIT_WAIT_CAP = 300
 # 值与 feed 有出入：hiwiki 没有 archive 概念、mac 写作 mac、部分
 # 平台是宣称值而非附件实测值，11/60 条直接映射会对不上 feed）。
 # 词表外的值丢弃（例如 hiwiki 某天新增的平台名）。
+# 143：stale 路径传的是上一轮 feed/newest.json 的条目，其 platforms
+# 已是 feed 词表值；"macos"/"archive" 须直通，否则在 else 分支被静默
+# 丢弃（新鲜路径传 hiwiki 原始值 "mac"/"other"，映射不变）。
 HIWIKI_NEWEST_PLATFORM_MAP = {
     "android": "android", "ios": "ios", "windows": "windows",
     "mac": "macos", "linux": "linux", "extension": "extension",
     "harmony": "harmony", "other": "archive",
+    "macos": "macos", "archive": "archive",
 }
 
 # 附件后缀 -> 平台（与 StoreClassifier.platformsForAsset 同表）。
@@ -486,16 +512,32 @@ class Api:
                              RATE_LIMIT_RETRIES, path))
                     time.sleep(wait)
                     continue
-                if e.code == 403 and "rate limit" in body.lower():
+                if e.code == 401:
+                    # 鉴权失败：token 无效/被吊销，重试无意义，整轮失败。
+                    raise SystemExit(
+                        "GitHub API 鉴权失败（401），请检查 STORE_PAT：%s"
+                        % path)
+                if is_rate:
+                    # 限速重试已耗尽：整轮失败（调用方据此置 meta_dead）。
                     raise SystemExit(
                         "GitHub API 限速（已用 %d 次），请用 token 或等重置后再跑"
                         % self.calls)
-                raise SystemExit("GitHub API %s 失败：%s" % (path, e))
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-                # 60：瞬时网络错误（DNS/连接重置/超时）或响应解析错误只降级
-                # 该仓（返回 None，调用方 fetch_repo_meta 按 404 同款处理），
-                # 不 abort 整轮。限速有 3 次重试 + 降级，瞬时错误此前零容错。
-                # 注意 HTTPError 是 URLError 的子类，本分支在它之后才匹配。
+                # 139：5xx / 非限速 403（如 DMCA 屏蔽仓）只降级该仓
+                # （返回 None，调用方按 404 同款处理），不再抛
+                # SystemExit——此前单个 5xx/403 会置 meta_dead，毒化
+                # 整轮剩余新仓的元数据（forks=0、无 created_at）。
+                print("GitHub API %s 单仓失败（%s），降级该仓：%s"
+                      % (path, e.code, e))
+                return None
+            except (urllib.error.URLError, TimeoutError, OSError,
+                    ValueError, http.client.HTTPException) as e:
+                # 60 + 142：瞬时网络错误（DNS/连接重置/超时）、响应解析
+                # 错误或 http.client 层错误（BadStatusLine /
+                # IncompleteRead，其基类只有 HTTPException，不是
+                # OSError/URLError 的子类）只降级该仓（返回 None，
+                # 调用方 fetch_repo_meta 按 404 同款处理），不 abort
+                # 整轮。注意 HTTPError 是 URLError 的子类，本分支在
+                # 它之后才匹配。
                 print("GitHub API %s 瞬时失败，降级该仓：%s" % (path, e))
                 return None
         raise SystemExit("GitHub API %s 失败：%s" % (path, last_error))
@@ -565,7 +607,7 @@ def select_installable_release(releases):
             plats = platforms_for_asset(asset.get("fileName") or "")
             if plats:
                 platforms.update(plats)
-                downloads += asset.get("downloadCount") or 0
+                downloads += as_int(asset.get("downloadCount"), "downloadCount")
                 installable += 1
         if platforms:
             return rel, platforms, downloads, installable
@@ -630,7 +672,7 @@ def build_newest_items(raw_items, feed_by_name):
             "description": raw.get("description") or "",
             "category": normalize_category(raw.get("category")),
             "language": raw.get("language") or "",
-            "stars": raw.get("stars") or 0,
+            "stars": as_int(raw.get("stars"), "stars", full),
             "latestTag": raw.get("latestTag") or "",
             "lastReleaseTime": raw.get("lastReleaseTime") or "",
             "platforms": platforms,
@@ -681,6 +723,23 @@ def load_hiwiki_pool(path):
         print("hiwiki pool: 去重 %d 条重复记录" % (len(records) - len(deduped)))
     print("hiwiki pool: %d 条记录（文件 %s）" % (len(deduped), path))
     return deduped, meta
+
+
+def load_prev_meta(path):
+    """读上一轮 meta.json（工作流从 gh-pages 取回），返回 dict；文件
+    缺失/损坏返回 {}（调用方按“无上一轮”处理，正常写新 meta）。"""
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print("prev meta %s 读不到（按无上一轮处理）：%s" % (path, e))
+        return {}
+    if not isinstance(data, dict):
+        print("prev meta %s 结构异常（按无上一轮处理）" % path)
+        return {}
+    return data
 
 
 def load_prev_feed(path):
@@ -746,7 +805,8 @@ def build_hiwiki_item(record, prev, api, metadata_cap, stats,
     elif simulate:
         # 离线模拟：2026-11-08 抓数没有 release 数据，降级拼条目。
         platforms = set((prev_item or {}).get("platforms") or [])
-        downloads = (prev_item or {}).get("downloadCount") or 0
+        downloads = as_int((prev_item or {}).get("downloadCount"),
+                           "downloadCount", full)
         installable = (prev_item or {}).get("assetCount") or 0
         latest_tag = record.get("latestTag") or ""
         latest_date = normalize_date(record.get("lastReleaseTime") or "")
@@ -791,7 +851,7 @@ def build_hiwiki_item(record, prev, api, metadata_cap, stats,
     if topics is None:
         topics = []
 
-    stars = record.get("stars") or 0
+    stars = as_int(record.get("stars"), "stars", full)
     description = record.get("description")
     if description is None and prev_item is not None:
         description = prev_item.get("description") or ""
@@ -880,6 +940,9 @@ def main():
                     help="上一轮 feed/newest.json 路径；新鲜文件缺失时沿用（stale），平台按本轮 feed 重算")
     ap.add_argument("--prev-feed", default=None,
                     help="上一轮 feed/all.json 路径；供元数据复用与回落池子")
+    ap.add_argument("--prev-meta", default=None,
+                    help="上一轮 meta.json 路径（工作流从 gh-pages 取回）；"
+                    "80：数据内容不变时沿用上一轮 meta 原样写出，不产生 diff")
     ap.add_argument("--metadata-cap", type=int, default=4500,
                     help="GitHub API 元数据调用硬上限；触顶后剩余新仓以残缺字段进 feed，整轮不失败")
     ap.add_argument("--harvest-status", default="ok",
@@ -1027,6 +1090,17 @@ def main():
     else:
         print("newest: 无数据，本轮不写 feed/newest.json（feed 不受影响）")
 
+    # 144：meta.json 补 harvest 完整度信号。池子丢 ≤5% 时 harvestStatus 仍为
+    # ok，之前与干净轮次无法区分；ok/failed 直接取自池子文件（与
+    # harvest-log.json 的 failRate 同数，load_hiwiki_pool 已抽进 pool_meta）。
+    harvest_ok = pool_meta.get("ok")
+    harvest_failed = pool_meta.get("failed")
+    harvest_total = (harvest_ok if isinstance(harvest_ok, int) else 0) \
+        + (harvest_failed if isinstance(harvest_failed, int) else 0)
+    harvest_fail_rate = (round(harvest_failed / harvest_total, 4)
+                         if isinstance(harvest_failed, int) and harvest_total > 0
+                         else None)
+
     meta = {"generatedAt": generated_at,
             "feed": len(feed),
             "feedPages": feed_pages,
@@ -1038,6 +1112,8 @@ def main():
             "unranked": len(feed) - ranked,
             "mappingDate": mapping_date,
             "harvestStatus": harvest_status,
+            "harvestFailed": harvest_failed if isinstance(harvest_failed, int) else None,
+            "harvestFailRate": harvest_fail_rate,
             "droppedNoInstallable": stats["dropped"],
             "metadataDegraded": stats["degraded"],
             "newestCount": len(newest_items),
@@ -1048,6 +1124,21 @@ def main():
             "historyOldDate": history_old_date.isoformat(),
             "historyOldFound": history_old is not None,
             "historyItems": len(history_stars)}
+    # 80：数据零变化时不空提交。上一轮 meta 存在且全部“数据字段”
+    # （除运行期时间戳/诊断字段外）逐项相等时，沿用上一轮 meta 原样
+    # 写出（字节与上一轮一致，gh-pages 无 diff、不空提交）；否则写
+    # 新 meta。排除的三个字段是运行期量，不是发布数据：generatedAt
+    # 为本轮时间；mappingDate 为 harvest 时间（池子内容相同时每轮
+    # 都变）；apiCalls 为本轮调用数（稳态为 0）。注意只比“内容真的
+    # 不变”才跳过：键集合不同或任一数据字段不同都走新写。
+    prev_meta = load_prev_meta(args.prev_meta)
+    meta_volatile = ("generatedAt", "mappingDate", "apiCalls")
+    if (prev_meta and set(prev_meta) == set(meta)
+            and all(prev_meta.get(k) == meta[k] for k in meta
+                    if k not in meta_volatile)):
+        print("meta: 数据内容与上一轮一致，沿用上一轮 meta.json"
+              "（generatedAt/mappingDate/apiCalls 不变），不产生 diff")
+        meta = prev_meta
     write_json(os.path.join(args.out, "meta.json"), meta)
 
     if args.snapshot_dir and args.snapshot_dir != "/dev/null":

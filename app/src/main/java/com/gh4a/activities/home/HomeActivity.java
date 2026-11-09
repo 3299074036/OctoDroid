@@ -279,9 +279,9 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
         tv.setTextIsSelectable(true);
         scroll.addView(tv);
         AlertDialog crashDialog = new AlertDialog.Builder(this)
-                .setTitle("上次闪退的错误信息（分享前请检查：可能含私有仓库名）")
+                .setTitle(R.string.crash_dialog_title)
                 .setView(scroll)
-                .setPositiveButton("知道了", null)
+                .setPositiveButton(R.string.dialog_acknowledged, null)
                 .show();
         // 0.1.23: crash dialog itself reports to the breadcrumb counter.
         com.gh4a.utils.CrashBreadcrumb.noteDialogShown();
@@ -627,11 +627,25 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
                     }
                     String owner = repo.substring(0, slash).trim();
                     String name = repo.substring(slash + 1).trim();
+                    // 128：只校验斜杠位置不够——`a b/c` 拼出的 URL 含空格，
+                    // startActivity 可抛 ActivityNotFoundException；且不编码的
+                    // 特殊字符会拼出非法 URL。按 GitHub 命名规则校验字符，
+                    // URL 用 Uri.Builder 拼接（自动编码）。
+                    if (!owner.matches("[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
+                            || !name.matches("[A-Za-z0-9._-]+")
+                            || name.startsWith(".") || name.endsWith(".")
+                            || name.contains("..")) {
+                        Toast.makeText(this, R.string.create_repo_invalid,
+                                Toast.LENGTH_SHORT).show();
+                        return;
+                    }
                     if (forPr) {
                         Toast.makeText(this, R.string.create_pr_web_note,
                                 Toast.LENGTH_LONG).show();
                         Intent browser = new Intent(Intent.ACTION_VIEW,
-                                Uri.parse("https://github.com/" + owner + "/" + name + "/compare"));
+                                new Uri.Builder().scheme("https").authority("github.com")
+                                        .appendPath(owner).appendPath(name)
+                                        .appendPath("compare").build());
                         startActivity(browser);
                     } else {
                         startActivity(IssueEditActivity.makeCreateIntent(this, owner, name));
@@ -1313,7 +1327,10 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
 
         service.getNotifications(options, 1)
                 .map(ApiHelpers::throwOnFailure)
-                .map(result -> !result.items().isEmpty())
+                // 133：Page.items() 可空（见 ApiHelpers.SearchPageAdapter 的 null 分支），
+                // 未判空即 NPE。
+                .map(result -> result != null && result.items() != null
+                        && !result.items().isEmpty())
                 .compose(makeLoaderSingle(ID_LOADER_NOTIFICATIONS_INDICATOR, force))
                 .subscribe(this::setNotificationsIndicatorVisible, this::handleLoadFailure);
     }

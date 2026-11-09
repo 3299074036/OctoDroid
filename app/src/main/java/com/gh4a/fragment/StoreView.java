@@ -532,6 +532,8 @@ public class StoreView extends LinearLayout {
     // ---------- 取数：三页签共用一份 feed 整包 ----------
 
     private void loadFeed() {
+        // 100：失败回调要落在发起页签，而不是回调时刻的当前页签
+        final int requestTab = mCurrentTab;
         if (mFeedData != null) {
             renderTabFromCache(mCurrentTab);
             return;
@@ -564,7 +566,7 @@ public class StoreView extends LinearLayout {
                     loadNewestIfNeeded();
                 }, error -> {
                     mFeedLoading = false;
-                    showTabError(mCurrentTab, error);
+                    showTabError(requestTab, error);
                 }));
     }
 
@@ -686,7 +688,7 @@ public class StoreView extends LinearLayout {
 
     private List<StoreRankGroups.Group> rankGroups() {
         if (mRankGroups == null) {
-            mRankGroups = StoreRankGroups.build(rankPool());
+            mRankGroups = StoreRankGroups.build(mContext, rankPool());
         }
         return mRankGroups;
     }

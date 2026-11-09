@@ -14,6 +14,8 @@ import android.util.Log;
 import com.gh4a.Gh4Application;
 import com.gh4a.fragment.SettingsFragment;
 import com.gh4a.utils.translate.TranslationManager;
+import com.gh4a.worker.NotificationsWorker;
+import com.gh4a.worker.ReleaseRadarWorker;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -409,9 +411,37 @@ public class SettingsBackupManager {
             }
             JSONObject prefs = backup.getJSONObject("prefs");
             if (prefs.has("Gh4a-pref")) {
-                jsonToPrefs(prefs.getJSONObject("Gh4a-pref"), context.getSharedPreferences(
-                        SettingsFragment.PREF_NAME, Context.MODE_PRIVATE),
+                SharedPreferences gh4aPrefs = context.getSharedPreferences(
+                        SettingsFragment.PREF_NAME, Context.MODE_PRIVATE);
+                jsonToPrefs(prefs.getJSONObject("Gh4a-pref"), gh4aPrefs,
                         SettingsBackupManager::isGh4aPrefKeyAllowed);
+                // 102：旧版/手写备份的 prefs version 可能是 0/1；若原样恢复，
+                // 下次启动 Gh4Application 的 v<2 迁移分支会因 USER_LOGIN/Token
+                // 源键不在恢复白名单内而抹掉全部账号。恢复后把 version 写回
+                // 当前值 4（只升不降），跳过旧迁移分支。只拒绝该键的值是不够
+                // 的：全新设备上 prefs 默认 version=0，迁移仍会跑。按 Object
+                // 读再判类型：手写备份把 version 写成字符串时 getInt 会抛
+                // ClassCastException，直接按缺失处理、一律写回 4。
+                Object restoredVersion = gh4aPrefs.getAll().get("version");
+                if (!(restoredVersion instanceof Integer)
+                        || (Integer) restoredVersion < 4) {
+                    gh4aPrefs.edit().putInt("version", 4).apply();
+                }
+                // 102 跟进：version 写回 4 后，下次启动不再跑 v<3 迁移，
+                // prefs 里已有的 int 型 user_id_*（旧版写入）会留在原地，
+                // 后续 getLong() 抛 ClassCastException；恢复处顺手转 long。
+                SharedPreferences.Editor idEditor = gh4aPrefs.edit();
+                boolean idChanged = false;
+                for (Map.Entry<String, ?> entry : gh4aPrefs.getAll().entrySet()) {
+                    if (entry.getKey().startsWith("user_id_")
+                            && entry.getValue() instanceof Integer) {
+                        idEditor.putLong(entry.getKey(), (Integer) entry.getValue());
+                        idChanged = true;
+                    }
+                }
+                if (idChanged) {
+                    idEditor.apply();
+                }
             }
             if (prefs.has("drawer_config")) {
                 jsonToPrefs(prefs.getJSONObject("drawer_config"),
@@ -446,6 +476,17 @@ public class SettingsBackupManager {
                 jsonToPrefs(credJson, Gh4Application.securePrefs(context),
                         SettingsBackupManager::isTranslationCredentialKey);
             }
+            // 104：恢复成功后立即让新间隔/开关生效并建好通知渠道，
+            // 否则要等下次冷启动（通知）/登录或切账号（雷达），新设备
+            // 上渠道根本不存在时通知会被系统静默丢弃。放 applyBackup
+            // 末尾：两处 doRestore（SettingsFragment/MeFragment）一次覆盖。
+            // rescheduleWorkers 内部已按登录态/开关决定调度或取消。
+            Gh4Application app = Gh4Application.get();
+            if (app != null) {
+                app.rescheduleWorkers();
+            }
+            NotificationsWorker.createNotificationChannels(context);
+            ReleaseRadarWorker.createNotificationChannels(context);
             return true;
         } catch (JSONException e) {
             return false;

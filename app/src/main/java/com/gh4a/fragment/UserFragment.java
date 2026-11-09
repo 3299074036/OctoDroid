@@ -212,7 +212,8 @@ public class UserFragment extends LoadingFragmentBase implements
                     getActivity(), mUser.login(), true));
 
             followingRow.setText(getResources().getQuantityString(R.plurals.following,
-                    mUser.following(), mUser.following()));
+                    // 115：following() 为 Integer 可空，getQuantityString(int) 会拆箱 NPE
+                    ApiHelpers.orZero(mUser.following()), ApiHelpers.orZero(mUser.following())));
             followingRow.setClickIntent(FollowerFollowingListActivity.makeIntent(
                     getActivity(), mUser.login(), false));
         } else {
@@ -270,8 +271,9 @@ public class UserFragment extends LoadingFragmentBase implements
         fillTextView(R.id.tv_bio, mUser.bio() != null ? EmojiParser.parseToUnicode(mUser.bio()) : null);
     }
 
+    // 115：本地 orZero 收敛为共享实现，见 ApiHelpers.orZero
     private static int orZero(Integer count) {
-        return count != null ? count : 0;
+        return ApiHelpers.orZero(count);
     }
 
     private void updateFollowingUi() {

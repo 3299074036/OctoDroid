@@ -43,6 +43,9 @@
         <item name="colorBreadcrumbBackground">@color/breadcrumb_background</item>
         <item name="colorIconForeground">@color/icon_foreground</item>
         <item name="drawerBackground">@color/drawer_background</item>
+        <!-- 132：M2 主题本身不定义 colorSurfaceVariant，这里接上骨架条灰，
+             搜索骨架屏才能按 ?attr/colorSurfaceVariant 取到深色适配值 -->
+        <item name="colorSurfaceVariant">@color/skeleton_bar</item>
     </style>
 
     <!-- Accent color variants -->

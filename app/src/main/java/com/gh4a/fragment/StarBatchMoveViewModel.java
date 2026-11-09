@@ -4,6 +4,8 @@ import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 import androidx.lifecycle.ViewModel;
 
+import com.gh4a.R;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -165,6 +167,75 @@ public class StarBatchMoveViewModel extends ViewModel {
                         new SingleOp(runId, true, successRes, clearExpandedId)),
                         error -> mSingleOp.setValue(
                                 new SingleOp(runId, false, failureRes, null))));
+    }
+
+    /**
+     * 0.2.4（126）：点 star 后拉官方列表的结果。拉列表只是为了弹出分组
+     * 框，本身没有 Toast／重拉；结果经 LiveData 发给重建后的 Fragment，
+     * 由它按结果弹框。失败时 lists 为 null，调用方按原逻辑不弹框（加星
+     * 本身已成功）。
+     */
+    public static final class StarListsResult {
+        /** 轮次 id：区分“新一次点 star”与“已展示过的结果”。 */
+        public final long runId;
+        /** 拉到的官方列表；失败时为 null。 */
+        public final List<UserListsGraphQL.UserList> lists;
+        /** 是否拉取失败。 */
+        public final boolean failed;
+
+        StarListsResult(long runId, List<UserListsGraphQL.UserList> lists, boolean failed) {
+            this.runId = runId;
+            this.lists = lists;
+            this.failed = failed;
+        }
+    }
+
+    private final MutableLiveData<StarListsResult> mStarLists = new MutableLiveData<>();
+    private long mStarListsRunId;
+    /** 已被 Fragment 展示／处理过的拉列表结果（旋转重建后不再重复弹框）。 */
+    private long mStarListsConsumedRunId = -1;
+
+    public LiveData<StarListsResult> getStarLists() {
+        return mStarLists;
+    }
+
+    /** 拉列表结果是否已被 Fragment 处理过。 */
+    public boolean isStarListsConsumed(StarListsResult result) {
+        return result != null && result.runId == mStarListsConsumedRunId;
+    }
+
+    /** 标记拉列表结果已处理（已弹框／已走新建／拉取失败已认领）。 */
+    public void markStarListsConsumed(StarListsResult result) {
+        if (result != null) {
+            mStarListsConsumedRunId = result.runId;
+        }
+    }
+
+    /** 点 star 后拉官方列表：Rx 链挂 ViewModel，旋转不中断。 */
+    public void fetchStarLists(String login) {
+        mStarListsRunId++;
+        final long runId = mStarListsRunId;
+        mSingleOpDisposables.add(UserListsGraphQL.fetchLists(login)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(lists -> mStarLists.setValue(
+                        new StarListsResult(runId, lists, false)),
+                        error -> mStarLists.setValue(
+                                new StarListsResult(runId, null, true))));
+    }
+
+    /**
+     * 0.2.4（126）：建组→入组整条链（建列表＋取 node id＋归属）走单发
+     * 操作：旋转不中断，结果经 LiveData 回到重建后的 Fragment（Toast）。
+     */
+    public void createListAndAssign(String fullName, String name, boolean isPrivate) {
+        runSingleOp(UserListsGraphQL.createList(name, isPrivate)
+                        .flatMap(list -> {
+                            List<String> ids = new ArrayList<>();
+                            ids.add(list.id);
+                            return UserListsGraphQL.assignRepo(fullName, ids);
+                        }),
+                R.string.assign_official_success, R.string.assign_official_failed, null);
     }
 
     private void moveNext(List<String> repos, int index, List<String> targetIds,

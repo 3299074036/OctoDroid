@@ -1080,4 +1080,13 @@
     <string name="store_result_count">%1$d in total</string>
     <string name="store_explore_title">Explore open-source software</string>
     <string name="store_explore_sub">%1$d apps</string>
+    <!-- 120：用户可见中文硬编码移入资源 -->
+    <string name="dialog_acknowledged">Got it</string>
+    <string name="login_token_plaintext_title">Note: token stored unencrypted</string>
+    <string name="login_token_plaintext_message">Encrypted storage is unavailable on this device, so the GitHub token from this login has been saved to an unencrypted file. Log in again on a device with working encrypted storage and the plaintext file will be migrated and deleted automatically.</string>
+    <string name="crash_dialog_title">Crash info from last run (check before sharing: may contain private repo names)</string>
+    <string name="radar_stage_cache_refreshing">Showing cached data, refreshing in background…</string>
+    <string name="radar_stage_refresh_failed_cache">Refresh failed, showing cached data</string>
+    <string name="radar_stage_load_failed">Load failed %1$s</string>
+    <string name="star_list_stale_retry">Cached data, tap to retry</string>
 </resources>

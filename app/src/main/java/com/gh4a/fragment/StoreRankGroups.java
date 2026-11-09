@@ -1,5 +1,9 @@
 package com.gh4a.fragment;
 
+import android.content.Context;
+
+import com.gh4a.utils.DiagTrace;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -439,14 +443,18 @@ public final class StoreRankGroups {
         return map;
     }
 
-    /** 后端给的榜名转格子：榜名不在 96 榜里的跳过（后端新榜，App 未跟进）。 */
-    private static Set<String> backendCells(StoreRepo item) {
+    /** 后端给的榜名转格子：榜名不在 96 榜里的跳过（后端新榜，App 未跟进），
+     * 丢弃时记一条诊断（只记榜名，不记仓库名）。 */
+    private static Set<String> backendCells(Context context, StoreRepo item) {
         Set<String> out = new HashSet<>();
         if (item.ranks != null) {
             for (String rank : item.ranks) {
                 String cell = NAME_TO_CELL.get(rank);
                 if (cell != null) {
                     out.add(cell);
+                } else {
+                    // 98：后端新榜名静默丢弃，记榜名以便跟进
+                    DiagTrace.log(context, "STORE", "unknown rank dropped: " + rank);
                 }
             }
         }
@@ -470,7 +478,7 @@ public final class StoreRankGroups {
      * 信后端为无榜，只有 ranks 缺失（旧数据）才回落本地静态表＋规则；
      * 每榜成员按星标倒序，平局按 fullName 升序；空榜保留空列表。
      */
-    public static List<Group> build(List<StoreRepo> pool) {
+    public static List<Group> build(Context context, List<StoreRepo> pool) {
         List<Group> groups = new ArrayList<>();
         for (int gi = 0; gi < GROUP_NAMES.length; gi++) {
             Group group = new Group(GROUP_NAMES[gi]);
@@ -486,7 +494,7 @@ public final class StoreRankGroups {
             Set<String> cells;
             if (item.ranks != null) {
                 // 后端给榜：非空用后端归属，空列表即后端确认无榜。
-                cells = backendCells(item);
+                cells = backendCells(context, item);
             } else {
                 cells = ASSIGN_MAP.get(item.fullName());
                 if (cells == null) {

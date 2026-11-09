@@ -122,7 +122,11 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
             new ActivityResultContracts.StartActivityForResult(),
             new ActivityResultHelpers.ActivityResultSuccessCallback(() -> {
                 reloadEvents(true);
-                getActivity().setResult(Activity.RESULT_OK);
+                // 127：异步回调返回时 Fragment 可能已 detach，getActivity() 为 null
+                Activity activity = getActivity();
+                if (activity != null) {
+                    activity.setResult(Activity.RESULT_OK);
+                }
             }));
 
     protected static Bundle buildArgs(String repoOwner, String repoName,
@@ -347,7 +351,7 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
 
     @Override
     protected RootAdapter<TimelineItem, ? extends RecyclerView.ViewHolder> onCreateAdapter() {
-        mAdapter = new TimelineItemAdapter(getActivity(), mRepoOwner, mRepoName, mIssue.number(),
+        mAdapter = new TimelineItemAdapter(getActivity(), mRepoOwner, mRepoName, ApiHelpers.orZero(mIssue.number()),
                 mIssue.pullRequest() != null, true, this);
         mAdapter.setLocked(isLocked());
         return mAdapter;
@@ -361,9 +365,10 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
                 TimelineItem item = data.get(i);
                 long itemId = 0;
                 if (item instanceof TimelineItem.TimelineComment) {
-                    itemId = ((TimelineItem.TimelineComment) item).comment().id();
+                    // 115：comment().id() 为 Long，赋给 long 即拆箱 NPE
+                    itemId = ApiHelpers.orZero(((TimelineItem.TimelineComment) item).comment().id());
                 } else if (item instanceof TimelineItem.TimelineReview) {
-                    itemId = ((TimelineItem.TimelineReview) item).review().id();
+                    itemId = ApiHelpers.orZero(((TimelineItem.TimelineReview) item).review().id());
                 }
                 if (mInitialComment.matches(itemId, item.getCreatedAt())) {
                     scrollToAndHighlightPosition(i + 1 /* adjust for header view */);
@@ -423,7 +428,8 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     }
 
     private boolean isLocked() {
-        return mIssue.locked() && !mIsCollaborator;
+        // 115：locked() 为 Boolean 可空，直接拆箱即 NPE
+        return Boolean.TRUE.equals(mIssue.locked()) && !mIsCollaborator;
     }
 
     private void updateMentionUsers() {
@@ -544,7 +550,8 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
             return;
         }
         mCommentTranslator.toggleTranslation(getActivity(), id, bodyHtml, () -> {
-            if (id == mIssue.id()) {
+            // 115：mIssue.id() 为 Long，与 long 比较会拆箱 NPE
+            if (mIssue.id() != null && id == mIssue.id()) {
                 refreshIssueBody();
             }
             if (mAdapter != null) {
@@ -629,7 +636,7 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     public Single<List<Reaction>> loadReactionDetails(ReactionBar.Item item, boolean bypassCache) {
         var service = ServiceFactory.getForFullPagedLists(ReactionService.class, bypassCache);
         return ApiHelpers.PageIterator
-                .toSingle(page -> service.getIssueReactions(mRepoOwner, mRepoName, mIssue.number(), page));
+                .toSingle(page -> service.getIssueReactions(mRepoOwner, mRepoName, ApiHelpers.orZero(mIssue.number()), page));
     }
 
     @Override
@@ -641,7 +648,7 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     public Single<Reaction> addReaction(ReactionBar.Item item, String content) {
         ReactionService service = ServiceFactory.get(ReactionService.class, false);
         ReactionRequest request = ReactionRequest.builder().content(content).build();
-        return service.createIssueReaction(mRepoOwner, mRepoName, mIssue.number(), request)
+        return service.createIssueReaction(mRepoOwner, mRepoName, ApiHelpers.orZero(mIssue.number()), request)
                 .map(ApiHelpers::throwOnFailure)
                 .compose(RxUtils.wrapWithErrorSnackbar(getBaseActivity(), R.string.add_reaction_error));
     }
@@ -649,7 +656,7 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     @Override
     public Single<Boolean> deleteReaction(ReactionBar.Item item, long reactionId) {
         ReactionService service = ServiceFactory.get(ReactionService.class, false);
-        return service.deleteIssueReaction(mRepoOwner, mRepoName, mIssue.number(), reactionId)
+        return service.deleteIssueReaction(mRepoOwner, mRepoName, ApiHelpers.orZero(mIssue.number()), reactionId)
                 .map(ApiHelpers::mapToTrueOnSuccess)
                 .compose(RxUtils.wrapWithErrorSnackbar(getBaseActivity(), R.string.remove_reaction_error));
     }
@@ -659,14 +666,14 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
             boolean bypassCache) {
         var service = ServiceFactory.getForFullPagedLists(ReactionService.class, bypassCache);
         return ApiHelpers.PageIterator
-                .toSingle(page -> service.getIssueCommentReactions(mRepoOwner, mRepoName, comment.id(), page));
+                .toSingle(page -> service.getIssueCommentReactions(mRepoOwner, mRepoName, ApiHelpers.orZero(comment.id()), page));
     }
 
     @Override
     public Single<Reaction> addReaction(GitHubCommentBase comment, String content) {
         ReactionService service = ServiceFactory.get(ReactionService.class, false);
         ReactionRequest request = ReactionRequest.builder().content(content).build();
-        return service.createIssueCommentReaction(mRepoOwner, mRepoName, comment.id(), request)
+        return service.createIssueCommentReaction(mRepoOwner, mRepoName, ApiHelpers.orZero(comment.id()), request)
                 .map(ApiHelpers::throwOnFailure)
                 .compose(RxUtils.wrapWithErrorSnackbar(getBaseActivity(), R.string.add_reaction_error));
     }
@@ -674,7 +681,7 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     @Override
     public Single<Boolean> deleteReaction(GitHubCommentBase comment, long reactionId) {
         ReactionService service = ServiceFactory.get(ReactionService.class, false);
-        return service.deleteIssueCommentReaction(mRepoOwner, mRepoName, comment.id(), reactionId)
+        return service.deleteIssueCommentReaction(mRepoOwner, mRepoName, ApiHelpers.orZero(comment.id()), reactionId)
                 .map(ApiHelpers::mapToTrueOnSuccess)
                 .compose(RxUtils.wrapWithErrorSnackbar(getBaseActivity(), R.string.remove_reaction_error));
     }
@@ -688,7 +695,11 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
         }
         if (mReactionMenuHelper != null) {
             mReactionMenuHelper.updateMenuItems();
-            getActivity().invalidateOptionsMenu();
+            // 127：异步回调（onReactionsUpdated）时 Activity 可能已为空
+            Activity activity = getActivity();
+            if (activity != null) {
+                activity.invalidateOptionsMenu();
+            }
         }
     }
 
@@ -719,7 +730,7 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     public Single<?> onEditorDoSend(String comment) {
         IssueCommentService service = ServiceFactory.get(IssueCommentService.class, false);
         CommentRequest request = CommentRequest.builder().body(comment).build();
-        return service.createIssueComment(mRepoOwner, mRepoName, mIssue.number(), request)
+        return service.createIssueComment(mRepoOwner, mRepoName, ApiHelpers.orZero(mIssue.number()), request)
                 .map(ApiHelpers::throwOnFailure);
     }
 
@@ -729,7 +740,11 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
         if (isAdded()) {
             reloadEvents(false);
         }
-        getActivity().setResult(Activity.RESULT_OK);
+        // 127：编辑器回调时 Activity 可能已为空
+        Activity activity = getActivity();
+        if (activity != null) {
+            activity.setResult(Activity.RESULT_OK);
+        }
     }
 
     @Override
@@ -789,7 +804,11 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
                         R.string.deleting_msg, R.string.error_delete_comment))
                 .subscribe(result -> {
                     reloadEvents(false);
-                    getActivity().setResult(Activity.RESULT_OK);
+                    // 127：删除回调返回时 Fragment 可能已 detach
+                    Activity activity = getActivity();
+                    if (activity != null) {
+                        activity.setResult(Activity.RESULT_OK);
+                    }
                 }, error -> handleActionFailure("Deleting comment failed", error));
     }
 }

@@ -111,11 +111,11 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
                 renderItems(cached);
                 setContentShown(true);
                 updateEmptyState();
-                setStage("显示缓存数据，后台刷新中…");
+                setStage(getString(R.string.radar_stage_cache_refreshing));
             } else {
                 setContentShown(true);
                 updateEmptyState();
-                setStage("正在加载…");
+                setStage(getString(R.string.loading_msg));
             }
             startDirectLoad(false);
         }
@@ -163,7 +163,7 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
             }
             setContentShown(true);
             updateEmptyState();
-            setStage("正在加载…");
+            setStage(getString(R.string.loading_msg));
         }
         mDirectLoad = RxUtils.doInBackground(RadarGraphQL.fetch(mLogin))
                 // A single request now; 30s is plenty, then surface the error.
@@ -223,7 +223,7 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
         if (mAdapter.getItemCount() > 0 || getContext() == null) {
             return;
         }
-        String msg = "Star 的仓库最近没有新版本";
+        String msg = getString(R.string.no_release_radar_items);
         Toast.makeText(getContext(), msg, Toast.LENGTH_LONG).show();
         setStage(msg);
     }
@@ -239,7 +239,7 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
             Log.d(Gh4Application.LOG_TAG, "Radar refresh failed", error);
             mShowingCache = false;
             if (getContext() != null) {
-                Toast.makeText(getContext(), "刷新失败，显示的是缓存数据",
+                Toast.makeText(getContext(), R.string.radar_stage_refresh_failed_cache,
                         Toast.LENGTH_SHORT).show();
             }
         } else {
@@ -248,11 +248,13 @@ public class ReleaseRadarFragment extends ListDataBaseFragment<ReleaseRadarFragm
             String msg = error.getClass().getSimpleName()
                     + (error.getMessage() != null ? ": " + error.getMessage() : "");
             if (getContext() != null) {
-                Toast.makeText(getContext(), "加载失败 " + msg, Toast.LENGTH_LONG).show();
+                Toast.makeText(getContext(),
+                        getString(R.string.radar_stage_load_failed, msg),
+                        Toast.LENGTH_LONG).show();
             }
             // Stamp the error on the empty view too: a Toast can be missed,
             // this stays until the next load.
-            setStage("加载失败 " + msg);
+            setStage(getString(R.string.radar_stage_load_failed, msg));
             handleLoadFailure(error);
         }
     }

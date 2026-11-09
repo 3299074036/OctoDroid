@@ -287,10 +287,9 @@ public class Github4AndroidActivity extends BaseActivity implements
         // of letting the user believe it is encrypted.
         if (Gh4Application.get().isSecurePrefsPlainFallback()) {
             new androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle("注意：令牌未加密存储")
-                    .setMessage("本设备加密存储不可用，本次登录的 GitHub 令牌已存入未加密文件。"
-                            + "换一台加密存储正常的设备重新登录后，该明文文件会自动迁移并删除。")
-                    .setPositiveButton("知道了", (d, w) -> {
+                    .setTitle(R.string.login_token_plaintext_title)
+                    .setMessage(R.string.login_token_plaintext_message)
+                    .setPositiveButton(R.string.dialog_acknowledged, (d, w) -> {
                         goToToplevelActivity();
                         finish();
                     })

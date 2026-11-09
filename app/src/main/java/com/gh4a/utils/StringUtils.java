@@ -69,6 +69,17 @@ public class StringUtils {
     }
 
     /**
+     * 117：commit SHA 截前 7 位的守卫版——sha 可空、可短于 7 位，
+     * 直接 substring(0, 7) 即 NPE/StringIndexOutOfBoundsException。
+     */
+    public static String shortSha(String sha) {
+        if (sha == null) {
+            return "";
+        }
+        return sha.length() > 7 ? sha.substring(0, 7) : sha;
+    }
+
+    /**
      * Format name.
      *
      * @param userLogin the user login
@@ -109,6 +120,10 @@ public class StringUtils {
     }
 
     public static SpannableStringBuilder applyBoldTags(String input) {
+        // 137：入参可空（6 处调用点未逐一核实是否可空），直接 indexOf 即 NPE
+        if (input == null) {
+            return new SpannableStringBuilder();
+        }
         SpannableStringBuilder ssb = new SpannableStringBuilder();
         int pos = 0;
 
@@ -154,6 +169,10 @@ public class StringUtils {
 
     @Nullable
     public static int[] findMatchingLines(String input, String match) {
+        // 135：TextMatch.fragment() 可空，input.indexOf(null) 即 NPE
+        if (input == null || match == null) {
+            return null;
+        }
         int pos = input.indexOf(match);
         if (pos < 0) {
             return null;
@@ -171,9 +190,15 @@ public class StringUtils {
 
         Matcher matcher = HUNK_START_PATTERN.matcher(diffHunk);
         if (matcher.matches()) {
-            int leftLine = Integer.parseInt(matcher.group(1)) - 1;
-            int rightLine = Integer.parseInt(matcher.group(2)) - 1;
-            return new int[] { leftLine, rightLine };
+            // 112：超大行号 hunk 头的 parseInt 抛 NumberFormatException，
+            // 调用点均未捕获；解析失败返回 null（无行号信息）。
+            try {
+                int leftLine = Integer.parseInt(matcher.group(1)) - 1;
+                int rightLine = Integer.parseInt(matcher.group(2)) - 1;
+                return new int[] { leftLine, rightLine };
+            } catch (NumberFormatException e) {
+                return null;
+            }
         }
 
         return null;

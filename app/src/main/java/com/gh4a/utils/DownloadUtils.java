@@ -242,9 +242,34 @@ public class DownloadUtils {
      * 下载完成通知改为仅下载中显示——校验通过后由应用自己发完成通知，
      * 否则用户一点系统通知就装上还没验过签名的 APK。{@code notifyOnComplete}
      * 为 false 时不发通知（自更新有自己的安装提示，见 ApkUpdateDownloader）。
+     * <p>
+     * P7：带回调的重载——调用方以异步签名结论为准处置（删文件/提示/放行
+     * 安装）时传 callback；此时本方法不做自己的签名 UI 处置（不删文件、
+     * 不弹签名 toast），只在 MATCH 且要求时发完成通知，避免同一份结论
+     * 两处各处置一次（旧自更新路径同步判 + 异步判各弹一次 mismatch toast）。
+     * callback 在主线程回调，check 为 null 表示非 APK（无签名结论）。
      */
+    public interface ApkSignatureCheckCallback {
+        void onSignatureChecked(ApkUpdateDownloader.ApkSignatureCheck check);
+    }
+
     public static void verifyDownloadedFile(Context context, File file, long downloadId,
             boolean notifyOnComplete) {
+        verifyDownloadedFile(context, file, downloadId, notifyOnComplete, null);
+    }
+
+    public static void verifyDownloadedFile(Context context, File file, long downloadId,
+            boolean notifyOnComplete, ApkSignatureCheckCallback callback) {
+        verifyDownloadedFile(context, file, downloadId, notifyOnComplete, callback, null);
+    }
+
+    /**
+     * 带期望包名的重载：expectedPackage 非空时签名校验还要求 APK 包名
+     * 等于它（自更新用：只接受自己的包，见 ApkUpdateDownloader L-3）。
+     */
+    public static void verifyDownloadedFile(Context context, File file, long downloadId,
+            boolean notifyOnComplete, ApkSignatureCheckCallback callback,
+            String expectedPackage) {
         final Context appContext = context.getApplicationContext();
         final Handler handler = new Handler(Looper.getMainLooper());
         DownloadRecordManager.setVerifying(downloadId, true);
@@ -255,10 +280,23 @@ public class DownloadUtils {
             final boolean isApk = file.getName().toLowerCase(java.util.Locale.US)
                     .endsWith(".apk");
             final ApkUpdateDownloader.ApkSignatureCheck check = isApk
-                    ? ApkUpdateDownloader.checkDownloadedApkSignature(appContext, file)
+                    ? (expectedPackage != null
+                            ? ApkUpdateDownloader.checkDownloadedApkSignature(
+                                    appContext, file, expectedPackage)
+                            : ApkUpdateDownloader.checkDownloadedApkSignature(
+                                    appContext, file))
                     : null;
             handler.post(() -> {
                 DownloadRecordManager.setVerifying(downloadId, false);
+                if (callback != null) {
+                    // P7：结论交给调用方全权处置，这里只发完成通知。
+                    if (check == ApkUpdateDownloader.ApkSignatureCheck.MATCH
+                            && notifyOnComplete) {
+                        notifyDownloadComplete(appContext, file, downloadId);
+                    }
+                    callback.onSignatureChecked(check);
+                    return;
+                }
                 if (check == ApkUpdateDownloader.ApkSignatureCheck.MISMATCH) {
                     // 签名与已安装的同包名应用不一致：可能是投毒／冒名包，删掉。
                     file.delete();

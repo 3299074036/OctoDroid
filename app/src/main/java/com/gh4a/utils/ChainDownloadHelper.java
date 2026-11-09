@@ -48,6 +48,20 @@ public class ChainDownloadHelper {
                 fileName, description, customizer, callback);
     }
 
+    /** 92：DM 永不广播时（如任务被外部删除）receiver 会永久挂在 application
+     * context 上。登记所有待处理 receiver，下次入队时把对应下载已不存在的反注册掉。 */
+    private static final List<PendingReceiver> sPendingReceivers = new ArrayList<>();
+
+    private static final class PendingReceiver {
+        final BroadcastReceiver receiver;
+        final long downloadId;
+
+        PendingReceiver(BroadcastReceiver receiver, long downloadId) {
+            this.receiver = receiver;
+            this.downloadId = downloadId;
+        }
+    }
+
     private static void enqueueNext(final Context context, final List<String> urls,
             final String fileName, final String description,
             final RequestCustomizer customizer, final Callback callback) {
@@ -55,6 +69,16 @@ public class ChainDownloadHelper {
         final List<String> rest = new ArrayList<>(urls.subList(1, urls.size()));
         final DownloadManager dm =
                 (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        // 90：外置存储未挂载时 getExternalFilesDir() 返回 null，
+        // setDestinationInExternalFilesDir 直接抛 IllegalStateException（主线程崩溃）。
+        if (dm == null
+                || context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) == null) {
+            Toast.makeText(context, R.string.download_failed, Toast.LENGTH_SHORT).show();
+            callback.onDownloadComplete(context, false, null, -1);
+            return;
+        }
+        // 92：先清理上轮残留的 receiver（对应下载已不在 DM 里）。
+        pruneStaleReceivers(context, dm);
         // 文件名来自网络：先 sanitize，防止路径穿越写到 Downloads 之外 (L-2)
         final String safeName = FileUtils.sanitizeFileName(fileName);
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
@@ -87,6 +111,7 @@ public class ChainDownloadHelper {
                     return;
                 }
                 ctx.unregisterReceiver(this);
+                removePendingReceiver(downloadId);
                 resolveResult(ctx, dm, downloadId, rest,
                         fileName, description, customizer, callback);
             }
@@ -97,6 +122,43 @@ public class ChainDownloadHelper {
         ContextCompat.registerReceiver(context, receiver,
                 new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
+        synchronized (sPendingReceivers) {
+            sPendingReceivers.add(new PendingReceiver(receiver, downloadId));
+        }
+    }
+
+    /** 92：反注册对应下载已不在 DownloadManager 里的旧 receiver。 */
+    private static void pruneStaleReceivers(Context context, DownloadManager dm) {
+        synchronized (sPendingReceivers) {
+            for (int i = sPendingReceivers.size() - 1; i >= 0; i--) {
+                PendingReceiver pending = sPendingReceivers.get(i);
+                boolean gone = false;
+                try (Cursor cursor = dm.query(new DownloadManager.Query()
+                        .setFilterById(pending.downloadId))) {
+                    gone = !cursor.moveToFirst();
+                } catch (Exception ignored) {
+                    // 查不到状态时不动它，等下次入队再试
+                }
+                if (gone) {
+                    try {
+                        context.unregisterReceiver(pending.receiver);
+                    } catch (IllegalArgumentException ignored) {
+                        // 已反注册过
+                    }
+                    sPendingReceivers.remove(i);
+                }
+            }
+        }
+    }
+
+    private static void removePendingReceiver(long downloadId) {
+        synchronized (sPendingReceivers) {
+            for (int i = sPendingReceivers.size() - 1; i >= 0; i--) {
+                if (sPendingReceivers.get(i).downloadId == downloadId) {
+                    sPendingReceivers.remove(i);
+                }
+            }
+        }
     }
 
     private static void resolveResult(Context context, DownloadManager dm, long downloadId,
@@ -123,6 +185,9 @@ public class ChainDownloadHelper {
         if (file != null) {
             callback.onDownloadComplete(context, true, file, downloadId);
         } else if (!rest.isEmpty()) {
+            // 91：失败链路的记录是死记录（重试成功后列表里多一条 FAILED），重试前删掉；
+            // 只有最后一条链路失败时才保留 FAILED 记录。
+            DownloadRecordManager.remove(context, downloadId);
             Toast.makeText(context, R.string.download_retry_alt, Toast.LENGTH_SHORT).show();
             enqueueNext(context, rest, fileName, description, customizer, callback);
         } else {

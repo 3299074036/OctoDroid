@@ -733,13 +733,24 @@ public class IssueEditActivity extends BasePagerActivity implements
                 content = matcher.group(6);
                 for (String line : matcher.group(2).split("\n")) {
                     int colonPos = line.indexOf(": ");
-                    if (colonPos > 0) {
+                    // 113：`name: `（空值）时 charAt(colonPos + 2) 越界；
+                    // `name: "` 时 substring 起止倒置。长度不够直接跳过该行。
+                    if (colonPos > 0 && line.length() > colonPos + 2) {
                         String key = line.substring(0, colonPos);
-                        boolean isQuoted = line.charAt(colonPos + 2) == '"'
-                                || line.charAt(colonPos + 2) == '\'';
-                        String value = isQuoted
-                                ? line.substring(colonPos + 3, line.length() - 1)
-                                : line.substring(colonPos + 2);
+                        char quoteChar = line.charAt(colonPos + 2);
+                        boolean isQuoted = quoteChar == '"' || quoteChar == '\'';
+                        String value;
+                        if (isQuoted) {
+                            // 有闭合引号才去两端引号，否则只去开引号、不截尾字符
+                            if (line.length() > colonPos + 3
+                                    && line.charAt(line.length() - 1) == quoteChar) {
+                                value = line.substring(colonPos + 3, line.length() - 1);
+                            } else {
+                                value = line.substring(colonPos + 3);
+                            }
+                        } else {
+                            value = line.substring(colonPos + 2);
+                        }
                         switch (key) {
                             case "name": name = value; break;
                             case "about": description = value; break;

@@ -345,6 +345,24 @@ public abstract class WebViewerActivity extends BaseActivity implements
         }
     }
 
+    /**
+     * 148：把值转义成可安全拼进单引号 JS 字符串字面量的形式（\、'、回车、
+     * 换行、</ 逐项转义），与 Wiki 路径 wrapWithMarkdownStyling 的内联
+     * 转义同款。分支名/文件夹名可含 '，不转义即可突破字符串执行任意 JS。
+     * null 按空串处理。
+     */
+    private static String escapeJsSingleQuoted(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+                .replace("</", "<\\/");
+    }
+
     protected String generateMarkdownHtml(String base64Data,
             String repoOwner, String repoName, String ref, String folderPath,
             String cssTheme, boolean addTitleHeader) {
@@ -375,7 +393,8 @@ public abstract class WebViewerActivity extends BaseActivity implements
         if (repoOwner != null && repoName != null) {
             String actualRef = ref == null ? "master" : ref;
             content.append(String.format("html = HtmlUtils.rewriteRelativeUrls(html, '%s', '%s', '%s', '%s');\n",
-                    repoOwner, repoName, actualRef, folderPath));
+                    escapeJsSingleQuoted(repoOwner), escapeJsSingleQuoted(repoName),
+                    escapeJsSingleQuoted(actualRef), escapeJsSingleQuoted(folderPath)));
         }
         // SEC-13: sanitize showdown output before innerHTML — attacker
         // markdown may carry raw HTML. Drops script/style/iframe/object/

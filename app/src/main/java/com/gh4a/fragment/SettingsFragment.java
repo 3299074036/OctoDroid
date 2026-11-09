@@ -455,15 +455,20 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             }
             final boolean result = ok;
             if (isAdded()) {
-                getActivity().runOnUiThread(() -> {
-                    android.widget.Toast.makeText(getActivity(),
-                            result ? R.string.restore_success : R.string.restore_failed,
-                            android.widget.Toast.LENGTH_LONG).show();
-                    // 恢复成功后刷新当前界面主题（深色模式切换时已有此先例）
-                    if (result && mListener != null) {
-                        mListener.onThemeChanged();
-                    }
-                });
+                // 125：isAdded() 判完、lambda 执行前仍可能 detach，
+                // getActivity() 进 lambda 前取局部变量
+                final android.app.Activity activity = getActivity();
+                if (activity != null) {
+                    activity.runOnUiThread(() -> {
+                        android.widget.Toast.makeText(activity,
+                                result ? R.string.restore_success : R.string.restore_failed,
+                                android.widget.Toast.LENGTH_LONG).show();
+                        // 恢复成功后刷新当前界面主题（深色模式切换时已有此先例）
+                        if (result && mListener != null) {
+                            mListener.onThemeChanged();
+                        }
+                    });
+                }
             }
         }).start();
     }
@@ -472,8 +477,13 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         if (!isAdded()) {
             return;
         }
-        getActivity().runOnUiThread(() -> android.widget.Toast.makeText(
-                getActivity(), message, android.widget.Toast.LENGTH_LONG).show());
+        // 125：同款 TOCTOU——isAdded() 判完、lambda 执行前仍可能 detach
+        final android.app.Activity activity = getActivity();
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(() -> android.widget.Toast.makeText(
+                activity, message, android.widget.Toast.LENGTH_LONG).show());
     }
 
     @Override

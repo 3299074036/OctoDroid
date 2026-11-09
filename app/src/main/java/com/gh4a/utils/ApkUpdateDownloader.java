@@ -66,18 +66,28 @@ public class ApkUpdateDownloader {
                         }
                         // 62：自更新同样走 verifyDownloadedFile 补记大小/SHA-256
                         // （不另发完成通知：自更新有自己的安装提示）。
-                        // 签名门仍在回调里同步判（不等异步校验），通过才放行安装。
-                        DownloadUtils.verifyDownloadedFile(ctx, file, downloadId, false);
-                        // 自更新安全门：APK 签名必须与当前已安装应用一致，
-                        // 否则可能是镜像站被投毒，拒绝安装并删除文件 (L-3)
-                        if (!isSignatureMatch(ctx, file)) {
-                            Toast.makeText(ctx, R.string.apk_signature_mismatch,
-                                    Toast.LENGTH_LONG).show();
-                            file.delete();
-                            DownloadRecordManager.remove(ctx, downloadId);
-                            return;
-                        }
-                        installApk(ctx, file);
+                        // P7（处方一：以异步结论为准）：原先这里紧接着同步调
+                        // isSignatureMatch——回调跑在 BroadcastReceiver
+                        // onReceive（主线程），getPackageArchiveInfo 对
+                        // 10–50MB 的 APK 做文件 IO + 签名解析全在主线程，
+                        // 且与 verify 里的异步校验重复。现改为等异步结论：
+                        // MATCH 才放行安装；MISMATCH/NOT_INSTALLED 按原
+                        // 同步分支同样删文件、清记录、提示签名不一致（自更
+                        // 新包名必为已安装的自己，NOT_INSTALLED 在此同样
+                        // 视为不一致，与原行为一致）。安装提示仍在校验结论
+                        // 之后出现、顺序不变，只是不再卡主线程；另旧路径同
+                        // 一份 MISMATCH 会同步、异步各弹一次 toast，现只弹一次。
+                        DownloadUtils.verifyDownloadedFile(ctx, file, downloadId, false,
+                                check -> {
+                                    if (check != ApkSignatureCheck.MATCH) {
+                                        Toast.makeText(ctx, R.string.apk_signature_mismatch,
+                                                Toast.LENGTH_LONG).show();
+                                        file.delete();
+                                        DownloadRecordManager.remove(ctx, downloadId);
+                                        return;
+                                    }
+                                    installApk(ctx, file);
+                                }, ctx.getPackageName());
                     });
         };
         // 0.2.2（S-M5）：下载改落应用私有目录，不再需要 WRITE_EXTERNAL_STORAGE，
@@ -106,16 +116,6 @@ public class ApkUpdateDownloader {
         return url != null && url.regionMatches(true, 0, "https://", 0, 8);
     }
 
-    /**
-     * 校验下载到的 APK 签名证书与当前已安装应用一致。
-     * API 28+ 用 signingInfo，低版本用 signatures，兼容 targetSdk 33 (L-3)。
-     * 自更新只接受自己的包：先核对包名，再核对签名。
-     */
-    private static boolean isSignatureMatch(Context context, File apkFile) {
-        return checkApkSignature(context, apkFile, context.getPackageName())
-                == ApkSignatureCheck.MATCH;
-    }
-
     /** 下载到的 APK 的签名校验结果（S-M1，供 Release 附件下载复用）。 */
     public enum ApkSignatureCheck {
         /** 与已安装的同包名应用签名一致。 */
@@ -133,6 +133,16 @@ public class ApkUpdateDownloader {
      */
     public static ApkSignatureCheck checkDownloadedApkSignature(Context context, File apkFile) {
         return checkApkSignature(context, apkFile, null);
+    }
+
+    /**
+     * 带期望包名的校验：expectedPackage 非空时还要求 APK 包名等于它
+     * （自更新只接受自己的包，L-3；P7 异步结论即走此口径，与原同步
+     * isSignatureMatch 的判定一致）。
+     */
+    public static ApkSignatureCheck checkDownloadedApkSignature(Context context, File apkFile,
+            String expectedPackage) {
+        return checkApkSignature(context, apkFile, expectedPackage);
     }
 
     private static ApkSignatureCheck checkApkSignature(Context context, File apkFile,

@@ -26,8 +26,10 @@ import com.gh4a.fragment.SettingsFragment;
 import com.gh4a.utils.MirrorHelper;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -39,8 +41,23 @@ import java.util.Set;
 public class MirrorSourceActivity extends BaseActivity {
     private static final int MENU_BATCH = 1;
 
+    // P9：旋转保存/恢复用的 Bundle 键（编辑态、批量态、上轮测速结果）。
+    private static final String KEY_BATCH_MODE = "mirror_batch_mode";
+    private static final String KEY_CHECKED = "mirror_checked";
+    private static final String KEY_EDITING_IS_NEW = "mirror_editing_is_new";
+    private static final String KEY_EDITING_OLD_URL = "mirror_editing_old_url";
+    private static final String KEY_TEST_DONE = "mirror_test_done";
+    private static final String KEY_DONE_URLS = "mirror_done_urls";
+    private static final String KEY_ITEM_URLS = "mirror_item_urls";
+    private static final String KEY_ITEM_LATENCIES = "mirror_item_latencies";
+    private static final String KEY_ADD_CARD_OPEN = "mirror_add_card_open";
+    private static final String KEY_ADD_CARD_TEXT = "mirror_add_card_text";
+
     private SharedPreferences mPrefs;
     private MirrorHelper.SpeedTestHandle mSpeedTestHandle;
+    // 0.2.4（94）：测速轮次计数——旧轮回调只能清掉自己那轮的句柄（见
+    // startSpeedTest 里 onAllComplete 的比对），新一轮的句柄不再被旧回调置空。
+    private int mSpeedTestGeneration;
     private final List<MirrorHelper.MirrorSpeedResult> mItems = new ArrayList<>();
     private final Set<String> mDoneUrls = new HashSet<>();
     private MirrorManageAdapter mAdapter;
@@ -145,7 +162,130 @@ public class MirrorSourceActivity extends BaseActivity {
         findViewById(R.id.batch_cancel).setOnClickListener(v -> exitBatchMode());
         mBatchDeleteBtn.setOnClickListener(v -> askBatchDelete());
 
-        refreshAndRetest();
+        // P9：旋转后复用上轮测速结果 + 编辑态，不无条件重跑全部探测
+        // （原先 onCreate 无条件 refreshAndRetest，71 条镜像每转一次
+        // 就重新并行探测一轮，编辑中的输入卡片/批量勾选也全丢）。
+        if (savedInstanceState != null) {
+            restoreFromSavedState(savedInstanceState);
+        } else {
+            refreshAndRetest();
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        // P9：存编辑态（新增/修改 + 旧地址 + 输入框文字）、批量态
+        // （批量模式 + 已勾选）、上轮测速结果（每条延迟 + 已测完集合
+        // + 是否整轮测完）。mCurrentValue/mUserPicked 已落 prefs，不用存。
+        outState.putBoolean(KEY_BATCH_MODE, mBatchMode);
+        outState.putStringArrayList(KEY_CHECKED, new ArrayList<>(mChecked));
+        outState.putBoolean(KEY_EDITING_IS_NEW, mEditingIsNew);
+        outState.putString(KEY_EDITING_OLD_URL, mEditingOldUrl);
+        outState.putBoolean(KEY_TEST_DONE, mTestDone);
+        outState.putStringArrayList(KEY_DONE_URLS, new ArrayList<>(mDoneUrls));
+        ArrayList<String> urls = new ArrayList<>();
+        long[] latencies = new long[mItems.size()];
+        for (int i = 0; i < mItems.size(); i++) {
+            urls.add(mItems.get(i).url);
+            latencies[i] = mItems.get(i).latencyMs;
+        }
+        outState.putStringArrayList(KEY_ITEM_URLS, urls);
+        outState.putLongArray(KEY_ITEM_LATENCIES, latencies);
+        outState.putBoolean(KEY_ADD_CARD_OPEN, isAddCardOpen());
+        outState.putString(KEY_ADD_CARD_TEXT,
+                mUrlInput != null ? mUrlInput.getText().toString() : "");
+    }
+
+    /**
+     * P9：旋转后恢复——列表按保存的延迟重建（先取保存值，缺失再取
+     * 持久化测速缓存），测完的上轮不再重跑探测；编辑卡片与批量勾选
+     * 原样恢复。注意：不走 refreshAndRetest（它会 collapseAddCard
+     * 并清掉编辑态），也不碰 94 号的测速句柄守卫行。
+     */
+    private void restoreFromSavedState(Bundle state) {
+        mBatchMode = state.getBoolean(KEY_BATCH_MODE, false);
+        ArrayList<String> checked = state.getStringArrayList(KEY_CHECKED);
+        mChecked.clear();
+        if (checked != null) {
+            mChecked.addAll(checked);
+        }
+        mEditingIsNew = state.getBoolean(KEY_EDITING_IS_NEW, true);
+        mEditingOldUrl = state.getString(KEY_EDITING_OLD_URL);
+        mTestDone = state.getBoolean(KEY_TEST_DONE, false);
+        ArrayList<String> done = state.getStringArrayList(KEY_DONE_URLS);
+        mDoneUrls.clear();
+        if (done != null) {
+            mDoneUrls.addAll(done);
+        }
+        ArrayList<String> urls = state.getStringArrayList(KEY_ITEM_URLS);
+        long[] latencies = state.getLongArray(KEY_ITEM_LATENCIES);
+        Map<String, Long> saved = new HashMap<>();
+        if (urls != null && latencies != null) {
+            for (int i = 0; i < urls.size() && i < latencies.length; i++) {
+                saved.put(urls.get(i), latencies[i]);
+            }
+        }
+        Map<String, Long> cached = MirrorHelper.getCachedSpeedResults(this);
+        mItems.clear();
+        for (MirrorHelper.MirrorSpeedResult t : MirrorHelper.getSpeedTestTargets(this)) {
+            Long latency = saved.get(t.url);
+            if (latency == null) {
+                latency = cached.get(t.url);
+            }
+            mItems.add(latency != null
+                    ? new MirrorHelper.MirrorSpeedResult(t.name, t.url, t.presetValue, latency)
+                    : t);
+        }
+        if (!saved.isEmpty() || !cached.isEmpty()) {
+            sortByLatency(mItems);
+        }
+        updateCurrentLine();
+        mAdapter.notifyDataSetChanged();
+        updateStatsBar();
+        if (mItems.isEmpty()) {
+            mListView.setVisibility(View.GONE);
+            mEmptyHint.setVisibility(View.VISIBLE);
+            mAutoSubtitle.setText("");
+        } else {
+            mListView.setVisibility(View.VISIBLE);
+            mEmptyHint.setVisibility(View.GONE);
+            if (mTestDone) {
+                // 上轮已测完：复用结果，不重跑探测；副标题口径与 finishTest 一致。
+                boolean hasOk = false;
+                for (MirrorHelper.MirrorSpeedResult r : mItems) {
+                    if (r.isOk()) {
+                        hasOk = true;
+                        break;
+                    }
+                }
+                if (!mUserPicked && hasOk) {
+                    mAutoSubtitle.setText(R.string.mirror_manage_auto_selected);
+                } else if (mUserPicked) {
+                    mAutoSubtitle.setText(R.string.mirror_manual_subtitle);
+                } else {
+                    mAutoSubtitle.setText("");
+                }
+            } else {
+                // 测速中途旋转：已测完的保留结果，未测完的重跑本轮探测
+                // （startSpeedTest 仍按整轮探测，见汇报残留说明）。
+                mAutoSubtitle.setText(R.string.mirror_manage_testing);
+                startSpeedTest();
+            }
+        }
+        if (mBatchMode) {
+            mBatchBar.setVisibility(View.VISIBLE);
+            updateBatchBar();
+        }
+        if (state.getBoolean(KEY_ADD_CARD_OPEN, false)) {
+            mAddTitle.setText(mEditingIsNew
+                    ? R.string.mirror_add : R.string.me_mirror_edit);
+            String text = state.getString(KEY_ADD_CARD_TEXT, "");
+            mUrlInput.setText(text);
+            mUrlInput.setSelection(mUrlInput.getText().length());
+            mAddCard.setVisibility(View.VISIBLE);
+        }
+        invalidateOptionsMenu();
     }
 
     @Override
@@ -352,6 +492,11 @@ public class MirrorSourceActivity extends BaseActivity {
     private void startSpeedTest() {
         final List<MirrorHelper.MirrorSpeedResult> probes =
                 new ArrayList<>(mItems);
+        // 0.2.4（94）：本轮的代数——回调里只认自己这代，旧轮的 onAllComplete
+        // 哪怕晚到，也只跳过置空，不会把新一轮的句柄清掉（之后 onDestroy
+        // 的 cancelSpeedTest 才能取消到新测速，也不会两轮并发重跑）。
+        mSpeedTestGeneration++;
+        final int generation = mSpeedTestGeneration;
         mSpeedTestHandle = MirrorHelper.testAllMirrorsSpeed(this, probes,
                 new MirrorHelper.SpeedTestCallback() {
                     @Override
@@ -374,7 +519,12 @@ public class MirrorSourceActivity extends BaseActivity {
 
                     @Override
                     public void onAllComplete() {
-                        mSpeedTestHandle = null;
+                        // 0.2.4（94）：只在当前句柄仍是本轮句柄时才置空——
+                        // 旧轮回调晚到时 mSpeedTestGeneration 已加一，直接
+                        // 跳过置空（新一轮的句柄留给 cancelSpeedTest 取消）。
+                        if (generation == mSpeedTestGeneration) {
+                            mSpeedTestHandle = null;
+                        }
                         if (isFinishing() || isDestroyed()) {
                             return;
                         }
@@ -524,6 +674,13 @@ public class MirrorSourceActivity extends BaseActivity {
         String url = MirrorHelper.normalizeUrl(mUrlInput.getText().toString());
         if (url.isEmpty()
                 || !url.regionMatches(true, 0, "https://", 0, 8)) {
+            Toast.makeText(this, R.string.mirror_custom_url_invalid,
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        // 93：只验 https:// 前缀不够——回环地址会在 add/update 里静默拒写，
+        // UI 却 toast“已添加”。这里用集中校验先拦住。
+        if (!MirrorHelper.isValidMirrorUrl(url)) {
             Toast.makeText(this, R.string.mirror_custom_url_invalid,
                     Toast.LENGTH_LONG).show();
             return;

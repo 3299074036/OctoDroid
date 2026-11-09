@@ -161,7 +161,14 @@ public class FileViewerActivity extends WebViewerActivity
             return generateMarkdownHtml(base64Data,
                     mRepoOwner, mRepoName, mRef, folderPath, cssTheme, addTitleHeader);
         } else {
-            String data = base64Data != null ? StringUtils.fromBase64(base64Data) : "";
+            // 114：非法 Base64 时 fromBase64 抛 IllegalArgumentException，
+            // 不捕获即整页加载失败；解码失败显示空内容。
+            String data;
+            try {
+                data = base64Data != null ? StringUtils.fromBase64(base64Data) : "";
+            } catch (IllegalArgumentException e) {
+                data = "";
+            }
             findMatchingLines(data);
             return generateCodeHtml(data, mPath,
                     mHighlightStart, mHighlightEnd, cssTheme, addTitleHeader);
@@ -196,8 +203,30 @@ public class FileViewerActivity extends WebViewerActivity
         if (base64Data == null) {
             return false;
         }
-        byte[] decodedData = Base64.decode(base64Data, Base64.DEFAULT);
-        Bitmap bitmap = BitmapFactory.decodeByteArray(decodedData, 0, decodedData.length);
+        // 114：非法 Base64 不崩溃；解码失败/空位图直接不打印；
+        // 大图先下采样到 2048 边长再打印（与 ImageViewerActivity 同款上限）。
+        byte[] decodedData;
+        try {
+            decodedData = Base64.decode(base64Data, Base64.DEFAULT);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(decodedData, 0, decodedData.length, bounds);
+        int inSampleSize = 1;
+        while (bounds.outWidth / (inSampleSize * 2) >= 2048
+                || bounds.outHeight / (inSampleSize * 2) >= 2048) {
+            inSampleSize *= 2;
+        }
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = inSampleSize;
+        options.inPreferredConfig = Bitmap.Config.RGB_565;
+        Bitmap bitmap = BitmapFactory.decodeByteArray(decodedData, 0, decodedData.length,
+                options);
+        if (bitmap == null) {
+            return false;
+        }
 
         PrintHelper printHelper = new PrintHelper(this);
         printHelper.setScaleMode(PrintHelper.SCALE_MODE_FIT);

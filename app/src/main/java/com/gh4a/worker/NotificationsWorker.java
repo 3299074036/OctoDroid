@@ -202,7 +202,9 @@ public class NotificationsWorker extends Worker {
 
             for (List<NotificationThread> list : notifsGroupedByRepo) {
                 for (NotificationThread n : list) {
-                    long timestamp = n.updatedAt().getTime();
+                    // 106：updatedAt() 可空（SingleFactory 的比较器已按可空处理，
+                    // Worker 侧三处直接 getTime() 即 NPE），null 按 0 计
+                    long timestamp = n.updatedAt() != null ? n.updatedAt().getTime() : 0;
                     hasNewNotification |= timestamp > lastCheck;
                     hasUnseenNotification |= timestamp > lastSeen;
                 }
@@ -228,7 +230,13 @@ public class NotificationsWorker extends Worker {
             prefetchRepoAvatars(notifsGroupedByRepo);
             for (List<NotificationThread> list : notifsGroupedByRepo) {
                 showRepoNotification(nm, list, lastCheck);
-                String repoId = String.valueOf(list.get(0).repository().id());
+                // 顺带：repository()/id() 可空时 String.valueOf 得 "null"，下面的
+                // Integer.parseInt 即 NumberFormatException；无 id 的组不记入已显示集合。
+                Repository repo = list.get(0).repository();
+                if (repo == null || repo.id() == null) {
+                    continue;
+                }
+                String repoId = String.valueOf(repo.id());
                 if (lastShownRepoIds != null) {
                     lastShownRepoIds.remove(repoId);
 
@@ -280,10 +288,17 @@ public class NotificationsWorker extends Worker {
             return;
         }
         Repository repository = notifications.get(0).repository();
+        // 顺带：repository/id 可空（SDK 模型字段全可空），直接 intValue() 即 NPE；
+        // 无 id 时不发通知（id 同时是通知 id 与 PendingIntent 请求码）。
+        if (repository == null || repository.id() == null) {
+            return;
+        }
         final int id = repository.id().intValue();
         String title = ApiHelpers.formatRepoName(getApplicationContext(), repository);
         // notifications are sorted by time descending
-        long when = notifications.get(0).updatedAt().getTime();
+        // 106：updatedAt() 可空，getTime() 即 NPE；未知时间按当前时间显示
+        long when = notifications.get(0).updatedAt() != null
+                ? notifications.get(0).updatedAt().getTime() : System.currentTimeMillis();
         String text = context.getResources().getQuantityString(
                 R.plurals.unread_notifications_summary_text,
                 notifications.size(), notifications.size());
@@ -336,10 +351,16 @@ public class NotificationsWorker extends Worker {
                 .setConversationTitle(title);
         for (int i = notifications.size() - 1; i >= 0; i--) {
             NotificationThread n = notifications.get(i);
-            style.addMessage(n.subject().title(),
-                    n.updatedAt().getTime(), determineNotificationTypeLabel(n));
+            // 106：updatedAt() 可空，getTime() 即 NPE，null 按 0 计
+            long timestamp = n.updatedAt() != null ? n.updatedAt().getTime() : 0;
+            // 顺带：subject() 可空，直接 title() 即 NPE；无标题用空串。
+            // determineNotificationTypeLabel 同样解引用 subject，见该方法入口守卫。
+            String subjectTitle = n.subject() != null && n.subject().title() != null
+                    ? n.subject().title() : "";
+            style.addMessage(subjectTitle,
+                    timestamp, determineNotificationTypeLabel(n));
             hasNewNotification = hasNewNotification ||
-                    n.updatedAt().getTime() > lastCheck;
+                    timestamp > lastCheck;
         }
         builder.setStyle(style);
 
@@ -430,6 +451,10 @@ public class NotificationsWorker extends Worker {
     }
 
     private String determineNotificationTypeLabel(NotificationThread notification) {
+        // 顺带（:340 的前置守卫）：subject() 可空，否则同行调用仍 NPE。
+        if (notification.subject() == null) {
+            return "";
+        }
         final Resources res = getApplicationContext().getResources();
         return switch (notification.subject().type()) {
             case NotificationAdapter.SUBJECT_COMMIT -> res.getString(R.string.notification_subject_commit);

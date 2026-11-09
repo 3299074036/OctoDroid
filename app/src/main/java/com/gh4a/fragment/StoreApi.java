@@ -30,7 +30,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
+import io.reactivex.Observable;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import okhttp3.CacheControl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -162,9 +164,14 @@ public class StoreApi {
         long savedAt = readSavedAt(metaFile);
         boolean fresh = savedAt > 0 && System.currentTimeMillis() - savedAt < ttl;
         if (fresh && cacheFile.exists()) {
-            StoreData data = parseFile(readFile(cacheFile), false, newest);
-            if (data != null) {
-                return data;
+            // 95：新鲜缓存读失败（文件在 exists 判断与读取之间消失、I/O 错误）
+            // 不直接抛错，回落下面的主站拉取流程。
+            try {
+                StoreData data = parseFile(readFile(cacheFile), false, newest);
+                if (data != null) {
+                    return data;
+                }
+            } catch (IOException ignored) {
             }
         }
         try {
@@ -239,6 +246,11 @@ public class StoreApi {
                     }
                 }
             }
+            // 147：结构合法但空的 feed 不是成功——返回 null 走过期缓存/镜像链路，
+            // 不当新鲜空商店缓存下来（后端从不发空 feed，见 generate.py 的空 feed 拒写）。
+            if (items.isEmpty()) {
+                return null;
+            }
             return new StoreData(items, offline, generatedAt);
         } catch (Exception e) {
             return null;
@@ -267,6 +279,10 @@ public class StoreApi {
                         // 单条坏数据只跳过该条，不让整组垮掉
                     }
                 }
+            }
+            // 147：同 parseBackend，空 newest 不当成功缓存。
+            if (items.isEmpty()) {
+                return null;
             }
             return new StoreData(items, offline, generatedAt);
         } catch (Exception e) {
@@ -329,32 +345,33 @@ public class StoreApi {
     /**
      * 给仓库列表逐个挂最新 Release 并过滤：无 Release 或无安装包的仓库
      * 在 dropEmpty 时直接去掉；单仓失败（404 等）只丢该仓，不让整组垮掉。
+     *
+     * P8：并发上限 ENRICH_MAX_CONCURRENCY（旧 Single.zip 在单条 io 线程
+     * 上串行订阅 30 个 Single——Retrofit 用 create() 同步 execute，每仓
+     * 阻塞等响应才订下一仓，从未真正 30 路并发，总耗时约 30 次往返之和；
+     * 匿名限速 60 次/小时，两次打开即可耗尽的总量账仍成立）。现改
+     * concatMapEager 保序（搜索页星标序不变）+ 限流至多 4 路并行；每仓
+     * inner 再 subscribeOn(io)，不加这句订阅会串在同一条 io 线程上跑完
+     * 一仓才订下一仓，限流失效。
      */
+    private static final int ENRICH_MAX_CONCURRENCY = 4;
+
     public static Single<List<StoreRepo>> enrich(List<Repository> repos, boolean dropEmpty) {
         if (repos == null || repos.isEmpty()) {
             return Single.just(new ArrayList<>());
         }
-        List<Single<StoreRepo>> singles = new ArrayList<>();
-        for (Repository repo : repos) {
-            // RxJava2 的 Single 不能发 null：onErrorReturnItem(null) 会在调用时
-            // 即 requireNonNull 抛 NPE（0.1.45 全军加载失败的根因）。兜底必须
-            // 是非空哨兵（无 Release 的空行，dropEmpty 时照常被过滤掉）。
-            singles.add(latestStoreRepo(repo).onErrorReturnItem(buildStoreRepo(repo, null)));
-        }
-        return Single.zip(singles, results -> {
-            List<StoreRepo> out = new ArrayList<>();
-            for (Object result : results) {
-                if (!(result instanceof StoreRepo)) {
-                    continue;
-                }
-                StoreRepo item = (StoreRepo) result;
-                if (dropEmpty && !item.hasAssets()) {
-                    continue;
-                }
-                out.add(item);
-            }
-            return out;
-        }).compose(RxUtils::doInBackground);
+        return Observable.fromIterable(repos)
+                .concatMapEager(repo -> latestStoreRepo(repo)
+                        .subscribeOn(Schedulers.io())
+                        // RxJava2 的 Single 不能发 null：onErrorReturnItem(null) 会在调用时
+                        // 即 requireNonNull 抛 NPE（0.1.45 全军加载失败的根因）。兜底必须
+                        // 是非空哨兵（无 Release 的空行，dropEmpty 时照常被过滤掉）。
+                        .onErrorReturnItem(buildStoreRepo(repo, null))
+                        .toObservable(),
+                        ENRICH_MAX_CONCURRENCY, 1)
+                .filter(item -> !dropEmpty || item.hasAssets())
+                .toList()
+                .compose(RxUtils::doInBackground);
     }
 
     /** 单仓的最新 Release（第 1 页首个非草稿；无 Release 返回空产物行）。 */

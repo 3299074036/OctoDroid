@@ -45,6 +45,7 @@ jobs:
             git worktree add /tmp/gh-pages-history gh-pages
             cp /tmp/gh-pages-history/store/history/*.json store-history/ 2>/dev/null || true
             cp /tmp/gh-pages-history/store/feed/all.json prev-feed.json 2>/dev/null || true
+            cp /tmp/gh-pages-history/store/meta.json prev-meta.json 2>/dev/null || true
             cp /tmp/gh-pages-history/store/feed/newest.json prev-newest.json 2>/dev/null || true
             cp /tmp/gh-pages-history/store/hiwiki/hiwiki-pool.json prev-hiwiki/ 2>/dev/null || true
             cp /tmp/gh-pages-history/store/hiwiki/hiwiki-ranks.json prev-hiwiki/ 2>/dev/null || true
@@ -65,6 +66,12 @@ jobs:
             echo "harvest ok"
           else
             echo "harvest failed (rc=$HARVEST_RC), falling back"
+            # 138：失败分支先删本轮可能已写的残 pool（harvest 在写完
+            # pool 后才判失败率 >5% 返回 1；level-3 分支只补 ranks，
+            # 不删 pool 会让残池被当回落池用）。level-2 随后会用上一
+            # 轮 pool 覆盖它，level-3 则保持无 pool、生成器走上一轮
+            # feed 回落，与回显文案一致。
+            rm -f hiwiki-data/hiwiki-pool.json
             # 79：harvest 失败时删掉本轮可能已写的 newest（失败率 >5% 时
             # harvest-hiwiki 仍可能已落盘不完整 newest），生成器改走
             # stale 路径（上一轮 prev-newest.json），避免 meta 里
@@ -92,6 +99,7 @@ jobs:
             --hiwiki-ranks hiwiki-data/hiwiki-ranks.json \
             --hiwiki-newest hiwiki-data/hiwiki-newest.json \
             --prev-feed prev-feed.json \
+            --prev-meta prev-meta.json \
             --prev-newest prev-newest.json \
             --metadata-cap 4500 \
             --harvest-status "$HARVEST_STATUS" \
@@ -200,12 +208,54 @@ jobs:
             git worktree add /tmp/gh-pages -b gh-pages
           fi
           mkdir -p /tmp/gh-pages/store
-          cp -r store-output/* /tmp/gh-pages/store/
+          # 140：用 rsync --delete 同步 store-output/，删掉 gh-pages
+          # 里多余的旧文件（某轮 newest 缺失时旧 newest.json、feed
+          # 缩水后多余的 page<N>.json 不再以旧版继续当新鲜数据服务）。
+          # history/ 与 hiwiki/ 不在 store-output 里、由下面步骤单独
+          # 管理，用 --exclude 保护，不参与 --delete。
+          rsync -a --delete --exclude='/history/' --exclude='/hiwiki/' \
+            store-output/ /tmp/gh-pages/store/
+          # 140：发布后断言 gh-pages 副本无多余文件（newest 有无与
+          # meta newestStatus 一致，各平台分页数与 feedPages 一致）。
+          python3 - <<'PYEOF'
+          import json, os
+          meta = json.load(open("store-output/meta.json"))
+          store = "/tmp/gh-pages/store"
+          newest = os.path.join(store, "feed", "newest.json")
+          if meta.get("newestStatus") == "missing":
+              assert not os.path.exists(newest), "stale newest.json left in gh-pages copy"
+          else:
+              assert os.path.exists(newest), "newest.json missing from gh-pages copy"
+          for platform, pages in meta.get("feedPages", {}).items():
+              d = os.path.join(store, "feed", platform)
+              got = sorted(f for f in os.listdir(d)
+                           if f.startswith("page") and f.endswith(".json"))
+              assert len(got) == pages, (platform, got, pages)
+          print("publish check ok: newest=%s pages match feedPages"
+                % meta.get("newestStatus"))
+          PYEOF
           mkdir -p /tmp/gh-pages/store/history
           cp store-history/*.json /tmp/gh-pages/store/history/ 2>/dev/null || true
-          # §6.4：历史快照只留 30 天滚动（生成器只回看 7 天，30 天足够；
-          # 每天 2 轮，不清会一直膨胀）。
-          find /tmp/gh-pages/store/history -name '*.json' -mtime +30 -delete 2>/dev/null || true
+          # 141：历史快照只留 30 天滚动。按文件名日期清理（<YYYY-MM-DD>.json），
+          # 不用 mtime：/tmp/gh-pages 是每轮新鲜 worktree 检出，所有文件
+          # mtime 均为检出时刻，-mtime +30 恒为假、清理永不生效。
+          python3 - <<'PYEOF'
+          import datetime, os
+          hist = "/tmp/gh-pages/store/history"
+          today = datetime.date.today()
+          removed = 0
+          for name in os.listdir(hist):
+              if not (name.endswith(".json") and len(name) == 15):
+                  continue
+              try:
+                  day = datetime.date.fromisoformat(name[:-5])
+              except ValueError:
+                  continue
+              if (today - day).days > 30:
+                  os.remove(os.path.join(hist, name))
+                  removed += 1
+          print("history cleanup: removed %d files older than 30 days" % removed)
+          PYEOF
           mkdir -p /tmp/gh-pages/store/hiwiki
           cp hiwiki-data/*.json /tmp/gh-pages/store/hiwiki/ 2>/dev/null || true
           touch /tmp/gh-pages/.nojekyll

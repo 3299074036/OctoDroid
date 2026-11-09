@@ -205,6 +205,10 @@ public class StarMergedFragment extends Fragment {
     private static final String KEY_LISTS_LOADED = "star_lists_loaded";
     private static final String KEY_UPDATES_LOADED = "star_updates_loaded";
     private static final String KEY_EXPANDED_OFFICIAL = "star_expanded_official";
+    // 0.2.4（97）：多选状态（多选模式＋已选仓库）进 onSaveInstanceState，
+    // 旋转后在 onCreate 恢复，不再静默退出多选模式丢掉已勾选的仓库。
+    private static final String KEY_MULTI_SELECT = "star_multi_select";
+    private static final String KEY_SELECTED_REPOS = "star_selected_repos";
 
     // 0.1.64：列表显示顺序只存本机（官方接口无排序能力），按账号记一份
     // 列表 ID 的顺序；拉取后按此顺序展示，新列表排最后，删除的去掉。
@@ -232,6 +236,18 @@ public class StarMergedFragment extends Fragment {
             mRestoredListsLoaded = savedInstanceState.getBoolean(KEY_LISTS_LOADED, false);
             mRestoredUpdatesLoaded = savedInstanceState.getBoolean(KEY_UPDATES_LOADED, false);
             mExpandedOfficialId = savedInstanceState.getString(KEY_EXPANDED_OFFICIAL);
+            // 0.2.4（97）：恢复多选状态（onDestroyView 会清掉旧实例的这份
+            // 状态，但新实例在 onCreate 里从 bundle 拿回来；视图重建时
+            // rebuild() 按它画出多选顶栏与勾选框）。
+            mMultiSelect = savedInstanceState.getBoolean(KEY_MULTI_SELECT, false);
+            ArrayList<String> selected =
+                    savedInstanceState.getStringArrayList(KEY_SELECTED_REPOS);
+            if (selected != null) {
+                mSelectedRepos.addAll(selected);
+            }
+            if (mMultiSelect && mSelectedRepos.isEmpty()) {
+                mMultiSelect = false;
+            }
         }
     }
 
@@ -244,6 +260,10 @@ public class StarMergedFragment extends Fragment {
         outState.putBoolean(KEY_LISTS_LOADED, mListsLoaded);
         outState.putBoolean(KEY_UPDATES_LOADED, mUpdatesLoaded);
         outState.putString(KEY_EXPANDED_OFFICIAL, mExpandedOfficialId);
+        // 0.2.4（97）：多选状态进 saved state；只在多选模式开启时存，
+        // 否则存空集合即可（恢复时空集合会把模式关掉，与上文一致）。
+        outState.putBoolean(KEY_MULTI_SELECT, mMultiSelect);
+        outState.putStringArrayList(KEY_SELECTED_REPOS, new ArrayList<>(mSelectedRepos));
     }
 
     @Override
@@ -378,6 +398,10 @@ public class StarMergedFragment extends Fragment {
         };
         requireActivity().getOnBackPressedDispatcher()
                 .addCallback(getViewLifecycleOwner(), mBackCallback);
+        // 0.2.4（97）：恢复的多选／排序模式要同步到返回键回调——onCreate
+        // 里恢复的 mMultiSelect=true 时，不调这里返回键就退不出多选模式。
+        // 非恢复路径下两者均为 false，与回调构造时的默认值一致，无行为变化。
+        updateBackCallback();
         updateSegmented();
         rebuild();
         // 0.1.3：进页只加载当前页（默认分组），不把三页全拉一遍。
@@ -918,7 +942,7 @@ public class StarMergedFragment extends Fragment {
                 if (age < 0 || age > STALE_CACHE_AGE_MS) {
                     Item stale = new Item();
                     stale.type = TYPE_STATUS;
-                    stale.title = "缓存数据，点按重试";
+                    stale.title = getString(R.string.star_list_stale_retry);
                     stale.retryLists = true;
                     mItems.add(stale);
                 }

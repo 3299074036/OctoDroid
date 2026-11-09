@@ -34,4 +34,8 @@
     <exclude domain="sharedpref" path="hot_repos_cache.xml" />
     <exclude domain="sharedpref" path="me_header_cache.xml" />
     <exclude domain="sharedpref" path="star_update_read.xml" />
+    <!-- 108：file 域（files/）默认随系统自动备份上云；诊断日志与商店
+         feed 缓存只是本地诊断/公开数据，不应占备份配额。 -->
+    <exclude domain="file" path="diagnostic/" />
+    <exclude domain="file" path="store-cache/" />
 </full-backup-content>

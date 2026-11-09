@@ -86,4 +86,6 @@
     <color name="mirror_current_green">#3f8f2e</color>
     <color name="mirror_error_red">#e5484d</color>
     <color name="mirror_divider">#EEEEEE</color>
+    <!-- 132：骨架条灰（白天值 = 原硬编码 0xFFE0E0E0），深色变体见 values-night -->
+    <color name="skeleton_bar">#E0E0E0</color>
 </resources>

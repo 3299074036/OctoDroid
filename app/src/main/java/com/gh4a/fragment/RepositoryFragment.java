@@ -22,6 +22,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
+import androidx.lifecycle.ViewModelProvider;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.method.LinkMovementMethod;
@@ -82,9 +83,6 @@ import java.util.Optional;
 import java.util.Set;
 
 import io.reactivex.Single;
-import io.reactivex.android.schedulers.AndroidSchedulers;
-import io.reactivex.disposables.CompositeDisposable;
-import io.reactivex.schedulers.Schedulers;
 import retrofit2.Response;
 
 public class RepositoryFragment extends LoadingFragmentBase implements
@@ -123,8 +121,9 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     // star/watch 请求在途标志：快速连击时两次请求会基于同一旧状态，
     // 回调翻转后 UI 与服务端不一致，在途时直接屏蔽新的点击
     private boolean mStarWatchInFlight = false;
-    // 0.1.64：点 star 加分组的 GraphQL 请求（拉列表/归属）。
-    private final CompositeDisposable mDisposables = new CompositeDisposable();
+    // 0.2.4（126）：点 star 后拉官方列表／建组／入组的状态机（与 58 同款）——
+    // Rx 链挂 ViewModel，旋转不中断；分组框与结果经 LiveData 回到重建后的 Fragment。
+    private StarBatchMoveViewModel mMoveViewModel;
     private boolean mIsReadmeLoaded = false;
     private boolean mIsReadmeExpanded = false;
     // README translation state
@@ -139,6 +138,10 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         super.onCreate(savedInstanceState);
         mRepository = getArguments().getParcelable("repo");
         mRef = getArguments().getString("ref");
+        // 0.2.4（126）：ViewModel 随 FragmentManager 在配置变更时保留，
+        // 在 onCreate 里取——视图重建不影响它持有的 Rx 链。
+        mMoveViewModel = new ViewModelProvider(this)
+                .get(StarBatchMoveViewModel.class);
     }
 
     @Override
@@ -162,7 +165,6 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-        mDisposables.clear();
         if (mReadmeTranslator != null) {
             mReadmeTranslator.cancel();
             mReadmeTranslator = null;
@@ -207,6 +209,12 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     @Override
     public void onViewCreated(View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+
+        // 0.2.4（126）：用 getViewLifecycleOwner() 观察（59 同款）——拉列表
+        // 结果与单发操作结果经 LiveData 回到重建后的 Fragment，旋转后分组
+        // 框按最新结果重建，不再随 mDisposables 一起丢掉。
+        mMoveViewModel.getStarLists().observe(getViewLifecycleOwner(), this::onStarListsLoaded);
+        mMoveViewModel.getSingleOp().observe(getViewLifecycleOwner(), this::onSingleOpChanged);
 
         mImageGetter = new HttpImageGetter(getActivity());
         fillData();
@@ -281,7 +289,7 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         final String name = mRepository.name();
 
         OverviewRow forkParentRow = mContentView.findViewById(R.id.fork_parent_row);
-        if (mRepository.isFork() && mRepository.parent() != null) {
+        if (Boolean.TRUE.equals(mRepository.isFork()) && mRepository.parent() != null) {
             Repository parent = mRepository.parent();
             forkParentRow.setVisibility(View.VISIBLE);
             forkParentRow.setText(getForkedFromTextWithHighlight(parent));
@@ -291,7 +299,8 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         }
 
         OverviewRow privateRow = mContentView.findViewById(R.id.private_row);
-        privateRow.setVisibility(mRepository.isPrivate() ? View.VISIBLE : View.GONE);
+        // 115：isPrivate() 为 Boolean 可空，条件里直接拆箱即 NPE
+        privateRow.setVisibility(Boolean.TRUE.equals(mRepository.isPrivate()) ? View.VISIBLE : View.GONE);
 
         OverviewRow languageRow = mContentView.findViewById(R.id.language_row);
         languageRow.setVisibility(StringUtils.isBlank(mRepository.language())
@@ -305,7 +314,7 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                 .setVisibility(showOverviewRowDivider ? View.VISIBLE : View.GONE);
 
         OverviewRow issuesRow = mContentView.findViewById(R.id.issues_row);
-        issuesRow.setVisibility(mRepository.hasIssues() ? View.VISIBLE : View.GONE);
+        issuesRow.setVisibility(Boolean.TRUE.equals(mRepository.hasIssues()) ? View.VISIBLE : View.GONE);
         issuesRow.setClickIntent(IssueListActivity.makeIntent(getActivity(), owner, name));
 
         OverviewRow pullsRow = mContentView.findViewById(R.id.pulls_row);
@@ -313,7 +322,7 @@ public class RepositoryFragment extends LoadingFragmentBase implements
 
         OverviewRow forksRow = mContentView.findViewById(R.id.forks_row);
         forksRow.setText(getResources().getQuantityString(R.plurals.fork,
-                mRepository.forksCount(), mRepository.forksCount()));
+                ApiHelpers.orZero(mRepository.forksCount()), ApiHelpers.orZero(mRepository.forksCount())));
         forksRow.setClickIntent(ForkListActivity.makeIntent(getActivity(), owner, name));
 
         mStarsRow = mContentView.findViewById(R.id.stars_row);
@@ -413,13 +422,13 @@ public class RepositoryFragment extends LoadingFragmentBase implements
 
     private void updateStargazerUi() {
         mStarsRow.setText(getResources().getQuantityString(R.plurals.star,
-                mRepository.stargazersCount(), mRepository.stargazersCount()));
+                ApiHelpers.orZero(mRepository.stargazersCount()), ApiHelpers.orZero(mRepository.stargazersCount())));
         mStarsRow.setToggleState(mIsStarring != null && mIsStarring);
     }
 
     private void updateWatcherUi() {
         mWatcherRow.setText(getResources().getQuantityString(R.plurals.watcher,
-                mRepository.subscribersCount(), mRepository.subscribersCount()));
+                ApiHelpers.orZero(mRepository.subscribersCount()), ApiHelpers.orZero(mRepository.subscribersCount())));
         mWatcherRow.setToggleState(mIsWatching != null && mIsWatching);
     }
 
@@ -720,8 +729,10 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                 .map(SearchPage::totalCount)
                 .compose(makeLoaderSingle(ID_LOADER_PULL_REQUEST_COUNT, force))
                 .subscribe(count -> {
-                    int totalCount = count.intValue();
-                    int issueCount = mRepository.openIssuesCount() - totalCount;
+                    // 115：totalCount() 为 Long 可空，intValue() 即 NPE；
+                    // openIssuesCount() 为 Integer 可空，相减即拆箱 NPE
+                    int totalCount = (int) ApiHelpers.orZero(count);
+                    int issueCount = ApiHelpers.orZero(mRepository.openIssuesCount()) - totalCount;
 
                     OverviewRow issuesRow = mContentView.findViewById(R.id.issues_row);
                     issuesRow.setText(getResources().getQuantityString(R.plurals.issue, issueCount, issueCount));
@@ -753,7 +764,7 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     if (mIsStarring != null) {
                         mIsStarring = !mIsStarring;
                         mRepository = mRepository.toBuilder()
-                                .stargazersCount(mRepository.stargazersCount() + (mIsStarring ? 1 : -1))
+                                .stargazersCount(ApiHelpers.orZero(mRepository.stargazersCount()) + (mIsStarring ? 1 : -1))
                                 .build();
                         updateStargazerUi();
                         // 0.1.64：点 star 成功后弹出“加入列表”（只加星不进组
@@ -776,57 +787,85 @@ public class RepositoryFragment extends LoadingFragmentBase implements
      * 0.1.64：点 star 加分组——加星成功后弹出“加入列表”多选框（全不勾选，
      * “新建列表…”可建；不勾选直接点确定 = 只加星，不进组）。拉官方列表失败
      * 时不弹框（不打扰，只加星）。
+     * <p>
+     * 0.2.4（126）：拉列表走 ViewModel（fetchStarLists），结果经 LiveData
+     * 回到重建后的 Fragment 再弹框；旋转不再丢分组框。只发请求、不直接弹框。
      */
     private void showStarToGroupDialog() {
-        if (getActivity() == null) return;
-        final String fullName = mRepository.fullName();
+        if (getActivity() == null || mMoveViewModel == null) return;
         final String login = Gh4Application.get().getAuthLogin();
-        mDisposables.add(UserListsGraphQL.fetchLists(login)
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(lists -> {
-                    if (!isAdded() || getActivity() == null) return;
-                    if (lists.isEmpty()) {
-                        // 无任何列表：直接新建（新建后归属到新列表）。
-                        UserListDialogHelper.showCreateListDialog(getActivity(),
-                                lists, mDisposables, newList -> {
-                                    if (!isAdded()) return;
-                                    List<String> ids = new ArrayList<>();
-                                    ids.add(newList.id);
-                                    assignStarredRepoToLists(fullName, ids);
-                                });
-                        return;
-                    }
-                    UserListDialogHelper.showAssignDialog(getActivity(), lists,
-                            new HashSet<>(),
-                            getString(R.string.star_list_star_subtitle, fullName),
-                            () -> UserListDialogHelper.showCreateListDialog(getActivity(),
-                                    lists, mDisposables, newList -> {
-                                        if (!isAdded()) return;
-                                        List<String> ids = new ArrayList<>();
-                                        ids.add(newList.id);
-                                        assignStarredRepoToLists(fullName, ids);
-                                    }),
-                            selectedIds -> assignStarredRepoToLists(fullName, selectedIds));
-                }, error -> {
-                    // 0.1.64：列表拉取失败不弹框（加星本身已成功）。
-                }));
+        mMoveViewModel.fetchStarLists(login);
+    }
+
+    /**
+     * 0.2.4（126）：拉官方列表的结果——ViewModel 里的 Rx 链旋转不中断，
+     * 重建后按结果弹框。结果在用户真正操作（确定／新建）时才标记已消费，
+     * 框开着旋转会重新弹出，不会丢；拉取失败不弹框（加星本身已成功）。
+     */
+    private void onStarListsLoaded(StarBatchMoveViewModel.StarListsResult result) {
+        if (result == null || mMoveViewModel == null
+                || mMoveViewModel.isStarListsConsumed(result)) {
+            return;
+        }
+        if (result.failed) {
+            mMoveViewModel.markStarListsConsumed(result);
+            return;
+        }
+        if (!isAdded() || getActivity() == null) {
+            return;
+        }
+        final List<UserListsGraphQL.UserList> lists =
+                result.lists != null ? result.lists : new ArrayList<>();
+        final String fullName = mRepository.fullName();
+        if (lists.isEmpty()) {
+            // 无任何列表：直接新建（新建后归属到新列表）。
+            UserListDialogHelper.showCreateListNameDialog(getActivity(),
+                    lists, (name, isPrivate) -> {
+                        mMoveViewModel.markStarListsConsumed(result);
+                        mMoveViewModel.createListAndAssign(fullName, name, isPrivate);
+                    });
+            return;
+        }
+        UserListDialogHelper.showAssignDialog(getActivity(), lists,
+                new HashSet<>(),
+                getString(R.string.star_list_star_subtitle, fullName),
+                () -> {
+                    mMoveViewModel.markStarListsConsumed(result);
+                    UserListDialogHelper.showCreateListNameDialog(getActivity(),
+                            lists, (name, isPrivate) ->
+                                    mMoveViewModel.createListAndAssign(
+                                            fullName, name, isPrivate));
+                },
+                selectedIds -> {
+                    mMoveViewModel.markStarListsConsumed(result);
+                    assignStarredRepoToLists(fullName, selectedIds);
+                });
+    }
+
+    /**
+     * 0.2.4（126）：单发入组结果——ViewModel 里的 Rx 链旋转不中断，重建后
+     * 按结果 Toast；已消费的不重复弹。仓库页只需 Toast，无需重拉。
+     */
+    private void onSingleOpChanged(StarBatchMoveViewModel.SingleOp op) {
+        if (op == null || mMoveViewModel == null || mMoveViewModel.isSingleOpConsumed(op)) {
+            return;
+        }
+        if (!isAdded() || getActivity() == null) {
+            return;
+        }
+        mMoveViewModel.markSingleOpConsumed(op);
+        Toast.makeText(getActivity(), op.messageRes,
+                op.success ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
     }
 
     private void assignStarredRepoToLists(String fullName, List<String> listIds) {
-        mDisposables.add(UserListsGraphQL.assignRepo(fullName, listIds)
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(ok -> {
-                    if (!isAdded()) return;
-                    Toast.makeText(getActivity(), R.string.assign_official_success,
-                            Toast.LENGTH_SHORT).show();
-                }, error -> {
-                    if (isAdded()) {
-                        Toast.makeText(getActivity(), R.string.assign_official_failed,
-                                Toast.LENGTH_LONG).show();
-                    }
-                }));
+        // 0.2.4（126）：入组走 ViewModel（58 同款），不再挂 Fragment 的
+        // mDisposables；结果经 LiveData 回到重建后的 Fragment（Toast）。
+        if (mMoveViewModel == null) {
+            return;
+        }
+        mMoveViewModel.runSingleOp(UserListsGraphQL.assignRepo(fullName, listIds),
+                R.string.assign_official_success, R.string.assign_official_failed, null);
     }
 
     private void toggleWatchingState() {
@@ -862,7 +901,7 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     if (mIsWatching != null) {
                         mIsWatching = result;
                         mRepository = mRepository.toBuilder()
-                                .subscribersCount(mRepository.subscribersCount() + (mIsWatching ? 1 : -1))
+                                .subscribersCount(ApiHelpers.orZero(mRepository.subscribersCount()) + (mIsWatching ? 1 : -1))
                                 .build();
                         updateWatcherUi();
                     }

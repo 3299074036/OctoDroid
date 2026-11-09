@@ -124,6 +124,14 @@ public class MirrorHelper {
         if (host == null || host.isEmpty()) {
             return false;
         }
+        // 89：DNS 尾点形（localhost. / 127.0.0.1.）与无尾点等价；不去掉时
+        // localhost. 命中不了拦截、127.0.0.1. 按 "." 切出 5 段被当域名放行。
+        while (host.endsWith(".")) {
+            host = host.substring(0, host.length() - 1);
+        }
+        if (host.isEmpty()) {
+            return false;
+        }
         return !isLoopbackOrPrivateHost(host);
     }
 
@@ -134,6 +142,10 @@ public class MirrorHelper {
      * 地址被放行（真机老设备同样中招，不只是测试问题）。
      * 这里按 authority 手工取：方括号内是 IPv6 字面量（去括号），
      * 否则截到 ':'（端口）为止；含 userinfo 时取最后一个 '@' 之后。
+     * 88：authority 到第一个 '/'、'?' 或 '#' 为止——'?'/'#' 之后是
+     * query/fragment，不是 host 的一部分；不截断时
+     * "https://127.0.0.1#@evil.com/" 会取到 evil.com（放行），而实际
+     * 请求按 RFC 3986 发往回环地址 127.0.0.1。
      */
     private static String extractHost(String url) {
         if (url == null) {
@@ -144,8 +156,20 @@ public class MirrorHelper {
         if (scheme >= 0) {
             rest = rest.substring(scheme + 3);
         }
+        int end = rest.length();
         int slash = rest.indexOf('/');
-        String authority = slash >= 0 ? rest.substring(0, slash) : rest;
+        if (slash >= 0) {
+            end = slash;
+        }
+        int query = rest.indexOf('?');
+        if (query >= 0 && query < end) {
+            end = query;
+        }
+        int fragment = rest.indexOf('#');
+        if (fragment >= 0 && fragment < end) {
+            end = fragment;
+        }
+        String authority = rest.substring(0, end);
         int at = authority.lastIndexOf('@');
         if (at >= 0) {
             authority = authority.substring(at + 1);
@@ -875,7 +899,11 @@ public class MirrorHelper {
             handle.track(call);
             try (Response r = call.execute()) {
                 if (r.isSuccessful() && r.body() != null) {
-                    r.body().bytes(); // 读完 1KB，耗时才真实
+                    // 99：Range 只是请求提示，服务端可忽略；bytes() 会把整个响应体
+                    // 读进内存。只取前 1KB 就关流，失控镜像也撑不爆测速线程。
+                    try (java.io.InputStream in = r.body().byteStream()) {
+                        in.read(new byte[1024]);
+                    }
                     return new MirrorSpeedResult(target.name, target.url, target.presetValue,
                             SystemClock.elapsedRealtime() - start);
                 }

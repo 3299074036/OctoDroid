@@ -11,8 +11,8 @@ import com.meisolsson.githubsdk.core.ServiceGenerator;
 import com.meisolsson.githubsdk.core.StringResponseConverterFactory;
 
 import java.io.File;
-import java.util.HashMap;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.Cache;
@@ -113,7 +113,9 @@ public class ServiceFactory {
     private static OkHttpClient sApiHttpClient;
     private static OkHttpClient sImageHttpClient;
 
-    private final static HashMap<String, Object> sCache = new HashMap<>();
+    // 107：多线程并发读写（Rx IO 线程 + 主线程 + WorkManager 线程均可进入），
+    // 未同步 HashMap 最坏丢条目/重复建 service，换 ConcurrentHashMap。
+    private final static ConcurrentHashMap<String, Object> sCache = new ConcurrentHashMap<>();
 
     public static <S> S get(Class<S> serviceClass, boolean bypassCache) {
         return get(serviceClass, bypassCache, null, null, null);

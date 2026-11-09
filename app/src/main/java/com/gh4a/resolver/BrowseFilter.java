@@ -49,8 +49,14 @@ public class BrowseFilter extends AppCompatActivity {
         if ((flags & (Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT)) != 0) {
             flags |= Intent.FLAG_ACTIVITY_MULTIPLE_TASK;
         }
+        // 151：本 Activity 是导出的，任意应用可发 VIEW intent 附带
+        // EXTRA_INITIAL_COMMENT；API <33 的无类型反序列化会按名字实例化
+        // classpath 内任意 Parcelable 的 CREATOR。先限定 extras 的类加载器，
+        // 再读 extra（android-intent-security skill 同款纵深防御做法）。
         // S-L6：API 33+ 用带 Class 参数的 typed API 取 Parcelable，避免
         // 反序列化时的类混淆；低版本走旧 API（minSdk 23）。
+        getIntent().setExtrasClassLoader(
+                IntentUtils.InitialCommentMarker.class.getClassLoader());
         IntentUtils.InitialCommentMarker initialComment;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             initialComment = getIntent().getParcelableExtra(

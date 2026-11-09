@@ -16,6 +16,7 @@
 package com.gh4a.fragment;
 
 import android.os.Bundle;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.appcompat.app.AlertDialog;
 
@@ -90,9 +91,9 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
     private String mExpandedOfficialId;
     private String mExpandedLocalGroup;
     private Disposable mListsDisposable;
-    // Dialog-initiated Schedulers.io() subscriptions (BUG-11).
-    private io.reactivex.disposables.CompositeDisposable mDialogDisposables =
-            new io.reactivex.disposables.CompositeDisposable();
+    // 0.2.4（87）：入组／建组状态机（与 58 同款）——Rx 链挂 ViewModel，
+    // 旋转不中断；结果经 LiveData 回到重建后的 Fragment（Toast＋重拉）。
+    private StarBatchMoveViewModel mMoveViewModel;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -105,7 +106,19 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
             mSortOrder = savedInstanceState.getString(STATE_KEY_SORT_ORDER);
             mSortDirection = savedInstanceState.getString(STATE_KEY_SORT_DIRECTION);
         }
+        // 0.2.4（87）：ViewModel 随 FragmentManager 在配置变更时保留，
+        // 在 onCreate 里取——视图重建不影响它持有的 Rx 链。
+        mMoveViewModel = new ViewModelProvider(this)
+                .get(StarBatchMoveViewModel.class);
         setHasOptionsMenu(true);
+    }
+
+    @Override
+    public void onViewCreated(View view, Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        // 0.2.4（87）：用 getViewLifecycleOwner() 观察（59 同款）——视图
+        // 销毁后、Fragment 销毁前的窗口内不再投递结果，不碰已销毁的视图。
+        mMoveViewModel.getSingleOp().observe(getViewLifecycleOwner(), this::onSingleOpChanged);
     }
 
     @Override
@@ -118,7 +131,6 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
             mListsDisposable.dispose();
         }
         mListsDisposable = null;
-        mDialogDisposables.dispose();
         mListsContainer = null;
         mListsTitle = null;
         mListsStatus = null;
@@ -177,9 +189,6 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
 
     @Override
     protected void onRecyclerViewInflated(RecyclerView view, android.view.LayoutInflater inflater) {
-        if (mDialogDisposables.isDisposed()) {
-            mDialogDisposables = new io.reactivex.disposables.CompositeDisposable();
-        }
         super.onRecyclerViewInflated(view, inflater);
         // 0.5.0 Star 页重排：给列表留出底栏高度的底边距并关闭 clip，
         // 使最后一行描述能完整滚到固定底栏上方，不再被截断。
@@ -391,54 +400,54 @@ public class StarredRepositoryListFragment extends PagedDataBaseFragment<Reposit
                     if (name.isEmpty()) {
                         return;
                     }
-                    mDialogDisposables.add(UserListsGraphQL.createList(name)
-                            .subscribeOn(Schedulers.io())
-                            .observeOn(AndroidSchedulers.mainThread())
-                            .subscribe(list -> {
-                                if (!isAdded()) {
-                                    return;
-                                }
+                    // 0.2.4（87）：建组→入组整条链走 ViewModel（58 同款），
+                    // 旋转不中断；列表已建好、仓库没归属进去的中间态不再出现。
+                    if (mMoveViewModel == null) {
+                        return;
+                    }
+                    mMoveViewModel.runSingleOp(UserListsGraphQL.createList(name)
+                            .flatMap(list -> {
                                 List<String> ids = new ArrayList<>();
                                 ids.add(list.id);
-                                assignToOfficialLists(repository.fullName(), ids);
-                            }, error -> {
-                                if (isAdded()) {
-                                    Toast.makeText(getActivity(), R.string.assign_official_failed,
-                                            Toast.LENGTH_LONG).show();
-                                }
-                            }));
+                                return UserListsGraphQL.assignRepo(
+                                        repository.fullName(), ids);
+                            }),
+                            R.string.assign_official_success,
+                            R.string.assign_official_failed, null);
                 })
                 .setNegativeButton(R.string.cancel, null)
                 .show();
     }
 
     private void assignToOfficialLists(String fullName, List<String> listIds) {
-        String[] parts = fullName.split("/", 2);
-        if (parts.length != 2) {
+        // 0.2.4（87）：取 node id → 更新列表链走 ViewModel（58 同款），
+        // 不再挂 Fragment 的 mDialogDisposables；结果经 LiveData 回到
+        // 重建后的 Fragment（Toast＋重拉）。
+        if (mMoveViewModel == null) {
             return;
         }
-        mDialogDisposables.add(UserListsGraphQL.fetchRepositoryNodeId(parts[0], parts[1])
-                .flatMap(nodeId -> {
-                    if (nodeId.isEmpty()) {
-                        return Single.error(new RuntimeException("empty node id"));
-                    }
-                    return UserListsGraphQL.updateListsForRepo(nodeId, listIds);
-                })
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(ok -> {
-                    if (!isAdded()) {
-                        return;
-                    }
-                    Toast.makeText(getActivity(), R.string.assign_official_success,
-                            Toast.LENGTH_SHORT).show();
-                    loadOfficialLists();
-                }, error -> {
-                    if (isAdded()) {
-                        Toast.makeText(getActivity(), R.string.assign_official_failed,
-                                Toast.LENGTH_LONG).show();
-                    }
-                }));
+        mMoveViewModel.runSingleOp(UserListsGraphQL.assignRepo(fullName, listIds),
+                R.string.assign_official_success, R.string.assign_official_failed, null);
+    }
+
+    /**
+     * 0.2.4（87）：单发操作（入组／建组→入组）结果——ViewModel 里的 Rx 链
+     * 旋转不中断，重建后按结果 Toast＋重拉；已消费的不重复弹。
+     */
+    private void onSingleOpChanged(StarBatchMoveViewModel.SingleOp op) {
+        if (op == null || mMoveViewModel == null || mMoveViewModel.isSingleOpConsumed(op)) {
+            return;
+        }
+        if (!isAdded() || getActivity() == null) {
+            return;
+        }
+        mMoveViewModel.markSingleOpConsumed(op);
+        Toast.makeText(getActivity(), op.messageRes,
+                op.success ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
+        if (!op.success) {
+            return;
+        }
+        loadOfficialLists();
     }
 
     /** Pre-existing local-group dialog, kept for the fallback path. */

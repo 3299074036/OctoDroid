@@ -43,6 +43,7 @@ import com.gh4a.ServiceFactory;
 import com.gh4a.fragment.SettingsFragment;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.ref.WeakReference;
@@ -63,6 +64,10 @@ import okhttp3.Response;
 import pl.droidsonroids.gif.GifDrawable;
 
 public class HttpImageGetter {
+    /** 150：评论图片单张上限 20MB——攻击者评论贴数百 MB 的“图片”URL，
+     * 打开 issue 即整包进内存 OOM；超限直接显示 error 图。 */
+    private static final int MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
     private static class GifCallback implements Drawable.Callback {
         private final List<WeakReference<TextView>> mViewRefs;
         private final Handler mHandler = new Handler();
@@ -461,11 +466,21 @@ public class HttpImageGetter {
                     .build();
             try (Response response = mClient.newCall(request).execute()) {
                 if (response.body() != null) {
-                    byte[] responseBody = response.body().bytes();
+                    okhttp3.ResponseBody body = response.body();
+                    // 150：先看 Content-Length，超限直接不读；长度撒谎/缺失时
+                    // 下面的流式限量读仍能兜底。
+                    if (body.contentLength() > MAX_IMAGE_BYTES) {
+                        return mErrorDrawable;
+                    }
+                    MediaType mediaType = body.contentType();
+                    byte[] responseBody = readCappedBytes(body.byteStream(),
+                            MAX_IMAGE_BYTES);
+                    if (responseBody == null) {
+                        return mErrorDrawable;
+                    }
                     // ByteArrayInputStream supports marking, which is required for
                     // URLConnection.guessContentTypeFromStream to work
                     InputStream is = new ByteArrayInputStream(responseBody);
-                    MediaType mediaType = response.body().contentType();
                     String mime = mediaType != null ? mediaType.toString() : null;
                     if (mime == null) {
                         mime = URLConnection.guessContentTypeFromName(source);
@@ -516,6 +531,22 @@ public class HttpImageGetter {
     private boolean canLoadGif() {
         // 0.1.1：动态页 GIF 始终加载，GIF 加载设置已下架，不再按模式/网络判断。
         return true;
+    }
+
+    /** 150：流式限量读——读到上限仍有数据即返回 null（超限），不整包进内存。 */
+    private static byte[] readCappedBytes(InputStream in, int maxBytes) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int total = 0;
+        int n;
+        while ((n = in.read(buf)) >= 0) {
+            total += n;
+            if (total > maxBytes) {
+                return null;
+            }
+            out.write(buf, 0, n);
+        }
+        return out.toByteArray();
     }
 
     private Bitmap getBitmap(final byte[] image) {

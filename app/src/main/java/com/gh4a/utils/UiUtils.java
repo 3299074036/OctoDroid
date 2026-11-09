@@ -197,7 +197,13 @@ public class UiUtils {
         return view.canScrollVertically(-1);
     }
 
-    public static Dialog createProgressDialog(Context context, @StringRes int messageResId) {
+    // 136：context 可为 null（DialogFragment.detach 后调 onCreateDialog），
+    // LayoutInflater.from(null) 即 NPE；返回 null，DialogFragment 容忍空 Dialog
+    @androidx.annotation.Nullable
+    public static Dialog createProgressDialog(@androidx.annotation.Nullable Context context, @StringRes int messageResId) {
+        if (context == null) {
+            return null;
+        }
         View content = LayoutInflater.from(context).inflate(R.layout.progress_dialog, null);
         TextView message = content.findViewById(R.id.message);
 

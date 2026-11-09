@@ -809,25 +809,41 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
 
     @Override
     public boolean onSuggestionClick(int position) {
+        // 129：getCursor() 可为 null（runQuery 在空查询时返回 null），
+        // 直接 moveToPosition 即 NPE；clear 行改按 _id 判定，不再靠“末行恒为 clear 行”
+        if (mSearch.getSuggestionsAdapter() == null) {
+            return true;
+        }
         Cursor cursor = mSearch.getSuggestionsAdapter().getCursor();
-        if (cursor.moveToPosition(position)) {
-            if (position == cursor.getCount() - 1) {
-                final int type = mSelectedSearchType;
-                final ContentResolver cr = getActivity().getContentResolver();
-                new Thread() {
-                    @Override
-                    public void run() {
-                        cr.delete(SuggestionsProvider.Columns.CONTENT_URI,
-                                SuggestionsProvider.Columns.TYPE + " = ?",
-                                new String[] { String.valueOf(type) });
-                    }
-                }.start();
+        if (cursor != null && cursor.moveToPosition(position)) {
+            if (isClearRowCursor(cursor)) {
+                final android.app.Activity activity = getActivity();
+                if (activity != null) {
+                    final int type = mSelectedSearchType;
+                    final ContentResolver cr = activity.getContentResolver();
+                    new Thread() {
+                        @Override
+                        public void run() {
+                            cr.delete(SuggestionsProvider.Columns.CONTENT_URI,
+                                    SuggestionsProvider.Columns.TYPE + " = ?",
+                                    new String[] { String.valueOf(type) });
+                        }
+                    }.start();
+                }
             } else {
                 mQuery = cursor.getString(1);
                 mSearch.setQuery(mQuery, true);
             }
         }
         return true;
+    }
+
+    /**
+     * 129：clear 行是 swapCursor 时以 _id = Long.MAX_VALUE 追加的 MatrixCursor 行，
+     * 按 _id 判定才不受 cursor 刷新错位影响。投影首列即 _ID。
+     */
+    private static boolean isClearRowCursor(Cursor cursor) {
+        return cursor != null && cursor.getLong(0) == Long.MAX_VALUE;
     }
 
     @Override
@@ -1185,18 +1201,21 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
 
     private java.util.List<String> loadRecentSearches() {
         java.util.List<String> out = new java.util.ArrayList<>();
-        try {
-            Cursor cursor = getContext().getContentResolver().query(
-                    SuggestionsProvider.Columns.CONTENT_URI, SUGGESTION_PROJECTION,
-                    SuggestionsProvider.Columns.TYPE + " = ?",
-                    new String[] { String.valueOf(mSelectedSearchType) }, SUGGESTION_ORDER);
+        // 129：getContext() 可为 null；cursor.close() 不在 finally，循环抛错即泄漏
+        android.content.Context context = getContext();
+        if (context == null) {
+            return out;
+        }
+        try (Cursor cursor = context.getContentResolver().query(
+                SuggestionsProvider.Columns.CONTENT_URI, SUGGESTION_PROJECTION,
+                SuggestionsProvider.Columns.TYPE + " = ?",
+                new String[] { String.valueOf(mSelectedSearchType) }, SUGGESTION_ORDER)) {
             if (cursor != null) {
                 int col = cursor.getColumnIndexOrThrow(SuggestionsProvider.Columns.SUGGESTION);
                 while (cursor.moveToNext() && out.size() < 6) {
                     String s = cursor.getString(col);
                     if (!TextUtils.isEmpty(s) && !out.contains(s)) out.add(s);
                 }
-                cursor.close();
             }
         } catch (Exception ignored) {
         }
@@ -1266,7 +1285,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         int gap = (int) (12 * density + 0.5f);
         for (int i = 0; i < 5; i++) {
             View bar = new View(requireContext());
-            bar.setBackgroundColor(0xFFE0E0E0);
+            // 132：硬编码浅灰 0xFFE0E0E0 在深色模式下刺眼；走主题的
+            // colorSurfaceVariant（75 同款：硬编码色改主题色）。
+            bar.setBackgroundColor(UiUtils.resolveColor(requireContext(),
+                    com.google.android.material.R.attr.colorSurfaceVariant));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, barHeight);
             params.topMargin = gap;
@@ -1374,7 +1396,12 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
 
         @Override
         public int getItemViewType(int position) {
-            return isClearRow(position) ? 1 : 0;
+            // 129：getItemViewType 时 cursor 未定位到该行，先移过去再按 _id 判定
+            Cursor cursor = getCursor();
+            if (cursor != null && cursor.moveToPosition(position)) {
+                return isClearRow(cursor) ? 1 : 0;
+            }
+            return 0;
         }
 
         @Override
@@ -1384,7 +1411,7 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
 
         @Override
         public View newView(Context context, Cursor cursor, ViewGroup parent) {
-            @LayoutRes int layoutResId = isClearRow(cursor.getPosition())
+            @LayoutRes int layoutResId = isClearRow(cursor)
                     ? R.layout.row_suggestion_clear : R.layout.row_suggestion;
             return mInflater.inflate(layoutResId, parent, false);
         }
@@ -1393,7 +1420,7 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
         public void bindView(View view, Context context, Cursor cursor) {
             int columnIndex = cursor.getColumnIndexOrThrow(SuggestionsProvider.Columns.SUGGESTION);
             String suggestionText = cursor.getString(columnIndex);
-            if (isClearRow(cursor.getPosition())) {
+            if (isClearRow(cursor)) {
                 bindClearSuggestionsRow(view, suggestionText);
             } else {
                 bindSuggestionRow(view, suggestionText);
@@ -1414,8 +1441,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             textView.setText(suggestionText);
         }
 
-        private boolean isClearRow(int position) {
-            return position == getCount() - 1;
+        // 129：不再按“末行恒为 clear 行”判定，cursor 刷新瞬间错位可误删全部历史；
+        // 改按 clear 行的 _id（Long.MAX_VALUE）判定，见 isClearRowCursor
+        private boolean isClearRow(Cursor cursor) {
+            return isClearRowCursor(cursor);
         }
     }
 }

@@ -294,8 +294,9 @@ public class MeFragment extends Fragment {
         setCount(view, R.id.me_count_following_value, orZero(mUser.following()));
     }
 
+    // 115：本地 orZero 收敛为共享实现，见 ApiHelpers.orZero
     private static int orZero(Integer count) {
-        return count != null ? count : 0;
+        return ApiHelpers.orZero(count);
     }
 
     private static void setCount(View view, int id, int count) {
@@ -932,20 +933,27 @@ public class MeFragment extends Fragment {
                 org.json.JSONObject backup =
                         com.gh4a.utils.SettingsBackupManager.readBackupFile(appContext, uri);
                 boolean ok = com.gh4a.utils.SettingsBackupManager.applyBackup(appContext, backup);
-                showToast(ok ? getString(R.string.restore_success)
-                        : getString(R.string.restore_failed));
-                if (ok && getActivity() != null) {
-                    getActivity().runOnUiThread(this::recreateActivity);
+                // 125：后台线程直接 getString()，detach 后抛 IllegalStateException；
+                // 改用 applicationContext 取文案
+                showToast(ok ? appContext.getString(R.string.restore_success)
+                        : appContext.getString(R.string.restore_failed));
+                // 125：getActivity() 在判空与使用之间可能变 null，先取局部变量
+                final android.app.Activity activity = getActivity();
+                if (ok && activity != null) {
+                    activity.runOnUiThread(this::recreateActivity);
                 }
             } catch (Exception e) {
-                showToast(getString(R.string.restore_failed));
+                showToast(appContext.getString(R.string.restore_failed));
             }
         }).start();
     }
 
     private void showToast(final String text) {
-        if (getActivity() == null) return;
-        getActivity().runOnUiThread(() ->
-                Toast.makeText(getActivity(), text, Toast.LENGTH_SHORT).show());
+        // 125：先判 getActivity() != null、随后 lambda 里又读一次是 TOCTOU，
+        // detach 后即 NPE；进 lambda 前取局部变量
+        final android.app.Activity activity = getActivity();
+        if (activity == null) return;
+        activity.runOnUiThread(() ->
+                Toast.makeText(activity, text, Toast.LENGTH_SHORT).show());
     }
 }

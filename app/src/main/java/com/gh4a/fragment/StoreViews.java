@@ -95,37 +95,6 @@ public class StoreViews {
         return tv;
     }
 
-    /** 入口行（标题 + 副标题 + 右箭头，如提交仓库／已下架记录／镜像源设置）。 */
-    public static View entryRow(Context context, String title, String subtitle,
-            View.OnClickListener listener) {
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        int side = dp(context, 16);
-        row.setPadding(side, dp(context, 14), side, dp(context, 14));
-        UiUtils.setSelectableBackground(row);
-        row.setOnClickListener(listener);
-        LinearLayout texts = new LinearLayout(context);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        texts.setLayoutParams(new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView main = text(context, 15, false);
-        main.setText(title);
-        texts.addView(main);
-        if (!TextUtils.isEmpty(subtitle)) {
-            TextView sub = text(context, 13, false);
-            sub.setText(subtitle);
-            sub.setTextColor(secondaryText(context));
-            texts.addView(sub);
-        }
-        row.addView(texts);
-        TextView arrow = text(context, 18, false);
-        arrow.setText("›");
-        arrow.setTextColor(secondaryText(context));
-        row.addView(arrow);
-        return row;
-    }
-
     /** 仓库行：名 + 描述 + ★／语言／版本 + 平台图标。 */
     public static View repoRow(Context context, StoreRepo item, View.OnClickListener listener) {
         LinearLayout row = new LinearLayout(context);
@@ -370,53 +339,6 @@ public class StoreViews {
             case ARCHIVE:
             default:
                 return context.getString(R.string.store_platform_archive);
-        }
-    }
-
-    public static String platformName(Context context, StoreClassifier.Platform platform) {
-        switch (platform) {
-            case ANDROID:
-                return "Android";
-            case IOS:
-                return "iOS";
-            case WINDOWS:
-                return context.getString(R.string.store_platform_windows);
-            case MACOS:
-                return context.getString(R.string.store_platform_macos);
-            case LINUX:
-                return context.getString(R.string.store_platform_linux);
-            case HARMONY:
-                return context.getString(R.string.store_platform_harmony);
-            case EXTENSION:
-                return context.getString(R.string.store_platform_extension);
-            case ARCHIVE:
-            default:
-                return context.getString(R.string.store_platform_archive);
-        }
-    }
-
-    /** 安装指南文案（按附件格式）。 */
-    public static int guideResForFormat(String format) {
-        switch (format) {
-            case "apk":
-                return R.string.store_guide_apk;
-            case "ipa":
-                return R.string.store_guide_ipa;
-            case "exe":
-                return R.string.store_guide_exe;
-            case "dmg":
-                return R.string.store_guide_dmg;
-            case "pkg":
-                return R.string.store_guide_pkg;
-            case "appimage":
-                return R.string.store_guide_appimage;
-            case "deb":
-                return R.string.store_guide_deb;
-            case "rpm":
-                return R.string.store_guide_rpm;
-            case "zip":
-            default:
-                return R.string.store_guide_zip;
         }
     }
 }

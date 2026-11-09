@@ -57,7 +57,8 @@ public class IssueAdapter extends RootAdapter<Issue, IssueAdapter.ViewHolder> {
         holder.tvTimestamp.setText(StringUtils.formatRelativeTime(mContext,
                 issue.createdAt(), true));
 
-        if (issue.comments() > 0) {
+        // 115：comments() 为 Integer 可空，> 0 比较会拆箱 NPE
+        if (ApiHelpers.orZero(issue.comments()) > 0) {
             holder.tvComments.setVisibility(View.VISIBLE);
             holder.tvComments.setText(String.valueOf(issue.comments()));
         } else {

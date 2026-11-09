@@ -192,10 +192,13 @@ public class HtmlUtils {
      */
     public static String rewriteRelativeUrls(final String html, final String repoUser,
             final String repoName, final String ref, final String folderPath) {
-        final String baseUrl = "https://github.com/" + repoUser + "/" + repoName + "/blob/" + ref + "/" + folderPath;
+        // 131：ref 为 null 时不能拼成 .../blob/null/...；HtmlUtils 拿不到
+        // defaultBranch，GitHub 会把 HEAD 解析为默认分支，用 HEAD 回落。
+        final String effectiveRef = ref == null || ref.isEmpty() ? "HEAD" : ref;
+        final String baseUrl = "https://github.com/" + repoUser + "/" + repoName + "/blob/" + effectiveRef + "/" + folderPath;
         String rewrittenHtml = rewriteUrlsInAttribute("href", html, baseUrl);
 
-        final String baseUrlForImages = "https://raw.github.com/" + repoUser + "/" + repoName + "/" + ref + "/" + folderPath;
+        final String baseUrlForImages = "https://raw.github.com/" + repoUser + "/" + repoName + "/" + effectiveRef + "/" + folderPath;
         return rewriteUrlsInAttribute("src", rewrittenHtml, baseUrlForImages);
     }
 
@@ -204,6 +207,9 @@ public class HtmlUtils {
             java.util.regex.Pattern.compile("(href)=\"(\\S+)\"");
     private static final java.util.regex.Pattern SRC_ATTR_PATTERN =
             java.util.regex.Pattern.compile("(src)=\"(\\S+)\"");
+    // 131：绝对 URL 判定——scheme 形（RFC 3986：字母开头，后跟字母/数字/+/-/. 再加冒号）
+    private static final java.util.regex.Pattern ABSOLUTE_URL_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9+.-]*:.*");
 
     private static String rewriteUrlsInAttribute(String attribute, String html, String baseUrl) {
         final Matcher matcher = ("href".equals(attribute) ? HREF_ATTR_PATTERN : SRC_ATTR_PATTERN)
@@ -211,7 +217,12 @@ public class HtmlUtils {
         StringBuffer sb = null; // lazy initialized only if there's any match
         while (matcher.find()) {
             String url = matcher.group(2);
-            boolean isAbsoluteUrl = url.contains(":");
+            // 131：`url.contains(":")` 会把含冒号的相对路径（如 `12:30/x.png`）
+            // 误判为绝对 URL 而不改写；只有 scheme 形（字母开头 + `:`）或
+            // `//` 开头的协议相对 URL 才算绝对。（注：`a:b` 本身就是 scheme 形，
+            // 按 RFC 3986 仍算绝对，不在此修的范围内。）
+            boolean isAbsoluteUrl = ABSOLUTE_URL_PATTERN.matcher(url).matches()
+                    || url.startsWith("//");
             boolean isAnchorUrl = url.startsWith("#");
             if (!isAbsoluteUrl && !isAnchorUrl) {
                 if (url.startsWith("/")) {

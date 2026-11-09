@@ -57,4 +57,6 @@
     <color name="mirror_current_green">#7cc36a</color>
     <color name="mirror_error_red">#ff8a80</color>
     <color name="mirror_divider">#2E2E2E</color>
+    <!-- 132：骨架条灰深色变体（M3 colorSurfaceVariant 深色值，不刺眼） -->
+    <color name="skeleton_bar">#49454F</color>
 </resources>

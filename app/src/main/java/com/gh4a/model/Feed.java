@@ -98,9 +98,19 @@ public class Feed implements Parcelable {
         Uri uri = Uri.parse(url);
         String host = uri.getHost();
 
+        // 119：相对路径/畸形 thumbnail URL 时 getHost() 为 null，
+        // 直接 startsWith 即 NPE，且异常发生在 @Commit 里会 abort 整篇 feed 解析
+        if (host == null) {
+            return -1;
+        }
         if (host.startsWith("avatars") && host.contains("githubusercontent.com")) {
             if (uri.getPathSegments().size() == 2) {
-                return Integer.valueOf(uri.getLastPathSegment());
+                try {
+                    return Integer.valueOf(uri.getLastPathSegment());
+                } catch (NumberFormatException e) {
+                    // 119：末段非数字（如用户名路径）时不抛，返回 -1
+                    return -1;
+                }
             }
         }
 
@@ -169,6 +179,10 @@ public class Feed implements Parcelable {
         dest.writeString(avatarUrl);
         dest.writeInt(userId);
         dest.writeString(preview);
+        // 119：Parcel 往返丢日期——补写 published/updated（null 记 -1），
+        // 追加在末尾，不打乱已有字段顺序
+        dest.writeLong(published != null ? published.getTime() : -1);
+        dest.writeLong(updated != null ? updated.getTime() : -1);
     }
 
     @Override
@@ -188,6 +202,11 @@ public class Feed implements Parcelable {
             feed.avatarUrl = in.readString();
             feed.userId = in.readInt();
             feed.preview = in.readString();
+            // 119：与 writeToParcel 同顺序读回 published/updated
+            long publishedTime = in.readLong();
+            feed.published = publishedTime != -1 ? new Date(publishedTime) : null;
+            long updatedTime = in.readLong();
+            feed.updated = updatedTime != -1 ? new Date(updatedTime) : null;
             return feed;
         }
 

@@ -185,8 +185,11 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                 FollowPayload payload = (FollowPayload) event.payload();
                 User target = payload.target();
                 if (target != null) {
+                    // 116：publicRepos()/followers() 可空，%d 格式化 null 会写出
+                    // "has null repositories"；orZero 后显示 0。
                     return res.getString(R.string.event_follow_desc,
-                            target.login(), target.publicRepos(), target.followers());
+                            target.login(), ApiHelpers.orZero(target.publicRepos()),
+                            ApiHelpers.orZero(target.followers()));
                 }
                 break;
             }
@@ -215,6 +218,10 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
 
             case IssuesEvent: {
                 IssuesPayload payload = (IssuesPayload) event.payload();
+                // 117：issue 可空，title() 直接解引用即 NPE
+                if (payload.issue() == null) {
+                    break;
+                }
                 String desc = payload.issue().title();
                 if (payload.action() == IssuesPayload.Action.Assigned ||
                         payload.action() == IssuesPayload.Action.Unassigned) {
@@ -235,6 +242,10 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                     if (enriched != null) {
                         pullRequest = enriched;
                     }
+                }
+                // 117：pullRequest 可空（原始 payload 里只有标题），title() 即 NPE
+                if (pullRequest == null) {
+                    break;
                 }
                 String title = pullRequest.title();
 
@@ -260,6 +271,10 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
             case PullRequestReviewEvent: {
                 PullRequestReviewPayload payload = (PullRequestReviewPayload) event.payload();
                 Review review = payload.review();
+                // 117：review 可空，body() 直接解引用即 NPE
+                if (review == null) {
+                    break;
+                }
                 String body = review.body();
                 if (body != null) {
                     return EmojiParser.parseToUnicode(review.body());
@@ -284,7 +299,8 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                     SpannableStringBuilder ssb = new SpannableStringBuilder();
                     float density = mContext.getResources().getDisplayMetrics().density;
                     int bottomMargin = Math.round(2 /* dp */ * density);
-                    int count = payload.size();
+                    // 117：size() 为 Integer 可空，直接拆箱即 NPE
+                    int count = ApiHelpers.orZero(payload.size());
                     int maxLines =
                             mContext.getResources()
                                     .getInteger(R.integer.event_description_max_lines);
@@ -297,7 +313,8 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                         }
 
                         int lastLength = ssb.length();
-                        String sha = commit.sha().substring(0, 7);
+                        // 117：sha 可空、可短于 7 位，直接 substring(0, 7) 即 NPE/越界
+                        String sha = StringUtils.shortSha(commit.sha());
 
                         ssb.append(sha);
                         ssb.setSpan(new TextAppearanceSpan(mContext, R.style.TextAppearance_SmallUrl_Sha),
@@ -338,8 +355,10 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                 TeamAddPayload payload = (TeamAddPayload) event.payload();
                 Team team = payload.team();
                 if (team != null) {
+                    // 116：同 FollowEvent，membersCount()/reposCount() 可空
                     return res.getString(R.string.event_team_add_desc, team.name(),
-                            team.membersCount(), team.reposCount());
+                            ApiHelpers.orZero(team.membersCount()),
+                            ApiHelpers.orZero(team.reposCount()));
                 }
                 break;
             }
@@ -380,13 +399,22 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
         switch (event.type()) {
             case CommitCommentEvent: {
                 CommitCommentPayload payload = (CommitCommentPayload) event.payload();
+                // 117：comment/commitId 可空，直接 substring 即 NPE
+                GitComment comment = payload.comment();
+                if (comment == null) {
+                    break;
+                }
                 return res.getString(R.string.event_commit_comment_title,
-                        payload.comment().commitId().substring(0, 7),
+                        StringUtils.shortSha(comment.commitId()),
                         formatFromRepoIdentifier(eventRepo));
             }
 
             case CreateEvent: {
                 CreatePayload payload = (CreatePayload) event.payload();
+                // 117：refType 可空，switch(null) 即 NPE
+                if (payload.refType() == null) {
+                    break;
+                }
                 switch (payload.refType()) {
                     case Repository:
                         return res.getString(R.string.event_create_repo_title);
@@ -402,6 +430,10 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
 
             case DeleteEvent: {
                 DeletePayload payload = (DeletePayload) event.payload();
+                // 117：refType 可空，switch(null) 即 NPE
+                if (payload.refType() == null) {
+                    break;
+                }
                 switch (payload.refType()) {
                     case Branch:
                         return res.getString(R.string.event_delete_branch_title, payload.ref(),
@@ -464,6 +496,10 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
 
             case IssuesEvent: {
                 IssuesPayload payload = (IssuesPayload) event.payload();
+                // 117：action 可空，switch(null) 即 NPE；issue 可空，number() 即 NPE
+                if (payload.action() == null || payload.issue() == null) {
+                    return "";
+                }
                 final int resId;
                 switch (payload.action()) {
                     case Opened: resId = R.string.event_issues_open_title; break;
@@ -493,6 +529,10 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
             case PullRequestEvent: {
                 PullRequestPayload payload = (PullRequestPayload) event.payload();
                 PullRequest pr = payload.pullRequest();
+                // 117：action 可空，switch(null) 即 NPE
+                if (payload.action() == null) {
+                    return "";
+                }
                 final int resId;
                 switch (payload.action()) {
                     case Opened:
@@ -532,6 +572,10 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                 PullRequestReviewPayload payload = (PullRequestReviewPayload) event.payload();
                 PullRequest pr = payload.pullRequest();
 
+                // 117：pullRequest 可空，number() 直接解引用即 NPE
+                if (pr == null) {
+                    break;
+                }
                 // assuming action is 'created' for now
                 return res.getString(R.string.event_review_title, pr.number(),
                         formatFromRepoIdentifier(eventRepo));
@@ -547,7 +591,7 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                             pr.number(), formatFromRepoIdentifier(eventRepo));
                 } else if (comment != null) {
                     return res.getString(R.string.event_commit_comment_title,
-                            comment.commitId().substring(0, 7),
+                            StringUtils.shortSha(comment.commitId()),
                             formatFromRepoIdentifier(eventRepo));
                 }
                 break;
@@ -555,7 +599,8 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
 
             case PushEvent: {
                 PushPayload payload = (PushPayload) event.payload();
-                String ref = payload.ref();
+                // 117：ref() 可空，startsWith 即 NPE
+                String ref = payload.ref() != null ? payload.ref() : "";
                 if (ref.startsWith("refs/heads/")) {
                     ref = ref.substring(11);
                 }
@@ -589,6 +634,11 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
     }
 
     private static Label extractLabelForTitle(GitHubEvent event) {
+        // 110：onBindViewHolder 在 formatTitle 判定 payload 无效返回后仍无条件调
+        // 本方法，payload 为 null/基类时强制转型即 NPE/ClassCastException
+        if (hasInvalidPayload(event)) {
+            return null;
+        }
         switch (event.type()) {
             case IssuesEvent:
                 return ((IssuesPayload) event.payload()).label();
