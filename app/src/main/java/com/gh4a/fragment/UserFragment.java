@@ -41,6 +41,7 @@ import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.AvatarHandler;
 import com.gh4a.utils.RxUtils;
 import com.gh4a.utils.StringUtils;
+import com.gh4a.utils.UiUtils;
 import com.gh4a.widget.OverviewRow;
 import com.meisolsson.githubsdk.model.Page;
 import com.meisolsson.githubsdk.model.Repository;
@@ -211,9 +212,8 @@ public class UserFragment extends LoadingFragmentBase implements
             mFollowersRow.setClickIntent(FollowerFollowingListActivity.makeIntent(
                     getActivity(), mUser.login(), true));
 
-            followingRow.setText(getResources().getQuantityString(R.plurals.following,
-                    // 115：following() 为 Integer 可空，getQuantityString(int) 会拆箱 NPE
-                    ApiHelpers.orZero(mUser.following()), ApiHelpers.orZero(mUser.following())));
+            followingRow.setText(UiUtils.getPluralString(getResources(), R.plurals.following,
+                    mUser.following()));
             followingRow.setClickIntent(FollowerFollowingListActivity.makeIntent(
                     getActivity(), mUser.login(), false));
         } else {
@@ -230,14 +230,14 @@ public class UserFragment extends LoadingFragmentBase implements
             gistsRow.setVisibility(isUser ? View.VISIBLE : View.GONE);
             if (isUser) {
                 int totalCount = orZero(mUser.publicGists()) + orZero(mUser.privateGists());
-                gistsRow.setText(getResources().getQuantityString(R.plurals.gist, totalCount, totalCount));
+                gistsRow.setText(UiUtils.getPluralString(getResources(), R.plurals.gist, totalCount));
                 gistsRow.setClickIntent(GistListActivity.makeIntent(getActivity(), mUser.login()));
             }
         }
 
         OverviewRow reposRow = mContentView.findViewById(R.id.repos_row);
         int repoCount = orZero(mUser.totalPrivateRepos()) + orZero(mUser.publicRepos());
-        reposRow.setText(getResources().getQuantityString(R.plurals.repository, repoCount, repoCount));
+        reposRow.setText(UiUtils.getPluralString(getResources(), R.plurals.repository, repoCount));
         reposRow.setClickIntent(RepositoryListActivity.makeIntent(getActivity(), mUser.login(), !isUser));
 
         OverviewRow typeRow = mContentView.findViewById(R.id.type_row);
@@ -285,7 +285,7 @@ public class UserFragment extends LoadingFragmentBase implements
             // 关注后粉丝数包含自己，显示时减一，最少为 0
             count = Math.max(0, count - 1);
         }
-        mFollowersRow.setText(getResources().getQuantityString(resId, count, count));
+        mFollowersRow.setText(UiUtils.getPluralString(getResources(), resId, count));
         mFollowersRow.setToggleState(following);
     }
 
@@ -483,7 +483,7 @@ public class UserFragment extends LoadingFragmentBase implements
                 .compose(makeLoaderSingle(ID_LOADER_ORG_MEMBER_COUNT, force))
                 .subscribe(count -> {
                     OverviewRow membersRow = mContentView.findViewById(R.id.members_row);
-                    membersRow.setText(getResources().getQuantityString(R.plurals.member, count, count));
+                    membersRow.setText(UiUtils.getPluralString(getResources(), R.plurals.member, count));
                 }, this::handleLoadFailure);
     }
 

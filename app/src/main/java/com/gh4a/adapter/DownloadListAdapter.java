@@ -62,7 +62,7 @@ public class DownloadListAdapter
             }
         }
         holder.tvSubtitle.setText(subtitle);
-        holder.tvTime.setText(StringUtils.formatRelativeTime(mContext, new Date(item.record.time), true));
+        holder.tvTime.setText(StringUtils.formatRelativeTime(mContext, item.record.time, true));
     }
 
     /** Queries DownloadManager for the live status of one download id. */

@@ -31,6 +31,7 @@ import com.gh4a.activities.RepositoryListActivity;
 import com.gh4a.activities.TranslationSettingsActivity;
 import com.gh4a.activities.home.HomeActivity;
 import com.gh4a.utils.ApiHelpers;
+import com.gh4a.utils.Background;
 import com.gh4a.utils.UiUtils;
 import com.gh4a.utils.AvatarHandler;
 import com.gh4a.utils.DarkModeScheduler;
@@ -821,7 +822,7 @@ public class MeFragment extends Fragment {
         }
         showSingleChoiceDialog(R.string.start_page, items, checked, which -> {
             mPrefs.edit().putString(SettingsFragment.KEY_START_PAGE, options.get(which)[1]).apply();
-            Toast.makeText(getActivity(), R.string.start_page_saved, Toast.LENGTH_SHORT).show();
+            UiUtils.toastIfAdded(this, R.string.start_page_saved);
             if (getView() != null) {
                 // 刷新本页的起始页摘要（行是动态建的，重新建设置区最稳妥）
                 rebuildSettingsRows();
@@ -908,14 +909,14 @@ public class MeFragment extends Fragment {
 
     private void writeBackupInBackground(final Context appContext,
             final org.json.JSONObject backup, final String savedFormat, final String failedFormat) {
-        new Thread(() -> {
+        Background.run("backup-write", () -> {
             try {
                 String fileName = com.gh4a.utils.SettingsBackupManager.writeBackupFile(appContext, backup);
                 showToast(savedFormat + ": " + fileName);
             } catch (Exception e) {
                 showToast(String.format(failedFormat, e.getMessage()));
             }
-        }).start();
+        });
     }
 
     private void confirmAndApplyRestore(final android.net.Uri uri) {
@@ -928,7 +929,7 @@ public class MeFragment extends Fragment {
 
     private void doRestore(final android.net.Uri uri) {
         final Context appContext = requireActivity().getApplicationContext();
-        new Thread(() -> {
+        Background.run("backup-restore", () -> {
             try {
                 org.json.JSONObject backup =
                         com.gh4a.utils.SettingsBackupManager.readBackupFile(appContext, uri);
@@ -937,23 +938,17 @@ public class MeFragment extends Fragment {
                 // 改用 applicationContext 取文案
                 showToast(ok ? appContext.getString(R.string.restore_success)
                         : appContext.getString(R.string.restore_failed));
-                // 125：getActivity() 在判空与使用之间可能变 null，先取局部变量
-                final android.app.Activity activity = getActivity();
-                if (ok && activity != null) {
-                    activity.runOnUiThread(this::recreateActivity);
+                if (ok) {
+                    UiUtils.runOnUiThreadIfAdded(this, this::recreateActivity);
                 }
             } catch (Exception e) {
                 showToast(appContext.getString(R.string.restore_failed));
             }
-        }).start();
+        });
     }
 
     private void showToast(final String text) {
-        // 125：先判 getActivity() != null、随后 lambda 里又读一次是 TOCTOU，
-        // detach 后即 NPE；进 lambda 前取局部变量
-        final android.app.Activity activity = getActivity();
-        if (activity == null) return;
-        activity.runOnUiThread(() ->
-                Toast.makeText(activity, text, Toast.LENGTH_SHORT).show());
+        // D-E2：判空 + runOnUiThread + Toast 三件套收敛到 UiUtils（内部一次判空取局部变量）
+        UiUtils.toastIfAdded(this, text);
     }
 }

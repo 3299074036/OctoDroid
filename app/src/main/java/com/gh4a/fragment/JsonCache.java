@@ -77,12 +77,6 @@ public class JsonCache<T> {
         return t < 0 ? -1 : System.currentTimeMillis() - t;
     }
 
-    /** 缓存是否存在且在有效期内。 */
-    public boolean isFresh(Context context, String timeKey, long ttlMs) {
-        long age = age(context, timeKey);
-        return age >= 0 && age < ttlMs;
-    }
-
     /** 删除指定键（登出清理用）。 */
     public void clear(Context context, String... keys) {
         if (context == null || keys == null) {

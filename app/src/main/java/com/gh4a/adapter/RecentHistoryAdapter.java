@@ -47,7 +47,7 @@ public class RecentHistoryAdapter extends RootAdapter<RecentHistoryManager.Entry
         holder.ivIcon.setImageResource(iconRes);
         holder.tvTitle.setText(title);
         holder.tvSubtitle.setText(subtitle);
-        holder.tvTime.setText(StringUtils.formatRelativeTime(mContext, new Date(entry.time), true));
+        holder.tvTime.setText(StringUtils.formatRelativeTime(mContext, entry.time, true));
     }
 
     public static class ViewHolder extends RecyclerView.ViewHolder {

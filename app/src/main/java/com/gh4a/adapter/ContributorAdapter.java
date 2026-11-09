@@ -13,6 +13,7 @@ import com.gh4a.R;
 import com.gh4a.activities.UserActivity;
 import com.gh4a.utils.AvatarHandler;
 import com.gh4a.utils.StringUtils;
+import com.gh4a.utils.UiUtils;
 import com.meisolsson.githubsdk.model.User;
 
 public class ContributorAdapter extends RootAdapter<User, ContributorAdapter.ViewHolder> {
@@ -34,8 +35,8 @@ public class ContributorAdapter extends RootAdapter<User, ContributorAdapter.Vie
         holder.ivGravatar.setTag(contributor);
 
         holder.tvTitle.setText(StringUtils.formatName(contributor.login(), contributor.name()));
-        holder.tvExtra.setText(mContext.getResources().getQuantityString(R.plurals.contributor_extra_data,
-                contributor.contributions(), contributor.contributions()));
+        UiUtils.setPluralText(holder.tvExtra, R.plurals.contributor_extra_data,
+                contributor.contributions());
     }
 
     @Override

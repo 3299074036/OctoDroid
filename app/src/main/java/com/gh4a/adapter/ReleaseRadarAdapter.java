@@ -37,7 +37,7 @@ public class ReleaseRadarAdapter
         holder.tvTag.setText(item.tagName);
 
         long time = item.publishedAt != 0 ? item.publishedAt : item.createdAt;
-        holder.tvTime.setText(StringUtils.formatRelativeTime(mContext, new Date(time), true));
+        holder.tvTime.setText(StringUtils.formatRelativeTime(mContext, time, true));
     }
 
     public static class ViewHolder extends RecyclerView.ViewHolder {

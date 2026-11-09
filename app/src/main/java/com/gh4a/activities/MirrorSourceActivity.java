@@ -519,12 +519,16 @@ public class MirrorSourceActivity extends BaseActivity {
 
                     @Override
                     public void onAllComplete() {
-                        // 0.2.4（94）：只在当前句柄仍是本轮句柄时才置空——
-                        // 旧轮回调晚到时 mSpeedTestGeneration 已加一，直接
-                        // 跳过置空（新一轮的句柄留给 cancelSpeedTest 取消）。
-                        if (generation == mSpeedTestGeneration) {
-                            mSpeedTestHandle = null;
+                        // 0.2.4（94 收尾）：代数守卫覆盖整条收尾路径——旧轮
+                        // 回调晚到时直接返回，既不置空新一轮句柄，也不跑
+                        // save + finish（旧轮的缓存写入会覆盖新一轮的实测
+                        // 结果，finishTest 会按旧数据重排并可能改选当前
+                        // 镜像）。目前旧轮到这一步前已被 cancel 拦下、尚
+                        // 不可达，此处是纵深防御。
+                        if (generation != mSpeedTestGeneration) {
+                            return;
                         }
+                        mSpeedTestHandle = null;
                         if (isFinishing() || isDestroyed()) {
                             return;
                         }

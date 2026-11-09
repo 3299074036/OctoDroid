@@ -33,7 +33,9 @@ import com.gh4a.activities.IssueListActivity;
 import com.gh4a.activities.RepositoryActivity;
 import com.gh4a.worker.NotificationsWorker;
 import com.gh4a.worker.ReleaseRadarWorker;
+import com.gh4a.utils.Background;
 import com.gh4a.utils.MirrorHelper;
+import com.gh4a.utils.UiUtils;
 import com.gh4a.widget.IntegerListPreference;
 
 import java.util.List;
@@ -418,7 +420,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private void writeBackupInBackground(final android.content.Context appContext,
             final org.json.JSONObject backup, final String savedFormat,
             final String failedFormat) {
-        new Thread(() -> {
+        Background.run("backup-write", () -> {
             try {
                 String fileName =
                         com.gh4a.utils.SettingsBackupManager.writeBackupFile(appContext, backup);
@@ -426,7 +428,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             } catch (Exception e) {
                 showToast(String.format(failedFormat, e.getMessage()));
             }
-        }).start();
+        });
     }
 
     private void confirmAndApplyRestore(final android.net.Uri uri) {
@@ -440,7 +442,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private void doRestore(final android.net.Uri uri) {
         // applicationContext 快照进线程：恢复完成前离开设置页，getContext() 会是 null (M-4)
         final android.content.Context appContext = getActivity().getApplicationContext();
-        new Thread(() -> {
+        Background.run("backup-restore", () -> {
             boolean ok;
             try {
                 org.json.JSONObject backup =
@@ -454,36 +456,20 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 ok = false;
             }
             final boolean result = ok;
-            if (isAdded()) {
-                // 125：isAdded() 判完、lambda 执行前仍可能 detach，
-                // getActivity() 进 lambda 前取局部变量
-                final android.app.Activity activity = getActivity();
-                if (activity != null) {
-                    activity.runOnUiThread(() -> {
-                        android.widget.Toast.makeText(activity,
-                                result ? R.string.restore_success : R.string.restore_failed,
-                                android.widget.Toast.LENGTH_LONG).show();
-                        // 恢复成功后刷新当前界面主题（深色模式切换时已有此先例）
-                        if (result && mListener != null) {
-                            mListener.onThemeChanged();
-                        }
-                    });
+            UiUtils.runOnUiThreadIfAdded(this, () -> {
+                UiUtils.toastIfAdded(this, result ? R.string.restore_success : R.string.restore_failed,
+                        android.widget.Toast.LENGTH_LONG);
+                // 恢复成功后刷新当前界面主题（深色模式切换时已有此先例）
+                if (result && mListener != null) {
+                    mListener.onThemeChanged();
                 }
-            }
-        }).start();
+            });
+        });
     }
 
     private void showToast(final String message) {
-        if (!isAdded()) {
-            return;
-        }
-        // 125：同款 TOCTOU——isAdded() 判完、lambda 执行前仍可能 detach
-        final android.app.Activity activity = getActivity();
-        if (activity == null) {
-            return;
-        }
-        activity.runOnUiThread(() -> android.widget.Toast.makeText(
-                activity, message, android.widget.Toast.LENGTH_LONG).show());
+        // D-E2：判空 + runOnUiThread + Toast 三件套收敛到 UiUtils（内部一次判空取局部变量）
+        UiUtils.toastIfAdded(this, message, android.widget.Toast.LENGTH_LONG);
     }
 
     @Override

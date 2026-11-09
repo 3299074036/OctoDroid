@@ -321,8 +321,8 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         pullsRow.setClickIntent(IssueListActivity.makeIntent(getActivity(), owner, name, true));
 
         OverviewRow forksRow = mContentView.findViewById(R.id.forks_row);
-        forksRow.setText(getResources().getQuantityString(R.plurals.fork,
-                ApiHelpers.orZero(mRepository.forksCount()), ApiHelpers.orZero(mRepository.forksCount())));
+        forksRow.setText(UiUtils.getPluralString(getResources(), R.plurals.fork,
+                mRepository.forksCount()));
         forksRow.setClickIntent(ForkListActivity.makeIntent(getActivity(), owner, name));
 
         mStarsRow = mContentView.findViewById(R.id.stars_row);
@@ -421,14 +421,14 @@ public class RepositoryFragment extends LoadingFragmentBase implements
     }
 
     private void updateStargazerUi() {
-        mStarsRow.setText(getResources().getQuantityString(R.plurals.star,
-                ApiHelpers.orZero(mRepository.stargazersCount()), ApiHelpers.orZero(mRepository.stargazersCount())));
+        mStarsRow.setText(UiUtils.getPluralString(getResources(), R.plurals.star,
+                mRepository.stargazersCount()));
         mStarsRow.setToggleState(mIsStarring != null && mIsStarring);
     }
 
     private void updateWatcherUi() {
-        mWatcherRow.setText(getResources().getQuantityString(R.plurals.watcher,
-                ApiHelpers.orZero(mRepository.subscribersCount()), ApiHelpers.orZero(mRepository.subscribersCount())));
+        mWatcherRow.setText(UiUtils.getPluralString(getResources(), R.plurals.watcher,
+                mRepository.subscribersCount()));
         mWatcherRow.setToggleState(mIsWatching != null && mIsWatching);
     }
 
@@ -569,10 +569,7 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                 mReadmeTranslator = null;
             }
             mIsTranslating = false;
-            if (getActivity() != null) {
-                Toast.makeText(getActivity(), R.string.translate_cancelled,
-                        Toast.LENGTH_SHORT).show();
-            }
+            UiUtils.toastIfAdded(this, R.string.translate_cancelled);
             updateTranslateButton();
             return;
         }
@@ -607,9 +604,8 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         }
         boolean started = TranslationUiHelper.runWithDefaultProvider(
                 getActivity(), this::startReadmeTranslation);
-        if (!started && getActivity() != null) {
-            Toast.makeText(getActivity(), R.string.translate_no_provider,
-                    Toast.LENGTH_LONG).show();
+        if (!started) {
+            UiUtils.toastIfAdded(this, R.string.translate_no_provider, Toast.LENGTH_LONG);
         }
     }
 
@@ -623,9 +619,10 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         }
         TranslationUiHelper.pickProviderAndRun(getActivity(), provider -> {
             String name = TranslationManager.getProviderDisplayName(getActivity(), provider);
-            Toast.makeText(getActivity(),
-                    getString(R.string.translate_provider_switched, name),
-                    Toast.LENGTH_SHORT).show();
+            if (isAdded()) {
+                UiUtils.toastIfAdded(this,
+                        getString(R.string.translate_provider_switched, name));
+            }
             startReadmeTranslation(provider);
         });
     }
@@ -688,11 +685,11 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     return;
                 }
                 mIsTranslating = false;
-                if (getActivity() != null) {
+                if (isAdded()) {
                     String msg = e.getMessage() != null ? e.getMessage() : "";
-                    Toast.makeText(getActivity(),
+                    UiUtils.toastIfAdded(RepositoryFragment.this,
                             getString(R.string.translate_failed) + (msg.isEmpty() ? "" : ": " + msg),
-                            Toast.LENGTH_LONG).show();
+                            Toast.LENGTH_LONG);
                 }
                 updateTranslateButton();
             }
@@ -735,10 +732,12 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     int issueCount = ApiHelpers.orZero(mRepository.openIssuesCount()) - totalCount;
 
                     OverviewRow issuesRow = mContentView.findViewById(R.id.issues_row);
-                    issuesRow.setText(getResources().getQuantityString(R.plurals.issue, issueCount, issueCount));
+                    issuesRow.setText(UiUtils.getPluralString(getResources(), R.plurals.issue,
+                            issueCount));
 
                     OverviewRow pullsRow = mContentView.findViewById(R.id.pulls_row);
-                    pullsRow.setText(getResources().getQuantityString(R.plurals.pull_request, totalCount, totalCount));
+                    pullsRow.setText(UiUtils.getPluralString(getResources(), R.plurals.pull_request,
+                            totalCount));
                 }, this::handleLoadFailure);
     }
 
@@ -801,6 +800,11 @@ public class RepositoryFragment extends LoadingFragmentBase implements
      * 0.2.4（126）：拉官方列表的结果——ViewModel 里的 Rx 链旋转不中断，
      * 重建后按结果弹框。结果在用户真正操作（确定／新建）时才标记已消费，
      * 框开着旋转会重新弹出，不会丢；拉取失败不弹框（加星本身已成功）。
+     * <p>
+     * 126 收尾：取消（点取消／返回／点框外）也进 ViewModel 已消费态
+     * （对话框的 onCancel 回调），否则取消后立即旋转，LiveData 重放
+     * 未消费的结果，分组框会重弹。取消状态存在 ViewModel 里，不用
+     * Fragment 临时 flag；框开着旋转仍重弹（销毁不走 onCancel）。
      */
     private void onStarListsLoaded(StarBatchMoveViewModel.StarListsResult result) {
         if (result == null || mMoveViewModel == null
@@ -823,7 +827,7 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     lists, (name, isPrivate) -> {
                         mMoveViewModel.markStarListsConsumed(result);
                         mMoveViewModel.createListAndAssign(fullName, name, isPrivate);
-                    });
+                    }, () -> mMoveViewModel.markStarListsConsumed(result));
             return;
         }
         UserListDialogHelper.showAssignDialog(getActivity(), lists,
@@ -834,12 +838,14 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     UserListDialogHelper.showCreateListNameDialog(getActivity(),
                             lists, (name, isPrivate) ->
                                     mMoveViewModel.createListAndAssign(
-                                            fullName, name, isPrivate));
+                                            fullName, name, isPrivate),
+                            () -> mMoveViewModel.markStarListsConsumed(result));
                 },
                 selectedIds -> {
                     mMoveViewModel.markStarListsConsumed(result);
                     assignStarredRepoToLists(fullName, selectedIds);
-                });
+                },
+                () -> mMoveViewModel.markStarListsConsumed(result));
     }
 
     /**
@@ -854,8 +860,8 @@ public class RepositoryFragment extends LoadingFragmentBase implements
             return;
         }
         mMoveViewModel.markSingleOpConsumed(op);
-        Toast.makeText(getActivity(), op.messageRes,
-                op.success ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
+        UiUtils.toastIfAdded(this, op.messageRes,
+                op.success ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG);
     }
 
     private void assignStarredRepoToLists(String fullName, List<String> listIds) {

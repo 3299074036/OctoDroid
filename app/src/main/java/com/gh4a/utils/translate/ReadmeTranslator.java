@@ -4,6 +4,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 
+import com.gh4a.utils.Background;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -68,13 +70,13 @@ public class ReadmeTranslator {
 
     /** Start translation on a background thread. */
     public void translate(final String html, final Callback callback) {
-        new Thread(() -> {
+        Background.run("readme-translate", () -> {
             try {
                 doTranslate(html, callback);
             } catch (Exception e) {
                 postError(callback, e);
             }
-        }).start();
+        });
     }
 
     private void doTranslate(String html, Callback callback) throws Exception {

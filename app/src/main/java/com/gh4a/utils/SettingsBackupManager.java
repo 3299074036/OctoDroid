@@ -30,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -401,6 +402,13 @@ public class SettingsBackupManager {
 
     /** Applies a backup created by {@link #collectBackup}. Returns false on bad format. */
     public static boolean applyBackup(Context context, JSONObject backup) {
+        // 103 回滚：本次实际会写的文件及其调用前快照（只含下面三个
+        // if 分支会写的文件，不扩大范围；rescheduleWorkers/建渠道
+        // 只在成功路径末尾跑，不在回滚范围内）。
+        SharedPreferences gh4aPrefs = null, drawerPrefs = null,
+                defaultPrefs = null, securePrefs = null;
+        Map<String, ?> gh4aSnapshot = null, drawerSnapshot = null,
+                defaultSnapshot = null, secureSnapshot = null;
         try {
             if (!"OctoDroid".equals(backup.optString("app"))) {
                 return false;
@@ -410,9 +418,25 @@ public class SettingsBackupManager {
                 return false;
             }
             JSONObject prefs = backup.getJSONObject("prefs");
+            // 写之前先快照：jsonToPrefs 每文件调一次 editor.apply()
+            //（已提交），后面任一文件解析失败时按快照逐个恢复。
             if (prefs.has("Gh4a-pref")) {
-                SharedPreferences gh4aPrefs = context.getSharedPreferences(
+                gh4aPrefs = context.getSharedPreferences(
                         SettingsFragment.PREF_NAME, Context.MODE_PRIVATE);
+                gh4aSnapshot = snapshotPrefs(gh4aPrefs);
+            }
+            if (prefs.has("drawer_config")) {
+                drawerPrefs = context.getSharedPreferences(
+                        "drawer_config", Context.MODE_PRIVATE);
+                drawerSnapshot = snapshotPrefs(drawerPrefs);
+            }
+            if (prefs.has("default")) {
+                defaultPrefs = PreferenceManager.getDefaultSharedPreferences(context);
+                defaultSnapshot = snapshotPrefs(defaultPrefs);
+                securePrefs = Gh4Application.securePrefs(context);
+                secureSnapshot = snapshotPrefs(securePrefs);
+            }
+            if (prefs.has("Gh4a-pref")) {
                 jsonToPrefs(prefs.getJSONObject("Gh4a-pref"), gh4aPrefs,
                         SettingsBackupManager::isGh4aPrefKeyAllowed);
                 // 102：旧版/手写备份的 prefs version 可能是 0/1；若原样恢复，
@@ -445,8 +469,7 @@ public class SettingsBackupManager {
             }
             if (prefs.has("drawer_config")) {
                 jsonToPrefs(prefs.getJSONObject("drawer_config"),
-                        context.getSharedPreferences("drawer_config", Context.MODE_PRIVATE),
-                        DRAWER_CONFIG_KEYS::contains);
+                        drawerPrefs, DRAWER_CONFIG_KEYS::contains);
             }
             if (prefs.has("default")) {
                 // 翻译区只接受白名单内的 translation_ 键（含 API key/secret，
@@ -470,10 +493,9 @@ public class SettingsBackupManager {
                         }
                     }
                 }
-                jsonToPrefs(plainJson,
-                        PreferenceManager.getDefaultSharedPreferences(context),
+                jsonToPrefs(plainJson, defaultPrefs,
                         SettingsBackupManager::isTranslationKeyAllowed);
-                jsonToPrefs(credJson, Gh4Application.securePrefs(context),
+                jsonToPrefs(credJson, securePrefs,
                         SettingsBackupManager::isTranslationCredentialKey);
             }
             // 104：恢复成功后立即让新间隔/开关生效并建好通知渠道，
@@ -489,7 +511,72 @@ public class SettingsBackupManager {
             ReleaseRadarWorker.createNotificationChannels(context);
             return true;
         } catch (JSONException e) {
+            // 103：applyBackup 返回 false 时，前面已提交的文件要回滚——
+            // 按调用前快照逐个文件恢复（只恢复本次实际写过的文件；
+            // 未走到写步骤的失败——如 app/version 校验、prefs 缺失——
+            // 快照为空，无事可做）。恢复也用 apply()：同一实例的
+            // apply 按调用顺序排队，恢复写一定排在失败的恢复写之后。
+            if (gh4aPrefs != null && gh4aSnapshot != null) {
+                restorePrefsSnapshot(gh4aPrefs, gh4aSnapshot);
+            }
+            if (drawerPrefs != null && drawerSnapshot != null) {
+                restorePrefsSnapshot(drawerPrefs, drawerSnapshot);
+            }
+            if (defaultPrefs != null && defaultSnapshot != null) {
+                restorePrefsSnapshot(defaultPrefs, defaultSnapshot);
+            }
+            if (securePrefs != null && secureSnapshot != null) {
+                restorePrefsSnapshot(securePrefs, secureSnapshot);
+            }
             return false;
         }
+    }
+
+    /**
+     * 103 回滚用：取一份 prefs 在调用前的全量快照。getAll() 返回的
+     * Set 是内部集合的浅拷贝，恢复前先深拷贝，防止之后写回时串改。
+     */
+    private static Map<String, ?> snapshotPrefs(SharedPreferences prefs) {
+        Map<String, Object> copy = new HashMap<>();
+        for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof Set) {
+                // noinspection unchecked
+                copy.put(entry.getKey(), new HashSet<>((Set<String>) value));
+            } else {
+                copy.put(entry.getKey(), value);
+            }
+        }
+        return copy;
+    }
+
+    /**
+     * 103 回滚用：把 prefs 整文件恢复到快照状态（先 clear 再按
+     * 快照逐键写回，备份里没有的旧键也会回来；备份多写的键会被清掉）。
+     * 未知类型的值跳过（SharedPreferences 只存以下六种类型）。
+     */
+    private static void restorePrefsSnapshot(SharedPreferences prefs,
+            Map<String, ?> snapshot) {
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.clear();
+        for (Map.Entry<String, ?> entry : snapshot.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                editor.putString(key, (String) value);
+            } else if (value instanceof Integer) {
+                editor.putInt(key, (Integer) value);
+            } else if (value instanceof Long) {
+                editor.putLong(key, (Long) value);
+            } else if (value instanceof Float) {
+                editor.putFloat(key, (Float) value);
+            } else if (value instanceof Boolean) {
+                editor.putBoolean(key, (Boolean) value);
+            } else if (value instanceof Set) {
+                // noinspection unchecked
+                editor.putStringSet(key, (Set<String>) value);
+            }
+        }
+        editor.apply();
     }
 }

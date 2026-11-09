@@ -294,6 +294,14 @@ public class NotificationsWorker extends Worker {
             return;
         }
         final int id = repository.id().intValue();
+        // 0.2.4：owner() 可空（SDK 模型字段全可空），下面三处解引用
+        //（通知 intent 的登录名、标为已读 intent、owner 头像）须先判空；
+        // 无 owner 时构造不出有效 intent，不发本组通知（与上面
+        // repository/id 为空时 return 同款处理）。
+        final User owner = repository.owner();
+        if (owner == null) {
+            return;
+        }
         String title = ApiHelpers.formatRepoName(getApplicationContext(), repository);
         // notifications are sorted by time descending
         // 106：updatedAt() 可空，getTime() 即 NPE；未知时间按当前时间显示
@@ -304,7 +312,7 @@ public class NotificationsWorker extends Worker {
                 notifications.size(), notifications.size());
 
         Intent intent = HomeActivity.makeNotificationsIntent(
-                context, repository.owner().login(), repository.name())
+                context, owner.login(), repository.name())
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent contentIntent = PendingIntent.getActivity(context, id, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -315,7 +323,7 @@ public class NotificationsWorker extends Worker {
 
         Intent markReadIntent =
                 NotificationHandlingService.makeMarkReposNotificationsAsReadActionIntent(
-                        context, id, repository.owner().login(), repository.name());
+                        context, id, owner.login(), repository.name());
         PendingIntent markReadPendingIntent = PendingIntent.getService(context, id,
                 markReadIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationCompat.Action markReadAction = new NotificationCompat.Action(
@@ -330,7 +338,7 @@ public class NotificationsWorker extends Worker {
                 .build();
 
         NotificationCompat.Builder builder = makeBaseBuilder()
-                .setLargeIcon(loadRoundUserAvatar(repository.owner()))
+                .setLargeIcon(loadRoundUserAvatar(owner))
                 .setGroup(GROUP_ID_GITHUB)
                 .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY)
                 .setWhen(when)
@@ -430,7 +438,11 @@ public class NotificationsWorker extends Worker {
                 NotificationThread n = list.get(0);
                 line.append(determineNotificationTypeLabel(n));
                 emphasisEnd = line.length();
-                line.append(" ").append(n.subject().title());
+                // 0.2.4：subject()/title() 可空（与 :358 同款守卫），
+                // 无标题时只留类型标签，不 NPE。
+                String subjectTitle = n.subject() != null && n.subject().title() != null
+                        ? n.subject().title() : "";
+                line.append(" ").append(subjectTitle);
             } else {
                 emphasisEnd = line.length();
                 line.append(context.getResources().getQuantityString(R.plurals.notification,

@@ -59,6 +59,9 @@ public class ImageViewerActivity extends AppCompatActivity {
     /** Max dimension used when downsampling very large images to avoid OOM. */
     private static final int MAX_DECODED_DIMENSION = 2048;
 
+    /** 130 纵深防御：inSampleSize 上限。2^20 已能把 int 范围内的任一维度压到 2048 以下。 */
+    private static final int MAX_IN_SAMPLE_SIZE = 1 << 20;
+
     /** Refuse to buffer more than this; huge files would OOM before downsampling. */
     private static final int MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 
@@ -343,8 +346,9 @@ public class ImageViewerActivity extends AppCompatActivity {
         int inSampleSize = 1;
         int width = boundsOptions.outWidth;
         int height = boundsOptions.outHeight;
-        while (width / (inSampleSize * 2) >= MAX_DECODED_DIMENSION
-                || height / (inSampleSize * 2) >= MAX_DECODED_DIMENSION) {
+        while ((width / (inSampleSize * 2) >= MAX_DECODED_DIMENSION
+                || height / (inSampleSize * 2) >= MAX_DECODED_DIMENSION)
+                && inSampleSize < MAX_IN_SAMPLE_SIZE) {
             inSampleSize *= 2;
         }
 

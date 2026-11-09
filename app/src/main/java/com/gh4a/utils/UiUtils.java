@@ -1,7 +1,9 @@
 package com.gh4a.utils;
 
+import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
+import android.content.res.Resources;
 import android.content.res.TypedArray;
 import android.graphics.Color;
 import android.text.Editable;
@@ -21,6 +23,7 @@ import android.widget.EdgeEffect;
 import android.widget.EditText;
 import android.widget.MultiAutoCompleteTextView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.gh4a.R;
 import com.gh4a.widget.IssueLabelSpan;
@@ -31,13 +34,17 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.function.Consumer;
 
 import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.PluralsRes;
 import androidx.annotation.StringRes;
 import androidx.appcompat.app.AlertDialog;
 import androidx.core.content.ContextCompat;
+import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.RecyclerView;
 
 public class UiUtils {
@@ -395,5 +402,93 @@ public class UiUtils {
         builder.setSpan(new ForegroundColorSpan(secondaryTextColor), start, builder.length(), 0);
 
         item.setTitle(builder);
+    }
+
+    /**
+     * D-E2：后台回调里 {@code getActivity()} 判空 + {@code runOnUiThread} +
+     * {@code Toast} 三件套的收敛点（顺带修 125/127 的 TOCTOU）。
+     *
+     * <p>原先各处先判 {@code getActivity() != null}、随后 lambda 里又读一次
+     * {@code getActivity()}：判空与使用之间 Fragment 可能 detach，读到
+     * null 即 NPE。这里一次判空后取局部变量，后续只用局部变量，不再重读。
+     */
+
+    /**
+     * Fragment 已附加时把它的 Activity 交给 {@code action}（同步执行）。
+     * 未附加或 Activity 为 null 时静默跳过。局部变量只取一次，杜绝 TOCTOU。
+     */
+    public static void withActivityIfAdded(@Nullable Fragment fragment,
+            @NonNull Consumer<Activity> action) {
+        if (fragment == null || !fragment.isAdded()) {
+            return;
+        }
+        Activity activity = fragment.getActivity();
+        if (activity == null) {
+            return;
+        }
+        action.accept(activity);
+    }
+
+    /**
+     * Fragment 已附加时把 {@code action} 投递到主线程执行；已 detach 时静默跳过。
+     */
+    public static void runOnUiThreadIfAdded(@Nullable Fragment fragment,
+            @NonNull Runnable action) {
+        withActivityIfAdded(fragment, activity -> activity.runOnUiThread(action));
+    }
+
+    /** Fragment 已附加时弹 Toast（短时）；已 detach 时静默跳过。 */
+    public static void toastIfAdded(@Nullable Fragment fragment, @StringRes int resId) {
+        toastIfAdded(fragment, resId, Toast.LENGTH_SHORT);
+    }
+
+    /** Fragment 已附加时弹 Toast；已 detach 时静默跳过。 */
+    public static void toastIfAdded(@Nullable Fragment fragment, @StringRes int resId,
+            int duration) {
+        withActivityIfAdded(fragment, activity -> activity.runOnUiThread(() ->
+                Toast.makeText(activity, resId, duration).show()));
+    }
+
+    /** Fragment 已附加时弹 Toast（短时）；已 detach 时静默跳过。 */
+    public static void toastIfAdded(@Nullable Fragment fragment, @NonNull String text) {
+        toastIfAdded(fragment, text, Toast.LENGTH_SHORT);
+    }
+
+    /** Fragment 已附加时弹 Toast；已 detach 时静默跳过。 */
+    public static void toastIfAdded(@Nullable Fragment fragment, @NonNull String text,
+            int duration) {
+        withActivityIfAdded(fragment, activity -> activity.runOnUiThread(() ->
+                Toast.makeText(activity, text, duration).show()));
+    }
+
+    /**
+     * D-E3：{@code getResources().getQuantityString(R.plurals.X, count, count)}
+     * 同款三元式的收敛点。count 为可空 {@link Integer} 时按 0 计
+     * （{@link ApiHelpers#orZero(Integer)}，顺带修 115 的 quantity 拆箱点）。
+     */
+
+    /** 取复数文案，格式化参数默认就是 count 本身（最常见的 {@code (X, n, n)} 写法）。 */
+    public static String getPluralString(@NonNull Resources res, @PluralsRes int pluralRes,
+            @Nullable Integer count) {
+        int n = ApiHelpers.orZero(count);
+        return res.getQuantityString(pluralRes, n, n);
+    }
+
+    /** 取复数文案，格式化参数由调用方指定（如 {@code checks_summary} 的参数是 summary 文案而非 count）。 */
+    public static String getPluralString(@NonNull Resources res, @PluralsRes int pluralRes,
+            @Nullable Integer count, Object... formatArgs) {
+        return res.getQuantityString(pluralRes, ApiHelpers.orZero(count), formatArgs);
+    }
+
+    /** 把复数文案写进 TextView，格式化参数默认就是 count 本身。 */
+    public static void setPluralText(@NonNull TextView view, @PluralsRes int pluralRes,
+            @Nullable Integer count) {
+        view.setText(getPluralString(view.getResources(), pluralRes, count));
+    }
+
+    /** 把复数文案写进 TextView，格式化参数由调用方指定。 */
+    public static void setPluralText(@NonNull TextView view, @PluralsRes int pluralRes,
+            @Nullable Integer count, Object... formatArgs) {
+        view.setText(getPluralString(view.getResources(), pluralRes, count, formatArgs));
     }
 }

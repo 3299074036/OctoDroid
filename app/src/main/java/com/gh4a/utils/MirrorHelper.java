@@ -842,7 +842,7 @@ public class MirrorHelper {
             return handle;
         }
         final OkHttpClient client = getSpeedTestClient();
-        new Thread(() -> {
+        Background.run("mirror-speed-test", () -> {
             // L-NEW-3：线程池上限 32——mirror_list 可无限添加，无上限会 OOM
             ExecutorService pool =
                     Executors.newFixedThreadPool(Math.min(targets.size(), MAX_SPEED_TEST_THREADS));
@@ -880,7 +880,7 @@ public class MirrorHelper {
                     cb.onAllComplete();
                 }
             });
-        }).start();
+        });
         return handle;
     }
 

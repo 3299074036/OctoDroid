@@ -27,6 +27,7 @@ import android.util.LongSparseArray;
 
 import com.gh4a.fragment.SearchFragment;
 import com.gh4a.fragment.SettingsFragment;
+import com.gh4a.utils.Background;
 import com.gh4a.utils.StringUtils;
 import com.gh4a.worker.NotificationsWorker;
 import com.gh4a.worker.ReleaseRadarWorker;
@@ -366,7 +367,7 @@ public class Gh4Application extends Application implements
         if (BuildConfig.CLIENT_ID.isEmpty() || BuildConfig.CLIENT_SECRET.isEmpty()) {
             return;
         }
-        new Thread(() -> {
+        Background.run("token-revoke", () -> {
             try {
                 String url = "https://api.github.com/applications/"
                         + BuildConfig.CLIENT_ID + "/token";
@@ -392,7 +393,7 @@ public class Gh4Application extends Application implements
             } catch (Exception e) {
                 Log.w(LOG_TAG, "Token revocation failed", e);
             }
-        }, "token-revoke").start();
+        });
     }
 
     /**

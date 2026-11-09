@@ -37,6 +37,7 @@ import com.gh4a.activities.UserActivity;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.AvatarHandler;
 import com.gh4a.utils.StringUtils;
+import com.gh4a.utils.UiUtils;
 import com.gh4a.widget.EllipsizeLineSpan;
 import com.meisolsson.githubsdk.model.Gist;
 import com.meisolsson.githubsdk.model.GitHubEvent;
@@ -478,7 +479,7 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                 List<GitHubWikiPage> pages = payload.pages();
                 int count = pages == null ? 0 : pages.size();
                 return res.getString(R.string.event_gollum_title,
-                        res.getQuantityString(R.plurals.page, count, count),
+                        UiUtils.getPluralString(res, R.plurals.page, count),
                         formatFromRepoIdentifier(eventRepo));
             }
 

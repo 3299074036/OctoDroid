@@ -82,7 +82,7 @@ public class UpdateChecker {
     public static void check(Context context, Callback callback) {
         final Handler handler = new Handler(Looper.getMainLooper());
         final Context appContext = context.getApplicationContext();
-        new Thread(() -> {
+        Background.run("update-check", () -> {
             try {
                 UpdateInfo info = doCheck(appContext);
                 handler.post(() -> callback.onResult(
@@ -91,7 +91,7 @@ public class UpdateChecker {
                 String message = e.getMessage() != null ? e.getMessage() : e.toString();
                 handler.post(() -> callback.onError(message));
             }
-        }).start();
+        });
     }
 
     private static UpdateInfo doCheck(Context context) throws Exception {

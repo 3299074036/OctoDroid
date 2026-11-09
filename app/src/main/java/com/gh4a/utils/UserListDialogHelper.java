@@ -57,6 +57,24 @@ public class UserListDialogHelper {
     public static void showAssignDialog(Context context,
             List<UserListsGraphQL.UserList> lists, Set<String> preCheckedIds,
             String message, Runnable onCreateNew, OnAssignConfirm onConfirm) {
+        showAssignDialog(context, lists, preCheckedIds, message,
+                onCreateNew, onConfirm, null);
+    }
+
+    /**
+     * 同上，另带 onCancel：用户点“取消”/按返回/点框外关闭时回调。
+     * <p>
+     * 0.2.4（126 收尾）：取消必须进 ViewModel 状态机——调用方在
+     * onCancel 里把 StarListsResult 标已消费，否则取消后立即旋转，
+     * LiveData 重放未消费的结果，分组框会重弹。注意不用
+     * OnDismissListener：旋转销毁 Activity 时对话框 dismiss 也会触发
+     * 它，会把“框开着旋转应重弹”的 0.2.3 行为也吃掉；取消按钮与
+     * onCancel 互斥（按钮关闭不走 onCancel），回调恰好一次。
+     */
+    public static void showAssignDialog(Context context,
+            List<UserListsGraphQL.UserList> lists, Set<String> preCheckedIds,
+            String message, Runnable onCreateNew, OnAssignConfirm onConfirm,
+            Runnable onCancel) {
         List<String> names = new ArrayList<>();
         boolean[] checked = new boolean[lists.size()];
         for (int i = 0; i < lists.size(); i++) {
@@ -82,6 +100,9 @@ public class UserListDialogHelper {
         new AlertDialog.Builder(context)
                 .setTitle(R.string.assign_official_title)
                 .setView(view)
+                .setOnCancelListener(dialog -> {
+                    if (onCancel != null) onCancel.run();
+                })
                 .setPositiveButton(R.string.ok, (dialog, which) -> {
                     List<String> selectedIds = new ArrayList<>();
                     for (int i = 0; i < checked.length; i++) {
@@ -93,7 +114,9 @@ public class UserListDialogHelper {
                         (dialog, which) -> {
                             if (onCreateNew != null) onCreateNew.run();
                         })
-                .setNegativeButton(R.string.cancel, null)
+                .setNegativeButton(R.string.cancel, (dialog, which) -> {
+                    if (onCancel != null) onCancel.run();
+                })
                 .show();
     }
 
@@ -170,6 +193,16 @@ public class UserListDialogHelper {
     public static void showCreateListNameDialog(Context context,
             List<UserListsGraphQL.UserList> existingLists,
             OnCreateNameConfirmed onConfirmed) {
+        showCreateListNameDialog(context, existingLists, onConfirmed, null);
+    }
+
+    /**
+     * 同上，另带 onCancel（126 收尾，语义同 showAssignDialog 的
+     * onCancel：取消进 ViewModel 已消费态，旋转不再重弹）。
+     */
+    public static void showCreateListNameDialog(Context context,
+            List<UserListsGraphQL.UserList> existingLists,
+            OnCreateNameConfirmed onConfirmed, Runnable onCancel) {
         View view = LayoutInflater.from(context)
                 .inflate(R.layout.dialog_create_list, null);
         EditText nameInput = view.findViewById(R.id.et_list_name);
@@ -178,8 +211,15 @@ public class UserListDialogHelper {
                 .setTitle(R.string.star_list_create_title)
                 .setView(view)
                 .setPositiveButton(R.string.star_list_save, null)
-                .setNegativeButton(R.string.cancel, null)
+                .setNegativeButton(R.string.cancel, (d, which) -> {
+                    if (onCancel != null) onCancel.run();
+                })
                 .create();
+        // 126 收尾：返回/点框外取消也走 onCancel；旋转销毁不触发
+        // onCancel，只触发 onDismiss，故此处不用 OnDismissListener。
+        dialog.setOnCancelListener(d -> {
+            if (onCancel != null) onCancel.run();
+        });
         dialog.setOnShowListener(d -> {
             Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
             save.setOnClickListener(v -> {

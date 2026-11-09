@@ -108,6 +108,15 @@ public class StringUtils {
         return Gh4Application.get().getPrettyTimeInstance().format(date);
     }
 
+    /**
+     * D-E6：epoch 毫秒版重载，省掉调用方各写一遍 {@code new Date(epoch)}。
+     * 与 {@link #formatRelativeTime(Context, Date, boolean)} 完全等价。
+     */
+    public static CharSequence formatRelativeTime(Context context, long epochMillis,
+            boolean showDateIfLongAgo) {
+        return formatRelativeTime(context, new Date(epochMillis), showDateIfLongAgo);
+    }
+
     public static CharSequence formatExactTime(Context context, Date date) {
         return DateUtils.formatDateTime(context, date.getTime(), DateUtils.FORMAT_SHOW_DATE
                 | DateUtils.FORMAT_SHOW_TIME

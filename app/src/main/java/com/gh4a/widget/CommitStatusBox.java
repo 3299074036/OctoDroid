@@ -16,6 +16,7 @@ import com.gh4a.BaseActivity;
 import com.gh4a.R;
 import com.gh4a.model.StatusWrapper;
 import com.gh4a.utils.IntentUtils;
+import com.gh4a.utils.UiUtils;
 import com.meisolsson.githubsdk.model.PullRequest;
 
 import java.util.ArrayList;
@@ -193,8 +194,7 @@ public class CommitStatusBox extends LinearLayoutCompat implements View.OnClickL
         String summary = TextUtils.join(", ", summaryList);
 
         int sumCount = pendingCount + failingCount + successCount;
-        mSummaryTextView.setText(getResources().getQuantityString(R.plurals.checks_summary,
-                sumCount, summary));
+        UiUtils.setPluralText(mSummaryTextView, R.plurals.checks_summary, sumCount, summary);
     }
 
     private void setStatusesExpanded(boolean expanded) {

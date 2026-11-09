@@ -273,7 +273,7 @@ public class DownloadUtils {
         final Context appContext = context.getApplicationContext();
         final Handler handler = new Handler(Looper.getMainLooper());
         DownloadRecordManager.setVerifying(downloadId, true);
-        new Thread(() -> {
+        Background.run("verify-download", () -> {
             String sha256 = computeSha256(file);
             long size = file.length();
             DownloadRecordManager.updateFileInfo(appContext, downloadId, size, sha256);
@@ -314,7 +314,7 @@ public class DownloadUtils {
                     notifyDownloadComplete(appContext, file, downloadId);
                 }
             });
-        }).start();
+        });
     }
 
     /** 下载完成通知的渠道（API 26+ 才建，低版本直接发）。 */

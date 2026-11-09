@@ -123,10 +123,9 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
             new ActivityResultHelpers.ActivityResultSuccessCallback(() -> {
                 reloadEvents(true);
                 // 127：异步回调返回时 Fragment 可能已 detach，getActivity() 为 null
-                Activity activity = getActivity();
-                if (activity != null) {
-                    activity.setResult(Activity.RESULT_OK);
-                }
+                // D-E2：收敛到 UiUtils.withActivityIfAdded（内部一次判空取局部变量）
+                UiUtils.withActivityIfAdded(this,
+                        activity -> activity.setResult(Activity.RESULT_OK));
             }));
 
     protected static Bundle buildArgs(String repoOwner, String repoName,
@@ -696,10 +695,8 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
         if (mReactionMenuHelper != null) {
             mReactionMenuHelper.updateMenuItems();
             // 127：异步回调（onReactionsUpdated）时 Activity 可能已为空
-            Activity activity = getActivity();
-            if (activity != null) {
-                activity.invalidateOptionsMenu();
-            }
+            // D-E2：收敛到 UiUtils.withActivityIfAdded
+            UiUtils.withActivityIfAdded(this, Activity::invalidateOptionsMenu);
         }
     }
 
@@ -741,10 +738,9 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
             reloadEvents(false);
         }
         // 127：编辑器回调时 Activity 可能已为空
-        Activity activity = getActivity();
-        if (activity != null) {
-            activity.setResult(Activity.RESULT_OK);
-        }
+        // D-E2：收敛到 UiUtils.withActivityIfAdded
+        UiUtils.withActivityIfAdded(this,
+                activity -> activity.setResult(Activity.RESULT_OK));
     }
 
     @Override
@@ -805,10 +801,9 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
                 .subscribe(result -> {
                     reloadEvents(false);
                     // 127：删除回调返回时 Fragment 可能已 detach
-                    Activity activity = getActivity();
-                    if (activity != null) {
-                        activity.setResult(Activity.RESULT_OK);
-                    }
+                    // D-E2：收敛到 UiUtils.withActivityIfAdded
+                    UiUtils.withActivityIfAdded(this,
+                            activity -> activity.setResult(Activity.RESULT_OK));
                 }, error -> handleActionFailure("Deleting comment failed", error));
     }
 }

@@ -207,9 +207,11 @@ public class HtmlUtils {
             java.util.regex.Pattern.compile("(href)=\"(\\S+)\"");
     private static final java.util.regex.Pattern SRC_ATTR_PATTERN =
             java.util.regex.Pattern.compile("(src)=\"(\\S+)\"");
-    // 131：绝对 URL 判定——scheme 形（RFC 3986：字母开头，后跟字母/数字/+/-/. 再加冒号）
+    // 131：绝对 URL 判定——scheme 形（RFC 3986：字母开头，后跟字母/数字/+/-/. 再加冒号），
+    // 但 scheme 至少 2 个字符：单字母 scheme（如 `a:b`）在 README 相对路径里
+    // 几乎不可能是真实 scheme（IANA 注册的 scheme 最短 2 字符），按相对路径改写。
     private static final java.util.regex.Pattern ABSOLUTE_URL_PATTERN =
-            java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9+.-]*:.*");
+            java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9+.-]+:.*");
 
     private static String rewriteUrlsInAttribute(String attribute, String html, String baseUrl) {
         final Matcher matcher = ("href".equals(attribute) ? HREF_ATTR_PATTERN : SRC_ATTR_PATTERN)
@@ -219,8 +221,8 @@ public class HtmlUtils {
             String url = matcher.group(2);
             // 131：`url.contains(":")` 会把含冒号的相对路径（如 `12:30/x.png`）
             // 误判为绝对 URL 而不改写；只有 scheme 形（字母开头 + `:`）或
-            // `//` 开头的协议相对 URL 才算绝对。（注：`a:b` 本身就是 scheme 形，
-            // 按 RFC 3986 仍算绝对，不在此修的范围内。）
+            // `//` 开头的协议相对 URL 才算绝对。0.2.4 收尾：scheme 须至少
+            // 2 字符，`a:b` 这类单字母冒号按相对路径改写，不算绝对 URL。
             boolean isAbsoluteUrl = ABSOLUTE_URL_PATTERN.matcher(url).matches()
                     || url.startsWith("//");
             boolean isAnchorUrl = url.startsWith("#");

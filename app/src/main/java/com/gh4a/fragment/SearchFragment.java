@@ -43,6 +43,7 @@ import com.gh4a.adapter.RootAdapter;
 import com.gh4a.adapter.SearchAdapter;
 import com.gh4a.db.SuggestionsProvider;
 import com.gh4a.utils.ApiHelpers;
+import com.gh4a.utils.Background;
 import com.gh4a.utils.UiUtils;
 import com.gh4a.utils.RxUtils;
 import com.gh4a.utils.StringUtils;
@@ -750,12 +751,8 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
             cv.put(SuggestionsProvider.Columns.SUGGESTION, query);
             cv.put(SuggestionsProvider.Columns.DATE, System.currentTimeMillis());
 
-            new Thread() {
-                @Override
-                public void run() {
-                    cr.insert(SuggestionsProvider.Columns.CONTENT_URI, cv);
-                }
-            }.start();
+            Background.run("suggestion-insert", () ->
+                    cr.insert(SuggestionsProvider.Columns.CONTENT_URI, cv));
         }
         loadResults();
         return true;
@@ -821,14 +818,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
                 if (activity != null) {
                     final int type = mSelectedSearchType;
                     final ContentResolver cr = activity.getContentResolver();
-                    new Thread() {
-                        @Override
-                        public void run() {
+                    Background.run("suggestion-clear", () ->
                             cr.delete(SuggestionsProvider.Columns.CONTENT_URI,
                                     SuggestionsProvider.Columns.TYPE + " = ?",
-                                    new String[] { String.valueOf(type) });
-                        }
-                    }.start();
+                                    new String[] { String.valueOf(type) }));
                 }
             } else {
                 mQuery = cursor.getString(1);
@@ -1147,21 +1140,16 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
                             .setPositiveButton(R.string.delete, (dialog, which) -> {
                                 final ContentResolver cr =
                                         requireContext().getContentResolver();
-                                new Thread() {
-                                    @Override
-                                    public void run() {
-                                        cr.delete(SuggestionsProvider.Columns.CONTENT_URI,
-                                                SuggestionsProvider.Columns.TYPE + " = ? AND "
-                                                        + SuggestionsProvider.Columns.SUGGESTION
-                                                        + " = ?",
-                                                new String[] { String.valueOf(type), term });
-                                        if (getActivity() != null) {
-                                            getActivity().runOnUiThread(() -> {
-                                                if (isAdded()) refreshDefaultHeader();
-                                            });
-                                        }
-                                    }
-                                }.start();
+                                Background.run("suggestion-delete", () -> {
+                                    cr.delete(SuggestionsProvider.Columns.CONTENT_URI,
+                                            SuggestionsProvider.Columns.TYPE + " = ? AND "
+                                                    + SuggestionsProvider.Columns.SUGGESTION
+                                                    + " = ?",
+                                            new String[] { String.valueOf(type), term });
+                                    UiUtils.runOnUiThreadIfAdded(this, () -> {
+                                        if (isAdded()) refreshDefaultHeader();
+                                    });
+                                });
                             })
                             .setNegativeButton(android.R.string.cancel, null)
                             .show();

@@ -70,14 +70,6 @@ public class HotReposCache {
         }
         CACHE.save(context, KEY_REPOS, KEY_TIME, repos);
     }
-
-    /** 缓存年龄（毫秒），无缓存返回 -1。 */
-    public static long age(Context context) {
-        return CACHE.age(context, KEY_TIME);
-    }
-
-    /** 缓存是否存在且在有效期内。 */
-    public static boolean isFresh(Context context) {
-        return CACHE.isFresh(context, KEY_TIME, TTL_MS);
-    }
 }
+
+

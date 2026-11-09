@@ -14,6 +14,7 @@ import androidx.appcompat.app.AlertDialog;
 
 import com.gh4a.Gh4Application;
 import com.gh4a.R;
+import com.gh4a.utils.Background;
 import com.gh4a.utils.translate.TranslationManager;
 import com.gh4a.utils.translate.Translator;
 
@@ -187,7 +188,7 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
         final String okFormat = getString(R.string.translation_test_ok);
         final String failFormat = getString(R.string.translation_test_fail);
         Toast.makeText(getContext(), R.string.translation_testing, Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
+        Background.run("translation-test", () -> {
             String message;
             try {
                 Translator translator = TranslationManager.createTranslator(appContext);
@@ -204,7 +205,7 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
                     Toast.makeText(getContext(), toastMsg, Toast.LENGTH_LONG).show();
                 }
             });
-        }).start();
+        });
     }
 
     @Override
