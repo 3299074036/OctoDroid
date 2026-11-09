@@ -10,21 +10,23 @@ public class NotificationHolder {
     @Nullable
     public final NotificationThread notification;
 
-    @NonNull
+    @Nullable
     public final Repository repository;
 
     private boolean mLastRepositoryNotification;
     private boolean mRead;
 
-    public NotificationHolder(@NonNull Repository repository) {
+    public NotificationHolder(@Nullable Repository repository) {
         notification = null;
         this.repository = repository;
     }
 
     public NotificationHolder(@NonNull NotificationThread notification) {
         this.notification = notification;
+        // 154/115：repository()/unread() 均可空；缺 repository 的通知按无仓库处理，
+        // 下游 formatRepoName/assignAvatar 均为 null 安全，调用点另行判空。
         repository = notification.repository();
-        mRead = !notification.unread();
+        mRead = !Boolean.TRUE.equals(notification.unread());
     }
 
     public boolean isLastRepositoryNotification() {

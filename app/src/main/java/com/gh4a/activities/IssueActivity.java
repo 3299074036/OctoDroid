@@ -74,7 +74,10 @@ public class IssueActivity extends BaseActivity implements
         View.OnClickListener, ConfirmationDialogFragment.Callback {
     public static Intent makeIntent(Context context, Issue issue) {
         Pair<String, String> repoOwnerAndName = ApiHelpers.extractRepoOwnerAndNameFromIssue(issue);
-        return makeIntent(context, repoOwnerAndName.first, repoOwnerAndName.second, issue.number());
+        // 207：issue.number() 是可空 Integer，传 int 形参即拆箱 NPE；
+        // issue 本身亦可空，空值按 0 计（下游走 404 加载失败页）。
+        return makeIntent(context, repoOwnerAndName.first, repoOwnerAndName.second,
+                issue != null ? ApiHelpers.orZero(issue.number()) : 0);
     }
 
     public static Intent makeIntent(Context context, String login, String repoName, int number) {
@@ -259,11 +262,18 @@ public class IssueActivity extends BaseActivity implements
                 }
                 return true;
             case R.id.share:
+                // 155：菜单加载完成前即可点，mIssue/htmlUrl() 为 null 时 Uri.parse 即 NPE。
+                if (mIssue == null || mIssue.htmlUrl() == null) {
+                    return true;
+                }
                 IntentUtils.share(this, getString(R.string.share_issue_subject,
                         mIssueNumber, mIssue.title(), mRepoOwner + "/" + mRepoName),
                         Uri.parse(mIssue.htmlUrl()));
                 return true;
             case R.id.browser:
+                if (mIssue == null || mIssue.htmlUrl() == null) {
+                    return true;
+                }
                 IntentUtils.launchBrowser(this, Uri.parse(mIssue.htmlUrl()));
                 return true;
             case R.id.copy_number:
@@ -290,7 +300,10 @@ public class IssueActivity extends BaseActivity implements
         if (mFragment != null) {
             getSupportFragmentManager().beginTransaction()
                     .remove(mFragment)
-                    .commit();
+                    // 181：onRefresh 可在状态已保存后触发，commit() 会抛
+                    // IllegalStateException；此处仅是丢弃旧 fragment，
+                    // 允许状态丢失。
+                    .commitAllowingStateLoss();
             setFragment(null);
         }
 

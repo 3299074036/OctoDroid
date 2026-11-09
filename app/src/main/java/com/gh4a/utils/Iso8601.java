@@ -33,6 +33,10 @@ public class Iso8601 {
                 for (int i = 0; i < PATTERNS.length; i++) {
                     SimpleDateFormat f = new SimpleDateFormat(PATTERNS[i], Locale.US);
                     f.setTimeZone(TimeZone.getTimeZone("UTC"));
+                    // 269 新单测：非法日期（月 13、日 40）必须返回 0 而不是进位
+                    // 滚算成合法日期——SimpleDateFormat 默认 lenient 会把
+                    // "2026-13-40T99:99:99Z" 算成 2027 年的某天。
+                    f.setLenient(false);
                     formats[i] = f;
                 }
                 return formats;

@@ -62,9 +62,22 @@ public class ChainDownloadHelper {
         }
     }
 
+    /** 257/261/262：入队前即失败（空链、非法文件名、存储瞬间不可用）
+     * 时与 dm == null 分支同款处理：toast + 失败回调。 */
+    private static void failEnqueue(Context context, Callback callback) {
+        Toast.makeText(context, R.string.download_failed, Toast.LENGTH_SHORT).show();
+        callback.onDownloadComplete(context, false, null, -1);
+    }
+
     private static void enqueueNext(final Context context, final List<String> urls,
             final String fileName, final String description,
             final RequestCustomizer customizer, final Callback callback) {
+        // 262：buildFallbackChain 经 addDistinctUrl 组装，url 为 null 或 ""
+        // 时返回空链；空链上 urls.get(0) 即越界。空链按入队失败处理。
+        if (urls == null || urls.isEmpty()) {
+            failEnqueue(context, callback);
+            return;
+        }
         final String url = urls.get(0);
         final List<String> rest = new ArrayList<>(urls.subList(1, urls.size()));
         final DownloadManager dm =
@@ -80,24 +93,44 @@ public class ChainDownloadHelper {
         // 92：先清理上轮残留的 receiver（对应下载已不在 DM 里）。
         pruneStaleReceivers(context, dm);
         // 文件名来自网络：先 sanitize，防止路径穿越写到 Downloads 之外 (L-2)
-        final String safeName = FileUtils.sanitizeFileName(fileName);
-        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-                // 0.2.2（S-M5）：下载落到应用私有目录（Android/data/<包>/files/Download），
-                // 不再进公共 Downloads/（其他应用可读）；打开时走 FileProvider。
-                // 私有目录不需要 WRITE_EXTERNAL_STORAGE，任何 API 级别都不用申请。
-                .setDestinationInExternalFilesDir(context,
-                        Environment.DIRECTORY_DOWNLOADS, safeName)
-                // 57：系统下载完成通知只在校验通过后才由应用自己发（见
-                // DownloadUtils.notifyDownloadComplete）——这里只显示下载中
-                // 进度，不在完成瞬间弹系统通知，否则用户一点就装上还没验过
-                // 签名的 APK（校验是事后异步的，见 DownloadUtils）。
-                .setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE)
-                .setAllowedOverRoaming(false);
-        if (customizer != null) {
-            customizer.customize(request);
+        final String safeName;
+        try {
+            // 257：文件名来自服务端且未经预清洗（release 附件名仓库方
+            // 自定、可含 ".."、可空；gist/仓库文件名用户自定），
+            // sanitizeFileName 遇 null 或 ".." 抛 IllegalArgumentException，
+            // 原先无 try/catch，主线程直接崩溃（下载未开始、无 toast）。
+            safeName = FileUtils.sanitizeFileName(fileName);
+        } catch (IllegalArgumentException e) {
+            failEnqueue(context, callback);
+            return;
         }
-        final long downloadId = dm.enqueue(request);
+        final long downloadId;
+        try {
+            // 261：:75 的 getExternalFilesDir() == null 检查（90 号）与
+            // 这里的 setDestinationInExternalFilesDir / dm.enqueue 之间
+            // 存在检查-执行窗口；存储在入队瞬间卸载即抛
+            // IllegalStateException / IllegalArgumentException（主线程崩溃）。
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
+                    // 0.2.2（S-M5）：下载落到应用私有目录（Android/data/<包>/files/Download），
+                    // 不再进公共 Downloads/（其他应用可读）；打开时走 FileProvider。
+                    // 私有目录不需要 WRITE_EXTERNAL_STORAGE，任何 API 级别都不用申请。
+                    .setDestinationInExternalFilesDir(context,
+                            Environment.DIRECTORY_DOWNLOADS, safeName)
+                    // 57：系统下载完成通知只在校验通过后才由应用自己发（见
+                    // DownloadUtils.notifyDownloadComplete）——这里只显示下载中
+                    // 进度，不在完成瞬间弹系统通知，否则用户一点就装上还没验过
+                    // 签名的 APK（校验是事后异步的，见 DownloadUtils）。
+                    .setNotificationVisibility(
+                            DownloadManager.Request.VISIBILITY_VISIBLE)
+                    .setAllowedOverRoaming(false);
+            if (customizer != null) {
+                customizer.customize(request);
+            }
+            downloadId = dm.enqueue(request);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            failEnqueue(context, callback);
+            return;
+        }
         // 下载记录里的 URL 剥离 query：签名 URL 的 query 可能含 token，
         // 不能让它进备份/下载记录 (L-17)
         String recordUrl = Uri.parse(url).buildUpon().clearQuery().build().toString();

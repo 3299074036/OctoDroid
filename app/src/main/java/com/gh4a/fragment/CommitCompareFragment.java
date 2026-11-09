@@ -113,6 +113,11 @@ public class CommitCompareFragment extends ListDataBaseFragment<Commit> implemen
 
     @Override
     protected Single<List<Commit>> onCreateDataSingle(boolean bypassCache) {
+        // 156：base/head 为 null（head 仓库被删的 PR）时 compare 接口的 @Path 参数
+        // 为 null 即抛 IllegalArgumentException，降级为空列表，不调接口。
+        if (mBase == null || mHead == null) {
+            return Single.just(new ArrayList<>());
+        }
         RepositoryCommitService service = ServiceFactory.get(RepositoryCommitService.class, bypassCache);
 
         Single<CommitCompare> compareSingle = service.compareCommits(mRepoOwner, mRepoName, mBase, mHead)

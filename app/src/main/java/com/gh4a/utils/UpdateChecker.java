@@ -10,7 +10,10 @@ import com.gh4a.BuildConfig;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -210,6 +213,9 @@ public class UpdateChecker {
         throw lastError;
     }
 
+    /** release JSON 上限：与 99/209 号同款口径，超限即拒收。 */
+    private static final int MAX_RELEASE_JSON_BYTES = 1024 * 1024;
+
     /** 单条链路拉取并校验 release JSON：HTTP 2xx 且 tag_name 非空才算成功。 */
     private static JSONObject fetchReleaseJson(Call call) throws IOException {
         try (Response response = call.execute()) {
@@ -218,7 +224,15 @@ public class UpdateChecker {
             }
             final JSONObject json;
             try {
-                json = new JSONObject(response.body().string());
+                // 237：响应体此前无上限整包读入（body().string() 全量进
+                // 内存）；更新检查走镜像链路（含用户自配镜像），恶意镜像
+                // 返回数百 MB 的 release JSON 时后台线程 OOM。先判
+                // Content-Length，再限流读（>1MB 即拒收），不整包进内存。
+                long contentLength = response.body().contentLength();
+                if (contentLength > MAX_RELEASE_JSON_BYTES) {
+                    throw new IOException("response too large");
+                }
+                json = new JSONObject(readBoundedString(response.body().byteStream()));
             } catch (JSONException e) {
                 throw new IOException("bad response");
             }
@@ -227,6 +241,24 @@ public class UpdateChecker {
             }
             return json;
         }
+    }
+
+    /** 限流读入响应体并转字符串；超过上限即抛 IOException，不整包进内存。 */
+    private static String readBoundedString(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int total = 0;
+        int n;
+        while ((n = in.read(buffer)) != -1) {
+            total += n;
+            if (total > MAX_RELEASE_JSON_BYTES) {
+                throw new IOException("response too large");
+            }
+            out.write(buffer, 0, n);
+        }
+        // ByteArrayOutputStream.toString(Charset) 要求 API 33（minSdk 23），
+        // 改用 String(byte[], Charset)，API 1 即有。
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
     /** True when the latest release version is newer than the installed one. */

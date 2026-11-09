@@ -24,6 +24,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 
 import com.gh4a.R;
+import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.StringUtils;
 import com.gh4a.utils.UiUtils;
 import com.meisolsson.githubsdk.model.IssueState;
@@ -58,10 +59,11 @@ public class MilestoneAdapter extends RootAdapter<Milestone, MilestoneAdapter.Vi
             holder.tvDesc.setVisibility(View.GONE);
         }
 
+        // 166：openIssues()/closedIssues() 为可空 Integer，%d 格式化会拆箱，缺字段按 0 计。
         holder.tvOpen.setText(mContext.getString(R.string.issue_milestone_open_issues,
-                milestone.openIssues()));
+                ApiHelpers.orZero(milestone.openIssues())));
         holder.tvClosed.setText(mContext.getString(R.string.issue_milestone_closed_issues,
-                milestone.closedIssues()));
+                ApiHelpers.orZero(milestone.closedIssues())));
 
         if (milestone.dueOn() != null) {
             holder.tvDue.setText(

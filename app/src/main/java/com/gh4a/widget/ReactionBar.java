@@ -126,15 +126,16 @@ public class ReactionBar extends HorizontalScrollView implements View.OnClickLis
         if (mAddReactionMenuHelper != null) {
             mAddReactionMenuHelper.updateMenuItems();
         }
-        if (reactions != null && reactions.totalCount() > 0) {
-            updateView(mPlusOneView, reactions.plusOne());
-            updateView(mMinusOneView, reactions.minusOne());
-            updateView(mLaughView, reactions.laugh());
-            updateView(mHoorayView, reactions.hooray());
-            updateView(mConfusedView, reactions.confused());
-            updateView(mHeartView, reactions.heart());
-            updateView(mRocketView, reactions.rocket());
-            updateView(mEyesView, reactions.eyes());
+        // 154/115：Reactions 各计数均为可空 Integer，直接进 int 形参会拆箱 NPE。
+        if (reactions != null && ApiHelpers.orZero(reactions.totalCount()) > 0) {
+            updateView(mPlusOneView, ApiHelpers.orZero(reactions.plusOne()));
+            updateView(mMinusOneView, ApiHelpers.orZero(reactions.minusOne()));
+            updateView(mLaughView, ApiHelpers.orZero(reactions.laugh()));
+            updateView(mHoorayView, ApiHelpers.orZero(reactions.hooray()));
+            updateView(mConfusedView, ApiHelpers.orZero(reactions.confused()));
+            updateView(mHeartView, ApiHelpers.orZero(reactions.heart()));
+            updateView(mRocketView, ApiHelpers.orZero(reactions.rocket()));
+            updateView(mEyesView, ApiHelpers.orZero(reactions.eyes()));
             setVisibility(View.VISIBLE);
         } else {
             setVisibility(View.GONE);
@@ -424,14 +425,28 @@ public class ReactionBar extends HorizontalScrollView implements View.OnClickLis
         }
     }
 
+    // 193：content()/createdAt() 可空；直接 compareTo 即 NPE，null 排最后。
+    private static <T extends Comparable<T>> int compareNullable(T lhs, T rhs) {
+        if (lhs == null && rhs == null) {
+            return 0;
+        }
+        if (lhs == null) {
+            return 1;
+        }
+        if (rhs == null) {
+            return -1;
+        }
+        return lhs.compareTo(rhs);
+    }
+
     private static Single<List<Reaction>> fetchReactions(Callback callback, Item item,
             ReactionDetailsCache cache) {
         return callback.loadReactionDetails(item, false)
                 .compose(RxUtils::doInBackground)
                 .compose(RxUtils.sortList((lhs, rhs) -> {
-                    int result = lhs.content().compareTo(rhs.content());
+                    int result = compareNullable(lhs.content(), rhs.content());
                     if (result == 0) {
-                        result = rhs.createdAt().compareTo(lhs.createdAt());
+                        result = compareNullable(rhs.createdAt(), lhs.createdAt());
                     }
                     return result;
                 }))
@@ -572,7 +587,11 @@ public class ReactionBar extends HorizontalScrollView implements View.OnClickLis
         }
 
         private void addOrRemoveReaction(final String content, final Long id) {
-            var currentReactions = new ArrayList<>(mDetailsCache.getReactions(mItem));
+            // 193：clear() 后 getReactions() 返回 null，ArrayList 拷贝构造
+            // 即 NPE；缺失按空列表计。
+            List<Reaction> cached = mDetailsCache.getReactions(mItem);
+            var currentReactions = cached != null
+                    ? new ArrayList<>(cached) : new ArrayList<Reaction>();
             toggleReaction(content, id, currentReactions, mCallback, mItem, mDetailsCache)
                     .subscribe(addedReaction -> {
                         if (addedReaction.isPresent()) {
@@ -626,6 +645,10 @@ public class ReactionBar extends HorizontalScrollView implements View.OnClickLis
             int plusOne = 0, minusOne = 0, confused = 0, heart = 0;
             int hooray = 0, laugh = 0, rocket = 0, eyes = 0;
             for (Reaction reaction : reactions) {
+                // 193：reaction / content 可空，switch (null) 即 NPE；跳过。
+                if (reaction == null || reaction.content() == null) {
+                    continue;
+                }
                 switch (reaction.content()) {
                     case Reaction.CONTENT_PLUS_ONE: ++plusOne; break;
                     case Reaction.CONTENT_MINUS_ONE: ++minusOne; break;

@@ -203,6 +203,10 @@ public class Github4AndroidActivity extends BaseActivity implements
 
             // 0.1.38：换 token 开始埋点（不记 code 与 verifier）。
             com.gh4a.utils.DiagTrace.log(this, "OAUTH_EXCHANGE", "start");
+            // 179：换 token 的订阅未绑定生命周期（裸 subscribe），弱网下用户在交换
+            // 完成前返回/旋转，回调会打到已销毁的旧 activity：onLoginFinished
+            // 里建 AlertDialog/startActivity 即崩。回调内先判存活再跑；
+            // 注意旋转时 isFinishing() 为 false，必须同时判 isDestroyed()。
             service.getToken(request)
                     .map(ApiHelpers::throwOnFailure)
                     .flatMap(token -> {
@@ -214,7 +218,15 @@ public class Github4AndroidActivity extends BaseActivity implements
                                 (t, user) -> Pair.create(t.accessToken(), user));
                     })
                     .compose(RxUtils::doInBackground)
-                    .subscribe(pair -> onLoginFinished(pair.first, pair.second), this::handleLoadFailure);
+                    .subscribe(pair -> {
+                        if (!isFinishing() && !isDestroyed()) {
+                            onLoginFinished(pair.first, pair.second);
+                        }
+                    }, error -> {
+                        if (!isFinishing() && !isDestroyed()) {
+                            handleLoadFailure(error);
+                        }
+                    });
             return true;
         }
 
@@ -329,11 +341,17 @@ public class Github4AndroidActivity extends BaseActivity implements
         String challenge = codeChallengeS256(verifier);
         // S-L6：state/verifier 存加密存储（之前是默认 prefs 明文；单次有效、
         // 回调后立即删除，但加密存储与 token 同款，无额外成本）。
+        // 180：必须用 commit() 同步落盘再开浏览器——apply() 只写内存、落盘异步，
+        // 打开浏览器本身就可能触发低内存杀进程，回调在新进程到达时读不到
+        // state/verifier 即校验失败、登录白做。两串很小，同步写成本可忽略。
+        // 注：报告建议的「先开浏览器再写偏好」会让该窗口更大（开浏览器正是
+        // 杀进程的触发点），故不采纳；残留旧 state 亦无害——全仓核对
+        // PREF_OAUTH_STATE/VERIFIER 只在回调校验处读，下次登录会覆盖。
         Gh4Application.securePrefs(activity)
                 .edit()
                 .putString(PREF_OAUTH_STATE, state)
                 .putString(PREF_OAUTH_VERIFIER, verifier)
-                .apply();
+                .commit();
         Uri uri = Uri.parse(OAUTH_URL)
                 .buildUpon()
                 .appendQueryParameter(PARAM_CLIENT_ID, BuildConfig.CLIENT_ID)

@@ -34,6 +34,9 @@ permissions:
 jobs:
   generate:
     runs-on: ubuntu-latest
+    # 211：此前无任何超时——harvest/generate 任一步挂死都会占 runner
+    # 直到 GitHub 默认 6 小时上限；整轮正常 10–20 分钟，60 分钟兜底。
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Fetch history snapshots and previous outputs
@@ -88,6 +91,9 @@ jobs:
             echo "harvestStatus=fallback" >> "$GITHUB_OUTPUT"
           fi
       - name: Generate store JSON
+        # 211：生成步是本轮最长的一步（API 补 metadata + 写全量 JSON），
+        # 单独 30 分钟上限，挂死不等整轮超时。
+        timeout-minutes: 30
         env:
           STORE_PAT: ${{ secrets.STORE_PAT }}
           HARVEST_STATUS: ${{ steps.harvest.outputs.harvestStatus }}

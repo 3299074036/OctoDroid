@@ -87,7 +87,8 @@ public class PullRequestActivity extends BaseFragmentPagerActivity implements
         PullRequestFilesFragment.CommentUpdateListener {
     public static Intent makeIntent(Context context, Issue issue) {
         Pair<String, String> repoOwnerAndName = ApiHelpers.extractRepoOwnerAndNameFromIssue(issue);
-        return makeIntent(context, repoOwnerAndName.first, repoOwnerAndName.second, issue.number());
+        // 166：issue.number() 为可空 Integer，makeIntent(int) 会拆箱。
+        return makeIntent(context, repoOwnerAndName.first, repoOwnerAndName.second, ApiHelpers.orZero(issue.number()));
     }
 
     public static Intent makeIntent(Context context, String repoOwner, String repoName, int number) {
@@ -250,11 +251,19 @@ public class PullRequestActivity extends BaseFragmentPagerActivity implements
                 showOpenCloseConfirmDialog(item.getItemId() == R.id.pull_reopen);
                 break;
             case R.id.share:
+                // 155：菜单加载完成前即可点，mPullRequest/htmlUrl() 为 null 时 Uri.parse 即 NPE。
+                if (mPullRequest == null || mPullRequest.htmlUrl() == null) {
+                    break;
+                }
                 IntentUtils.share(this, getString(R.string.share_pull_subject,
-                        mPullRequest.number(), mPullRequest.title(),
+                        // 166：number() 为可空 Integer，%1$d 格式化会拆箱。
+                        ApiHelpers.orZero(mPullRequest.number()), mPullRequest.title(),
                         mRepoOwner + "/" + mRepoName), Uri.parse(mPullRequest.htmlUrl()));
                 break;
             case R.id.browser:
+                if (mPullRequest == null || mPullRequest.htmlUrl() == null) {
+                    break;
+                }
                 IntentUtils.launchBrowser(this, Uri.parse(mPullRequest.htmlUrl()));
                 break;
             case R.id.copy_number:
@@ -316,11 +325,15 @@ public class PullRequestActivity extends BaseFragmentPagerActivity implements
         if (position == PAGE_COMMITS) {
             PullRequestMarker base = mPullRequest.base();
             PullRequestMarker head = mPullRequest.head();
+            // 156：base/head 可空（head 仓库被删的 PR），缺失时传 null；
+            // CommitCompareFragment 对 null base/head 降级为空列表，不调 compare 接口。
             return CommitCompareFragment.newInstance(mRepoOwner, mRepoName, mPullRequestNumber,
-                    base.label(), base.sha(), head.label(), head.sha());
+                    base != null ? base.label() : null, base != null ? base.sha() : null,
+                    head != null ? head.label() : null, head != null ? head.sha() : null);
         } else if (position == PAGE_FILES) {
+            PullRequestMarker head = mPullRequest.head();
             return PullRequestFilesFragment.newInstance(mRepoOwner, mRepoName,
-                    mPullRequestNumber, mPullRequest.head().sha());
+                    mPullRequestNumber, head != null ? head.sha() : null);
         } else {
             Fragment f = PullRequestConversationFragment.newInstance(mPullRequest,
                     mIssue, mIsCollaborator, mInitialComment);
@@ -478,7 +491,7 @@ public class PullRequestActivity extends BaseFragmentPagerActivity implements
     private void updatePullRequestState(boolean open) {
         @StringRes int dialogMessageResId = open ? R.string.opening_msg : R.string.closing_msg;
         @StringRes int errorMessageResId = open ? R.string.issue_error_reopen : R.string.issue_error_close;
-        String errorMessage = getString(errorMessageResId, mPullRequest.number());
+        String errorMessage = getString(errorMessageResId, ApiHelpers.orZero(mPullRequest.number()));
 
         PullRequestService service = ServiceFactory.get(PullRequestService.class, false);
         EditPullRequest request = EditPullRequest.builder()
@@ -495,7 +508,8 @@ public class PullRequestActivity extends BaseFragmentPagerActivity implements
     }
 
     private void mergePullRequest(String commitTitle, String commitDetails, MergeRequest.Method mergeMethod) {
-        String errorMessage = getString(R.string.pull_error_merge, mPullRequest.number());
+        // 166：number() 为可空 Integer，%1$d 格式化会拆箱。
+        String errorMessage = getString(R.string.pull_error_merge, ApiHelpers.orZero(mPullRequest.number()));
         PullRequestService service = ServiceFactory.get(PullRequestService.class, false);
         MergeRequest request = MergeRequest.builder()
                 .commitTitle(commitTitle)
@@ -617,7 +631,7 @@ public class PullRequestActivity extends BaseFragmentPagerActivity implements
 
             final PullRequestActivity activity = (PullRequestActivity) getContext();
             return new AlertDialog.Builder(activity)
-                    .setTitle(getString(R.string.pull_message_dialog_title, mPr.number()))
+                    .setTitle(getString(R.string.pull_message_dialog_title, ApiHelpers.orZero(mPr.number())))
                     .setView(view)
                     .setPositiveButton(R.string.pull_request_merge, (dialog, which) -> {
                         String commitTitle = mTitleField.getEditText().getText().toString();

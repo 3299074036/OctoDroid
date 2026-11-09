@@ -11,6 +11,8 @@ import android.content.Context;
 import android.graphics.Matrix;
 import android.graphics.PointF;
 import android.graphics.drawable.Drawable;
+import android.os.Parcel;
+import android.os.Parcelable;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -53,6 +55,65 @@ public class ZoomableImageView extends AppCompatImageView implements View.OnTouc
 
     // Whether the view currently has a drawable it can zoom.
     private boolean mHasDrawable = false;
+
+    // 192：旋转后缩放/平移丢失——onSizeChanged → fitImageToView() 会
+    // mMatrix.reset() 抹掉矩阵；把矩阵 9 个值存进 SavedState，恢复时
+    // 暂存，在 fitImageToView() 算出新 mFitScale 后再贴回去（onSizeChanged
+    // 与 setImageDrawable → resetZoom 两条路都经过这里），贴一次即消费。
+    private float[] mSavedMatrixValues;
+
+    @Override
+    protected Parcelable onSaveInstanceState() {
+        Parcelable superState = super.onSaveInstanceState();
+        SavedState ss = new SavedState(superState);
+        float[] values = new float[9];
+        mMatrix.getValues(values);
+        ss.matrixValues = values;
+        return ss;
+    }
+
+    @Override
+    protected void onRestoreInstanceState(Parcelable state) {
+        if (state instanceof SavedState) {
+            SavedState ss = (SavedState) state;
+            super.onRestoreInstanceState(ss.getSuperState());
+            mSavedMatrixValues = ss.matrixValues;
+            return;
+        }
+        super.onRestoreInstanceState(state);
+    }
+
+    static class SavedState extends View.BaseSavedState {
+        float[] matrixValues;
+
+        SavedState(Parcelable superState) {
+            super(superState);
+        }
+
+        private SavedState(Parcel in) {
+            super(in);
+            matrixValues = in.createFloatArray();
+        }
+
+        @Override
+        public void writeToParcel(Parcel out, int flags) {
+            super.writeToParcel(out, flags);
+            out.writeFloatArray(matrixValues);
+        }
+
+        public static final Parcelable.Creator<SavedState> CREATOR =
+                new Parcelable.Creator<SavedState>() {
+                    @Override
+                    public SavedState createFromParcel(Parcel in) {
+                        return new SavedState(in);
+                    }
+
+                    @Override
+                    public SavedState[] newArray(int size) {
+                        return new SavedState[size];
+                    }
+                };
+    }
 
     public ZoomableImageView(@NonNull Context context) {
         this(context, null);
@@ -143,6 +204,13 @@ public class ZoomableImageView extends AppCompatImageView implements View.OnTouc
         float redundantY = (mViewHeight - drawableHeight * scale) / 2f;
         mMatrix.postTranslate(redundantX, redundantY);
         setImageMatrix(mMatrix);
+        // 192：见字段注释——恢复暂存的缩放矩阵（只贴一次）。
+        if (mSavedMatrixValues != null) {
+            mMatrix.setValues(mSavedMatrixValues);
+            mSavedMatrixValues = null;
+            fixTranslation();
+            setImageMatrix(mMatrix);
+        }
     }
 
     private void fixTranslation() {

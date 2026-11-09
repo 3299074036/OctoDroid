@@ -543,9 +543,12 @@ public abstract class BaseActivity extends AppCompatActivity implements
     private void applyAccentTheme() {
         // Called before super.onCreate(), so don't use getPrefs() (Activity not yet created).
         // Use application context which is safe at this point.
-        String accent = getApplicationContext()
-                .getSharedPreferences(SettingsFragment.PREF_NAME, MODE_PRIVATE)
-                .getString(SettingsFragment.KEY_ACCENT_COLOR, "green");
+        // 228：103 同款防御读取——accent 存成 int 时 getString 抛
+        // ClassCastException，冷启动循环崩溃；错型回默认 green。
+        SharedPreferences prefs = getApplicationContext()
+                .getSharedPreferences(SettingsFragment.PREF_NAME, MODE_PRIVATE);
+        Object rawAccent = prefs.getAll().get(SettingsFragment.KEY_ACCENT_COLOR);
+        String accent = rawAccent instanceof String ? (String) rawAccent : "green";
         switch (accent) {
             case "blue": setTheme(R.style.AppTheme_Blue); break;
             case "red": setTheme(R.style.AppTheme_Red); break;

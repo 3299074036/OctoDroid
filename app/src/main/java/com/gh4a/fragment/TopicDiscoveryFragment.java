@@ -21,6 +21,8 @@ import com.google.android.material.chip.Chip;
 import com.google.android.material.chip.ChipGroup;
 import com.meisolsson.githubsdk.model.Page;
 import com.meisolsson.githubsdk.model.Repository;
+
+import java.util.Locale;
 import com.meisolsson.githubsdk.service.search.SearchService;
 
 import io.reactivex.Single;
@@ -83,7 +85,8 @@ public class TopicDiscoveryFragment extends PagedDataBaseFragment<Repository> {
                     && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
                     && event.getAction() == KeyEvent.ACTION_DOWN;
             if (isSearchAction || isEnterKey) {
-                String topic = v.getText().toString().trim().toLowerCase();
+                // 172：toLowerCase() 默认 locale，土耳其语下话题过滤失配。
+                String topic = v.getText().toString().trim().toLowerCase(Locale.ROOT);
                 if (!TextUtils.isEmpty(topic)) {
                     selectTopic(topic, null);
                 }

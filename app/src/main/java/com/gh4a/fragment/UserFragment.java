@@ -52,7 +52,6 @@ import com.meisolsson.githubsdk.service.organizations.OrganizationService;
 import com.meisolsson.githubsdk.service.repositories.RepositoryService;
 import com.meisolsson.githubsdk.service.users.UserFollowerService;
 import com.meisolsson.githubsdk.service.users.UserService;
-import com.vdurmont.emoji.EmojiParser;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -241,7 +240,10 @@ public class UserFragment extends LoadingFragmentBase implements
         reposRow.setClickIntent(RepositoryListActivity.makeIntent(getActivity(), mUser.login(), !isUser));
 
         OverviewRow typeRow = mContentView.findViewById(R.id.type_row);
-        switch (mUser.type()) {
+        // 166：type() 可空，缺字段时按普通用户处理（隐藏类型行）。
+        if (mUser.type() == null) {
+            typeRow.setVisibility(View.GONE);
+        } else switch (mUser.type()) {
             case User:
                 typeRow.setVisibility(View.GONE);
                 break;
@@ -268,7 +270,7 @@ public class UserFragment extends LoadingFragmentBase implements
         fillTextView(R.id.tv_website, mUser.blog());
         fillTextView(R.id.tv_company, mUser.company());
         fillTextView(R.id.tv_location, mUser.location());
-        fillTextView(R.id.tv_bio, mUser.bio() != null ? EmojiParser.parseToUnicode(mUser.bio()) : null);
+        fillTextView(R.id.tv_bio, mUser.bio() != null ? StringUtils.parseEmojiToUnicode(mUser.bio()) : null);
     }
 
     // 115：本地 orZero 收敛为共享实现，见 ApiHelpers.orZero
@@ -346,7 +348,7 @@ public class UserFragment extends LoadingFragmentBase implements
                 TextView tvDesc = rowView.findViewById(R.id.tv_desc);
                 if (!StringUtils.isBlank(repo.description())) {
                     tvDesc.setVisibility(View.VISIBLE);
-                    tvDesc.setText(EmojiParser.parseToUnicode(repo.description()));
+                    tvDesc.setText(StringUtils.parseEmojiToUnicode(repo.description()));
                 } else {
                     tvDesc.setVisibility(View.GONE);
                 }
@@ -413,6 +415,10 @@ public class UserFragment extends LoadingFragmentBase implements
         responseSingle.map(ApiHelpers::mapToBooleanOrThrowOnFailure)
                 .compose(RxUtils::doInBackground)
                 .subscribe(result -> {
+                    // 162：同款结构，detach 后 updateFollowingUi 内的 getResources() 即 NPE。
+                    if (!isAdded()) {
+                        return;
+                    }
                     if (mUser != null && mIsFollowing != null) {
                         mIsFollowing = !mIsFollowing;
                         mUser = mUser.toBuilder()
@@ -422,6 +428,9 @@ public class UserFragment extends LoadingFragmentBase implements
                         updateFollowingUi();
                     }
                 }, error -> {
+                    if (!isAdded()) {
+                        return;
+                    }
                     handleActionFailure("Toggling following state failed", error);
                     updateFollowingUi();
                 });
@@ -478,7 +487,8 @@ public class UserFragment extends LoadingFragmentBase implements
                 .map(ApiHelpers::throwOnFailure)
                 .map(page -> {
                     int pagesCount = ApiHelpers.getTotalPagesCount(page);
-                    return pagesCount == 1 ? page.items().size() : pagesCount;
+                    // 166：items() 可空，缺字段按 0 条计。
+                    return pagesCount == 1 ? (page.items() != null ? page.items().size() : 0) : pagesCount;
                 })
                 .compose(makeLoaderSingle(ID_LOADER_ORG_MEMBER_COUNT, force))
                 .subscribe(count -> {

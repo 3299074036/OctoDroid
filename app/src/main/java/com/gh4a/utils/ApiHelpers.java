@@ -68,7 +68,8 @@ public class ApiHelpers {
         if (author != null && !TextUtils.isEmpty(author.login())) {
             return author.login();
         }
-        GitUser commitAuthor = commit.commit().author();
+        // 254：commit.commit() 可空，直接 .author() 即 NPE；空时回退 unknown。
+        GitUser commitAuthor = commit.commit() != null ? commit.commit().author() : null;
         if (commitAuthor != null && !TextUtils.isEmpty(commitAuthor.name())) {
             return commitAuthor.name();
         }
@@ -86,8 +87,10 @@ public class ApiHelpers {
         if (commit.committer() != null) {
             return commit.committer().login();
         }
-        if (commit.commit().committer() != null) {
-            return commit.commit().committer().name();
+        // 254：同 getAuthorName，commit.commit() 可空；空时回退 unknown。
+        GitUser committer = commit.commit() != null ? commit.commit().committer() : null;
+        if (committer != null) {
+            return committer.name();
         }
         return context.getString(R.string.unknown);
     }
@@ -226,14 +229,27 @@ public class ApiHelpers {
             return uri;
         }
 
+        // 263：全量 replace 会改错 host 与路径段——原先 authority 的
+        // .replace("api.", "") 全量替换，owner 登录名恰为 repos 时
+        // /repos/repos/<repo> 的 "repos/" 也全量削掉。两处都只处理首段/
+        // 前缀；另注意 /api/v3/ 形是企业版 API 路径，其 authority 本身
+        // 就是 Web host，绝不能去前缀——企业版 host 为 api.company.com
+        // 时 https://api.company.com/api/v3/… 绝不能改成
+        // https://company.com/…（报告的原句“仅当以 api. 开头时去前缀”
+        // 字面读会漏掉这一层，故此处按证据里的企业版例子补上该区分）。
+        boolean enterpriseApiPath = path.contains("/api/v3/");
+        path = path.replace("/api/v3/", "/");
+        if (path.startsWith("/repos/")) {
+            path = path.substring("/repos".length());
+        }
         path = path
-                .replace("/api/v3/", "/")
-                .replace("repos/", "")
                 .replace("commits/", "commit/")
                 .replace("pulls/", "pull/");
 
-        String authority = uri.getAuthority()
-                .replace("api.", "");
+        String authority = uri.getAuthority();
+        if (!enterpriseApiPath && authority.startsWith("api.")) {
+            authority = authority.substring("api.".length());
+        }
 
         return uri.buildUpon()
                 .path(path)
@@ -268,6 +284,11 @@ public class ApiHelpers {
     private final static char[] HEX_CHARS = "0123456789abcdef".toCharArray();
 
     public static String sha256Of(String input) {
+        // 208：input 可空，getBytes() 即 NPE；空输入回 ""（调用方
+        // DiffLoadTask:37 随后比对不匹配即过滤，与无摘要同款处理）。
+        if (input == null) {
+            return "";
+        }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] messageDigest = digest.digest(input.getBytes());
@@ -285,6 +306,12 @@ public class ApiHelpers {
     }
 
     public static int getTotalPagesCount(Page<?> page) {
+        // 256：204 空 body 时 page 本身为 null（throwOnFailure 原样返回
+        // response.body()，唯一调用方 UserFragment:480 正是此路径），
+        // 直接 page.last() 即 NPE；空页按 1 页处理。
+        if (page == null) {
+            return 1;
+        }
         // When all items of a paginated list fit in a single page,
         // GitHub API responses do not include pagination details
         return page.last() != null ? page.last() : 1;
@@ -418,7 +445,11 @@ public class ApiHelpers {
                     .map(lists -> {
                         List<T> result = new ArrayList<>();
                         for (List<T> l : lists) {
-                            result.addAll(l);
+                            // 255：toObservable 的 map 可能产出 null items
+                            // 的页（见下），null 进 addAll 即 NPE；空页跳过。
+                            if (l != null) {
+                                result.addAll(l);
+                            }
                         }
                         return result;
                     });
@@ -445,7 +476,13 @@ public class ApiHelpers {
                                         resultPage == null ? null : resultPage.next())))
                                 .map(responsePage -> responsePage == null
                                         ? Collections.<T>emptyList()
-                                        : responsePage.items());
+                                        // 255：分页接口返回缺 items 的页时
+                                        // items() 为 null，下游 addAll/for-each
+                                        // 即 NPE；与 SearchPageAdapter 同款，
+                                        // null 按空列表处理。
+                                        : responsePage.items() != null
+                                                ? responsePage.items()
+                                                : Collections.<T>emptyList());
                     });
         }
 
@@ -465,9 +502,13 @@ public class ApiHelpers {
                                     if (resultPage == null) {
                                         return Pair.create((T) null, (Integer) null);
                                     }
-                                    for (T item : resultPage.items()) {
-                                        if (predicate.test(item)) {
-                                            return Pair.create(item, (Integer) null);
+                                    // 255：同上，items() 为 null 时按空页处理。
+                                    List<T> items = resultPage.items();
+                                    if (items != null) {
+                                        for (T item : items) {
+                                            if (predicate.test(item)) {
+                                                return Pair.create(item, (Integer) null);
+                                            }
                                         }
                                     }
                                     return Pair.create((T) null, resultPage.next());

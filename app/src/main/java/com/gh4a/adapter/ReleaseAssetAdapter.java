@@ -11,6 +11,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 
 import com.gh4a.R;
+import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.StringUtils;
 import com.meisolsson.githubsdk.model.ReleaseAsset;
 import com.meisolsson.githubsdk.model.User;
@@ -48,9 +49,17 @@ public class ReleaseAssetAdapter extends RootAdapter<ReleaseAsset, ReleaseAssetA
             holder.tvDownloads.setVisibility(View.GONE);
         } else {
             holder.tvSize.setVisibility(View.VISIBLE);
-            holder.tvDownloads.setVisibility(View.VISIBLE);
-            holder.tvSize.setText(Formatter.formatFileSize(mContext, asset.size()));
-            holder.tvDownloads.setText(String.valueOf(asset.downloadCount()));
+            // 218：size() 为 Integer 可空，formatFileSize 形参为 long，
+            // 缺 size 时直接拆箱即 NPE；downloadCount() 缺失时
+            // String.valueOf 会显示字面 "null"，改为隐藏该栏。
+            holder.tvSize.setText(Formatter.formatFileSize(mContext,
+                    ApiHelpers.orZero(asset.size())));
+            if (asset.downloadCount() == null) {
+                holder.tvDownloads.setVisibility(View.GONE);
+            } else {
+                holder.tvDownloads.setVisibility(View.VISIBLE);
+                holder.tvDownloads.setText(String.valueOf(asset.downloadCount()));
+            }
         }
     }
 

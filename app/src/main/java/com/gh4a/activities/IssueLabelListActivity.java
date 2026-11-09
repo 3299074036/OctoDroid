@@ -19,6 +19,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Parcelable;
+import android.text.TextUtils;
 import androidx.annotation.Nullable;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
@@ -28,6 +29,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.Toast;
 
 import com.gh4a.BaseActivity;
 import com.gh4a.Gh4Application;
@@ -224,6 +226,13 @@ public class IssueLabelListActivity extends BaseActivity implements
         public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
             switch (item.getItemId()) {
             case Menu.FIRST:
+                // 182：空名会原样发给服务端（addLabel/editLabel 不校验）；
+                // 拦截并提示，留在编辑态让用户补名字，不发请求。
+                if (TextUtils.isEmpty(mLabel.name())) {
+                    Toast.makeText(IssueLabelListActivity.this,
+                            R.string.issue_label_empty_name, Toast.LENGTH_SHORT).show();
+                    return true;
+                }
                 if (mLabel.newlyAdded) {
                     addLabel(mLabel);
                 } else {
@@ -274,7 +283,8 @@ public class IssueLabelListActivity extends BaseActivity implements
             for (int i = 0; i < count; i++) {
                 IssueLabelAdapter.EditableLabel item = mAdapter.getItem(i);
                 Label itemBase = item.base();
-                if (!item.newlyAdded && itemBase != null && itemBase.name().equals(baseName)) {
+                if (!item.newlyAdded && itemBase != null && itemBase.name() != null
+                        && itemBase.name().equals(baseName)) {
                     label = item;
                     break;
                 }

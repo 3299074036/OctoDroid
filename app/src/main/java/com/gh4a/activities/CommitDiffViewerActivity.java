@@ -32,6 +32,7 @@ import com.meisolsson.githubsdk.model.request.ReactionRequest;
 import com.meisolsson.githubsdk.service.reactions.ReactionService;
 import com.meisolsson.githubsdk.service.repositories.RepositoryCommentService;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import io.reactivex.Single;
@@ -96,6 +97,11 @@ public class CommitDiffViewerActivity extends DiffViewerActivity<GitComment> {
     @Override
     public Single<List<Reaction>> loadReactionDetails(ReactionBar.Item item, boolean bypassCache) {
         final CommentWrapper comment = (CommentWrapper) item;
+        // 216：comment.comment.id() 为 Long 可空，ReactionService 形参为 long，
+        // 缺 id 时直接拆箱即 NPE；无 id 的评论没有可拉取的 reaction。
+        if (comment.comment.id() == null) {
+            return Single.just(new ArrayList<>());
+        }
         var service = ServiceFactory.getForFullPagedLists(ReactionService.class, bypassCache);
         return ApiHelpers.PageIterator
                 .toSingle(page -> service.getCommitCommentReactions(mRepoOwner, mRepoName, comment.comment.id(), page));
@@ -104,6 +110,10 @@ public class CommitDiffViewerActivity extends DiffViewerActivity<GitComment> {
     @Override
     public Single<Reaction> addReaction(ReactionBar.Item item, String content) {
         CommentWrapper comment = (CommentWrapper) item;
+        // 216：同 loadReactionDetails，缺 id 时短路（错误进 snackbar，不崩溃）。
+        if (comment.comment.id() == null) {
+            return Single.error(new IllegalStateException("Commit comment has no id"));
+        }
         final ReactionService service = ServiceFactory.get(ReactionService.class, false);
         ReactionRequest request = ReactionRequest.builder().content(content).build();
 
@@ -115,6 +125,10 @@ public class CommitDiffViewerActivity extends DiffViewerActivity<GitComment> {
     @Override
     public Single<Boolean> deleteReaction(ReactionBar.Item item, long reactionId) {
         CommentWrapper comment = (CommentWrapper) item;
+        // 216：同上，缺 id 时按“未删除”短路。
+        if (comment.comment.id() == null) {
+            return Single.just(false);
+        }
         final ReactionService service = ServiceFactory.get(ReactionService.class, false);
         return service.deleteCommitCommentReaction(mRepoOwner, mRepoName, comment.comment.id(), reactionId)
                 .map(ApiHelpers::mapToTrueOnSuccess)

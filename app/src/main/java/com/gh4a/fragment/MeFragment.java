@@ -205,7 +205,8 @@ public class MeFragment extends Fragment {
                         MeHeaderCache.save(getActivity(), new MeHeaderCache.Header(
                                 mUser.login(),
                                 mUser.name(),
-                                mUser.id(),
+                                // 154/115：id() 为可空 Long，Header 形参为 long，按 orZero 给默认。
+                                ApiHelpers.orZero(mUser.id()),
                                 mUser.avatarUrl(),
                                 mUser.createdAt() != null ? mUser.createdAt().getTime() : -1,
                                 orZero(mUser.publicRepos()) + orZero(mUser.totalPrivateRepos()),

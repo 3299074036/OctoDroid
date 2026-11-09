@@ -60,9 +60,16 @@ public class PullRequestBranchInfoView extends RelativeLayout implements View.On
         SpannableStringBuilder builder = StringUtils.applyBoldTags(getContext().getString(formatResId));
         int pos = builder.toString().indexOf("[ref]");
         if (pos >= 0) {
-            String label = TextUtils.isEmpty(marker.label()) ? marker.ref() : marker.label();
+            // 156：head/base 缺失时 marker 为 null，分支名留空、不跳转。
+            String label = "";
+            if (marker != null) {
+                label = TextUtils.isEmpty(marker.label()) ? marker.ref() : marker.label();
+                if (label == null) {
+                    label = "";
+                }
+            }
             builder.replace(pos, pos + 5, label);
-            if (marker.repo() != null && makeClickable) {
+            if (marker != null && marker.repo() != null && makeClickable) {
                 builder.setSpan(
                         new ForegroundColorSpan(mAccentColor), pos, pos + label.length(), 0);
                 view.setClickable(true);
@@ -77,10 +84,12 @@ public class PullRequestBranchInfoView extends RelativeLayout implements View.On
     @Override
     public void onClick(View v) {
         PullRequestMarker marker = v.getId() == R.id.tv_pr_from ? mSourceMarker : mTargetMarker;
-        if (marker.repo() != null) {
-            Intent intent = RepositoryActivity.makeIntent(getContext(), marker.repo(),
-                    marker.ref());
-            getContext().startActivity(intent);
+        // 156：marker 可空（head/base 缺失时 bind 传入 null），不跳转。
+        if (marker == null || marker.repo() == null) {
+            return;
         }
+        Intent intent = RepositoryActivity.makeIntent(getContext(), marker.repo(),
+                marker.ref());
+        getContext().startActivity(intent);
     }
 }

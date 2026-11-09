@@ -125,7 +125,8 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
         int unread = 0;
         if (notifications != null) {
             for (com.gh4a.model.NotificationHolder h : notifications) {
-                if (h.notification != null && h.notification.unread()) unread++;
+                // 154/115：unread() 为可空 Boolean，缺字段按未读计。
+                if (h.notification != null && Boolean.TRUE.equals(h.notification.unread())) unread++;
             }
         }
         return unread;
@@ -211,6 +212,13 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
                     "id=" + mSelectedFactoryId);
         }
         mFactory = getFactoryForItem(mSelectedFactoryId);
+        // 196：保存的 factory id 可能来自已下架的页（旧版本状态恢复），
+        // getFactoryForItem 回 null，后续 mFactory 调用即 NPE；回落到
+        // determineInitialPage()（恒返回合法页，默认趋势页）。
+        if (mFactory == null) {
+            mSelectedFactoryId = determineInitialPage();
+            mFactory = getFactoryForItem(mSelectedFactoryId);
+        }
 
         mNotificationsIndicatorIcon =
                 DrawableCompat.wrap(ContextCompat.getDrawable(this, R.drawable.circle).mutate());
@@ -646,7 +654,14 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
                                 new Uri.Builder().scheme("https").authority("github.com")
                                         .appendPath(owner).appendPath(name)
                                         .appendPath("compare").build());
-                        startActivity(browser);
+                        // 195：隐式浏览器 intent 在无浏览器设备上抛
+                        // ActivityNotFoundException；接住并提示。
+                        try {
+                            startActivity(browser);
+                        } catch (android.content.ActivityNotFoundException e) {
+                            Toast.makeText(this, R.string.no_browser_found,
+                                    Toast.LENGTH_LONG).show();
+                        }
                     } else {
                         startActivity(IssueEditActivity.makeCreateIntent(this, owner, name));
                     }

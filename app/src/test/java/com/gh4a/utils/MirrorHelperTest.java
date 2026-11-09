@@ -58,4 +58,18 @@ public class MirrorHelperTest {
         assertFalse(MirrorHelper.isValidMirrorUrl(null));
         assertFalse(MirrorHelper.isValidMirrorUrl("https://"));
     }
+
+    @Test
+    public void userinfoUrlValidationIsAboutHostNotCredentials() {
+        // 269（关联第四轮 214）：https://user:password@host/ 能通过校验——
+        // 校验只判定 host 是否回环/内网，不管 userinfo；凭据进不进日志/
+        // 崩溃文件是 redactUrlForLog（214）的职责，不归校验管。
+        // 公共 host + userinfo 仍放行；回环 host + userinfo 仍拦截。
+        assertTrue(MirrorHelper.isValidMirrorUrl(
+                "https://user:password@mirror.example.com/x"));
+        assertFalse(MirrorHelper.isValidMirrorUrl(
+                "https://user:password@127.0.0.1/x"));
+        assertFalse(MirrorHelper.isValidMirrorUrl(
+                "https://user:password@192.168.1.1/x"));
+    }
 }

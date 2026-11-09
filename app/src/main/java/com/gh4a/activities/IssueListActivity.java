@@ -197,8 +197,11 @@ public class IssueListActivity extends BaseFragmentPagerActivity implements
                 mSelectedMilestone = position == 0 ? null : position == 1 ? "" : entry;
                 break;
             case "assigneeselect":
-                mSelectedAssignee = position == 0 ? null
-                        : position == 1 ? "" : mAssignees.get(position - 2).login();
+                // 183：原 mAssignees.get(position - 2) 在旋转后新实例里为 null
+                //（onRefresh 已置 null，对话框是 DialogFragment，旋转后仍存活
+                // 可回调）；entry 就是对话框里显示的那一项（即 login），与
+                // label/milestone 两支同款写法，不再依赖 mAssignees。
+                mSelectedAssignee = position == 0 ? null : position == 1 ? "" : entry;
                 break;
             case "participatingselect":
                 mSelectedParticipatingStatus = position;
@@ -294,11 +297,14 @@ public class IssueListActivity extends BaseFragmentPagerActivity implements
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == REQUEST_ISSUE_CREATE) {
-            if (resultCode == Activity.RESULT_OK && data.hasExtra("issue")) {
+            if (resultCode == Activity.RESULT_OK && data != null && data.hasExtra("issue")) {
                 Issue issue = data.getParcelableExtra("issue");
-                Intent intent = IssueActivity.makeIntent(this, mRepoOwner, mRepoName,
-                        issue.number());
-                startActivityForResult(intent, REQUEST_ISSUE_AFTER_CREATE);
+                // 166：issue 可为 null，number() 为可空 Integer，makeIntent(int) 会拆箱。
+                if (issue != null) {
+                    Intent intent = IssueActivity.makeIntent(this, mRepoOwner, mRepoName,
+                            ApiHelpers.orZero(issue.number()));
+                    startActivityForResult(intent, REQUEST_ISSUE_AFTER_CREATE);
+                }
             }
         } else if (requestCode == REQUEST_ISSUE_AFTER_CREATE) {
             // Refresh all fragments (instead of just open issues fragment) when coming back from
@@ -538,7 +544,9 @@ public class IssueListActivity extends BaseFragmentPagerActivity implements
 
     private String buildFilterItem(String type, String value) {
         if (!TextUtils.isEmpty(value)) {
-            return type + ":\"" + value + "\"";
+            // 184：值里含双引号（如标签名 `a"b`）会提前闭合引号、破坏
+            // 搜索语法；按 GitHub 搜索语法用反斜杠转义引号。
+            return type + ":\"" + value.replace("\"", "\\\"") + "\"";
         } else if (value == null) {
             // null means 'any value'
             return "";
@@ -597,9 +605,11 @@ public class IssueListActivity extends BaseFragmentPagerActivity implements
         assignees.add(getString(R.string.issue_filter_by_any_assignee));
         assignees.add(getString(R.string.issue_filter_by_no_assignee));
 
+        // 183：user / login 可空；空 login 用 "" 占位保住下标对齐。
         for (User user : mAssignees) {
-            assignees.add(user.login());
-            if (user.login().equalsIgnoreCase(mSelectedAssignee)) {
+            String login = user != null && user.login() != null ? user.login() : "";
+            assignees.add(login);
+            if (login.equalsIgnoreCase(mSelectedAssignee)) {
                 selected = assignees.size() - 1;
             }
         }

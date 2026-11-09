@@ -501,6 +501,11 @@ public class MirrorSourceActivity extends BaseActivity {
                 new MirrorHelper.SpeedTestCallback() {
                     @Override
                     public void onProbeComplete(MirrorHelper.MirrorSpeedResult result) {
+                        // 161：与 onAllComplete 同款代数守卫——旧轮探针晚到时直接
+                        // 返回，不覆盖新一轮的行数据。
+                        if (generation != mSpeedTestGeneration) {
+                            return;
+                        }
                         if (isFinishing() || isDestroyed()) {
                             return;
                         }
@@ -905,8 +910,11 @@ public class MirrorSourceActivity extends BaseActivity {
                 cbox.setChecked(mChecked.contains(r.url));
                 edit.setVisibility(View.GONE);
                 delete.setVisibility(View.GONE);
-                v.setBackgroundColor(mChecked.contains(r.url)
-                        ? 0xFFF5F5F5 : 0x00000000);
+                // 198：原 0xFFF5F5F5 浅灰在深色下配浅字不可读；改用
+                // mirror_row_selected（#2465b345 透明绿，与非批量
+                // 选中态同款，深浅模式均可读）。
+                v.setBackgroundResource(mChecked.contains(r.url)
+                        ? R.drawable.mirror_row_selected : 0);
             } else {
                 cbox.setVisibility(View.GONE);
                 edit.setVisibility(View.VISIBLE);

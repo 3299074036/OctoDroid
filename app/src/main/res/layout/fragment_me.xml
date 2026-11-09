@@ -30,7 +30,7 @@
                 <View
                     android:layout_width="64dp"
                     android:layout_height="64dp"
-                    android:background="#FFE0E0E0" />
+                    android:background="?attr/colorSurfaceVariant" />
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -43,13 +43,13 @@
                         android:layout_width="160dp"
                         android:layout_height="16dp"
                         android:layout_marginTop="6dp"
-                        android:background="#FFE0E0E0" />
+                        android:background="?attr/colorSurfaceVariant" />
 
                     <View
                         android:layout_width="110dp"
                         android:layout_height="14dp"
                         android:layout_marginTop="10dp"
-                        android:background="#FFE0E0E0" />
+                        android:background="?attr/colorSurfaceVariant" />
 
                 </LinearLayout>
 

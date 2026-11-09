@@ -165,12 +165,19 @@ public class WatcherListFragment extends PagedDataBaseFragment<User> {
         responseSingle.compose(RxUtils::doInBackground)
                 .subscribe(result -> {
                     mWatchingInFlight = false;
+                    // 162：同 toggleStarringState，detach 后回调不再碰 Activity。
+                    if (!isAdded()) {
+                        return;
+                    }
                     if (mIsWatching != null) {
                         mIsWatching = result;
                     }
                     getActivity().invalidateOptionsMenu();
                 }, error -> {
                     mWatchingInFlight = false;
+                    if (!isAdded()) {
+                        return;
+                    }
                     getActivity().invalidateOptionsMenu();
                     handleActionFailure("Updating repo watching state failed", error);
                 });

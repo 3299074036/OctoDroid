@@ -159,7 +159,11 @@ public abstract class PagedDataBaseFragment<T> extends LoadingListFragmentBase i
                         .compose(RxUtils::doInBackground)
                         .toObservable())
                 .scan(Pair.create(new ArrayList<T>(), 0), (pair, page) -> {
-                    pair.first.addAll(page.items());
+                    // 169：page.items() 可空（缺字段的分页响应），addAll(null) 即 NPE；
+                    // 缺失按空页处理（204 已由 DummyPage 兜底为空列表）。
+                    if (page.items() != null) {
+                        pair.first.addAll(page.items());
+                    }
                     return Pair.create(pair.first, page.next());
                 })
                 // filter out initial value

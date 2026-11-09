@@ -75,6 +75,7 @@ import com.meisolsson.githubsdk.model.payload.PushPayload;
 import com.meisolsson.githubsdk.model.payload.ReleasePayload;
 import com.meisolsson.githubsdk.service.pull_request.PullRequestService;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
@@ -265,6 +266,10 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
     public void onCreateContextMenu(ContextMenu menu, View v, ContextMenuInfo menuInfo) {
         super.onCreateContextMenu(menu, v, menuInfo);
 
+        // 170：menuInfo 可空或非 RecyclerView 类型，直接强转即 NPE/CCE（同 158 号同款守卫）。
+        if (!(menuInfo instanceof ContextMenuAwareRecyclerView.RecyclerContextMenuInfo)) {
+            return;
+        }
         ContextMenuAwareRecyclerView.RecyclerContextMenuInfo info =
                 (ContextMenuAwareRecyclerView.RecyclerContextMenuInfo) menuInfo;
         GitHubEvent event = getEventForContextMenuPosition(info.position);
@@ -353,7 +358,8 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
             case GollumEvent: {
                 GollumPayload payload = (GollumPayload) event.payload();
                 List<GitHubWikiPage> pages = payload.pages();
-                if (pages != null && !pages.isEmpty()) { //TODO: now just open the first page
+                // 155：htmlUrl() 可空，Uri.parse(null) 即 NPE；无链接时不加菜单项。
+                if (pages != null && !pages.isEmpty() && pages.get(0).htmlUrl() != null) { //TODO: now just open the first page
                     menu.add(getString(R.string.menu_wiki))
                             .setIntent(new Intent(Intent.ACTION_VIEW, Uri.parse(pages.get(0).htmlUrl())));
                 }
@@ -440,10 +446,15 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
 
     @Override
     public boolean onContextItemSelected(MenuItem item) {
+        // 170：menuInfo 可空或非 RecyclerView 类型，直接强转即 NPE/CCE（同 158 号同款守卫）；
+        // 选菜单时 fragment 可能已 detach，getActivity() 为 null 即 NPE。
+        if (!(item.getMenuInfo() instanceof ContextMenuAwareRecyclerView.RecyclerContextMenuInfo)) {
+            return false;
+        }
         ContextMenuAwareRecyclerView.RecyclerContextMenuInfo info =
                 (ContextMenuAwareRecyclerView.RecyclerContextMenuInfo) item.getMenuInfo();
         GitHubEvent event = getEventForContextMenuPosition(info.position);
-        if (event == null) {
+        if (event == null || !isAdded()) {
             return false;
         }
 
@@ -521,7 +532,30 @@ public abstract class EventListFragment extends PagedDataBaseFragment<GitHubEven
     @Override
     protected void onAddData(RootAdapter<GitHubEvent, ? extends RecyclerView.ViewHolder> adapter,
             Collection<GitHubEvent> data) {
-        super.onAddData(adapter, data);
+        // 213：第二道防线——type() 为 null 的事件（未知类型解析失败后
+        // 的残留，或其他来源的空 type）不进 adapter；主防线是
+        // ServiceFactory 的 UNKNOWN_EVENT_TYPE_INTERCEPTOR（解析前
+        // 剥条目），111 空页兜底保留。
+        Collection<GitHubEvent> filtered = data;
+        if (data != null) {
+            boolean hasBad = false;
+            for (GitHubEvent event : data) {
+                if (event == null || event.type() == null) {
+                    hasBad = true;
+                    break;
+                }
+            }
+            if (hasBad) {
+                List<GitHubEvent> kept = new ArrayList<>();
+                for (GitHubEvent event : data) {
+                    if (event != null && event.type() != null) {
+                        kept.add(event);
+                    }
+                }
+                filtered = kept;
+            }
+        }
+        super.onAddData(adapter, filtered);
         enrichPullRequestEvents();
     }
 

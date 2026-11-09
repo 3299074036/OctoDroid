@@ -43,6 +43,16 @@ public class CustomTabsHelper {
     private CustomTabsHelper() {}
 
     /**
+     * 259：清掉缓存的 Custom Tabs 包名，下次重新解析。进程存活期间卸载/
+     * 禁用已缓存的浏览器后，旧缓存指向不存在的包，setPackage 后
+     * launchUrl 即抛 ActivityNotFoundException，且此后每次外链都崩，
+     * 直到进程重启。
+     */
+    public static void clearPackageNameCache() {
+        sPackageNameToUse = null;
+    }
+
+    /**
      * Goes through all apps that handle VIEW intents and have a warmup service. Picks
      * the one chosen by the user if there is one, otherwise makes a best effort to return a
      * valid package name.

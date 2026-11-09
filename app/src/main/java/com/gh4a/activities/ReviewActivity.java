@@ -68,10 +68,17 @@ public class ReviewActivity extends FragmentContainerActivity {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.share:
+                // 155：mReview/htmlUrl() 可空，Uri.parse(null) 即 NPE。
+                if (mReview == null || mReview.htmlUrl() == null) {
+                    return true;
+                }
                 IntentUtils.share(this, mTitle, Uri.parse(mReview.htmlUrl()));
                 return true;
 
             case R.id.browser:
+                if (mReview == null || mReview.htmlUrl() == null) {
+                    return true;
+                }
                 IntentUtils.launchBrowser(this, Uri.parse(mReview.htmlUrl()));
                 return true;
         }
@@ -87,8 +94,9 @@ public class ReviewActivity extends FragmentContainerActivity {
 
     @Override
     protected Intent navigateUp() {
+        // 154/115：mReview.id() 为可空 Long，117 同款守卫——id 为 null 时不带 marker。
         return PullRequestActivity.makeIntent(this, mRepoOwner, mRepoName, mIssueNumber,
                 PullRequestActivity.PAGE_CONVERSATION,
-                new IntentUtils.InitialCommentMarker(mReview.id()));
+                mReview.id() != null ? new IntentUtils.InitialCommentMarker(mReview.id()) : null);
     }
 }

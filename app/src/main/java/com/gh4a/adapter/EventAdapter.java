@@ -73,7 +73,6 @@ import com.meisolsson.githubsdk.model.payload.PullRequestReviewPayload;
 import com.meisolsson.githubsdk.model.payload.PushPayload;
 import com.meisolsson.githubsdk.model.payload.ReleasePayload;
 import com.meisolsson.githubsdk.model.payload.TeamAddPayload;
-import com.vdurmont.emoji.EmojiParser;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -151,7 +150,8 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
         GitHubEvent.RepoIdentifier eventRepo = event.repo();
 
         if (hasInvalidPayload(event)) {
-            return eventType.toString();
+            // 223：type() 可空时 toString() 即 NPE；无效 payload 一律按空描述处理。
+            return eventType != null ? eventType.toString() : "";
         }
 
         Resources res = mContext.getResources();
@@ -161,7 +161,7 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                 CommitCommentPayload payload = (CommitCommentPayload) event.payload();
                 GitComment comment = payload.comment();
                 if (comment != null) {
-                    return EmojiParser.parseToUnicode(comment.body());
+                    return StringUtils.parseEmojiToUnicode(comment.body());
                 }
                 break;
             }
@@ -169,7 +169,10 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
             case CreateEvent: {
                 CreatePayload payload = (CreatePayload) event.payload();
                 if (payload.refType() == ReferenceType.Repository) {
-                    return res.getString(R.string.event_create_repo_desc, eventRepo.repoWithUserName());
+                    // 223：eventRepo 可空（其余分支均走 null 安全的
+                    // formatFromRepoIdentifier），直接 repoWithUserName() 即 NPE。
+                    return res.getString(R.string.event_create_repo_desc,
+                            formatFromRepoIdentifier(eventRepo));
                 }
                 break;
             }
@@ -212,7 +215,7 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
             case IssueCommentEvent: {
                 IssueCommentPayload payload = (IssueCommentPayload) event.payload();
                 if (payload != null && payload.comment() != null) {
-                    return EmojiParser.parseToUnicode(payload.comment().body());
+                    return StringUtils.parseEmojiToUnicode(payload.comment().body());
                 }
                 break;
             }
@@ -278,7 +281,7 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                 }
                 String body = review.body();
                 if (body != null) {
-                    return EmojiParser.parseToUnicode(review.body());
+                    return StringUtils.parseEmojiToUnicode(review.body());
                 }
                 break;
             }
@@ -287,7 +290,7 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                         (PullRequestReviewCommentPayload) event.payload();
                 ReviewComment comment = payload.comment();
                 if (comment != null) {
-                    return EmojiParser.parseToUnicode(comment.body());
+                    return StringUtils.parseEmojiToUnicode(comment.body());
                 }
                 break;
             }
@@ -322,7 +325,7 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
                                 ssb.length() - sha.length(), ssb.length(), 0);
 
                         ssb.append(" ");
-                        ssb.append(StringUtils.getFirstLine(EmojiParser.parseToUnicode(commit.message())));
+                        ssb.append(StringUtils.getFirstLine(StringUtils.parseEmojiToUnicode(commit.message())));
                         ssb.setSpan(new EllipsizeLineSpan(i == (count - 1) ? 0 : bottomMargin),
                                 lastLength, ssb.length(), 0);
                     }
@@ -394,7 +397,8 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
         Resources res = mContext.getResources();
 
         if (hasInvalidPayload(event)) {
-            return event.type().toString();
+            // 223：同 formatDescription，type() 为 null 时不 toString()。
+            return event.type() != null ? event.type().toString() : "";
         }
 
         switch (event.type()) {
@@ -652,6 +656,11 @@ public class EventAdapter extends RootAdapter<GitHubEvent, EventAdapter.EventVie
     public static boolean hasInvalidPayload(GitHubEvent event) {
         GitHubPayload payload = event.payload();
         if (payload == null) {
+            return true;
+        }
+        // 223：type() 可空（GitHub 正常响应恒带，但缺字段即 switch(null) NPE）；
+        // 缺 type 的事件与无效 payload 同等处理（三处 switch 前的统一守卫）。
+        if (event.type() == null) {
             return true;
         }
         // we only accept and work with derived classes; if the base class

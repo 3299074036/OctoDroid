@@ -114,33 +114,45 @@ public class DownloadRecordManager {
         }
     }
 
+    /**
+     * 250：record/updateFileInfo/remove 均为 getRecords() 全量读 → 内存改 →
+     * save() 全量写，JsonCache 不做同步；两个下载的校验可并发执行（见
+     * DownloadUtils.verifyDownloadedFile 的 Background 线程），后 save
+     * 者覆盖前者，补记的大小/SHA-256 静默丢失。读改写三步走同一把锁。
+     */
+    private static final Object sRecordsLock = new Object();
+
     public static void record(Context context, long downloadId, String fileName,
             String url, String description) {
-        List<Record> records = getRecords(context);
-        records.add(0, new Record(downloadId, fileName, url, description,
-                System.currentTimeMillis()));
-        while (records.size() > MAX_RECORDS) {
-            records.remove(records.size() - 1);
+        synchronized (sRecordsLock) {
+            List<Record> records = getRecords(context);
+            records.add(0, new Record(downloadId, fileName, url, description,
+                    System.currentTimeMillis()));
+            while (records.size() > MAX_RECORDS) {
+                records.remove(records.size() - 1);
+            }
+            save(context, records);
         }
-        save(context, records);
     }
 
     /** 下载完成后补记文件大小与 SHA-256（供下载列表展示、人工核对）。 */
     public static void updateFileInfo(Context context, long downloadId,
             long size, String sha256) {
-        List<Record> records = getRecords(context);
-        boolean changed = false;
-        for (int i = 0; i < records.size(); i++) {
-            Record r = records.get(i);
-            if (r.downloadId == downloadId) {
-                records.set(i, new Record(r.downloadId, r.fileName, r.url,
-                        r.description, r.time, size, sha256));
-                changed = true;
-                break;
+        synchronized (sRecordsLock) {
+            List<Record> records = getRecords(context);
+            boolean changed = false;
+            for (int i = 0; i < records.size(); i++) {
+                Record r = records.get(i);
+                if (r.downloadId == downloadId) {
+                    records.set(i, new Record(r.downloadId, r.fileName, r.url,
+                            r.description, r.time, size, sha256));
+                    changed = true;
+                    break;
+                }
             }
-        }
-        if (changed) {
-            save(context, records);
+            if (changed) {
+                save(context, records);
+            }
         }
     }
 
@@ -150,13 +162,15 @@ public class DownloadRecordManager {
     }
 
     public static void remove(Context context, long downloadId) {
-        List<Record> records = getRecords(context);
-        for (int i = records.size() - 1; i >= 0; i--) {
-            if (records.get(i).downloadId == downloadId) {
-                records.remove(i);
+        synchronized (sRecordsLock) {
+            List<Record> records = getRecords(context);
+            for (int i = records.size() - 1; i >= 0; i--) {
+                if (records.get(i).downloadId == downloadId) {
+                    records.remove(i);
+                }
             }
+            save(context, records);
         }
-        save(context, records);
     }
 
     public static void clear(Context context) {

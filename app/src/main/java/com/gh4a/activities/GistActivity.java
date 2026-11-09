@@ -172,6 +172,10 @@ public class GistActivity extends BaseActivity implements View.OnClickListener {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.share:
+                // 155：htmlUrl() 可空，Uri.parse(null) 即 NPE（mGist 为 null 时菜单项已移除）。
+                if (mGist == null || mGist.htmlUrl() == null) {
+                    return true;
+                }
                 String login = ApiHelpers.getUserLogin(this, mGist.owner());
                 IntentUtils.share(this, getString(R.string.share_gist_subject, mGistId, login),
                         Uri.parse(mGist.htmlUrl()));
@@ -193,13 +197,19 @@ public class GistActivity extends BaseActivity implements View.OnClickListener {
     }
 
     private void updateStarringState() {
+        // 154/175：mIsStarred 为可空 Boolean，onRefresh 会置 null；在途响应回调里
+        // 直接 !mIsStarred 会拆箱 NPE。状态未知时不发请求；调用时状态捕获进局部变量。
+        if (mIsStarred == null) {
+            return;
+        }
+        final boolean wasStarred = mIsStarred;
         GistService service = ServiceFactory.get(GistService.class, false);
-        Single<Response<Void>> responseSingle = mIsStarred
+        Single<Response<Void>> responseSingle = wasStarred
                 ? service.unstarGist(mGistId) : service.starGist(mGistId);
         responseSingle.map(ApiHelpers::mapToBooleanOrThrowOnFailure)
                 .compose(RxUtils::doInBackground)
                 .subscribe(result -> {
-                    mIsStarred = !mIsStarred;
+                    mIsStarred = !wasStarred;
                     supportInvalidateOptionsMenu();
                 }, error -> {
                     handleActionFailure("Updating gist starring state failed", error);

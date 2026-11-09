@@ -104,10 +104,17 @@ public class RepositoryListContainerFragment extends Fragment implements
     }
 
     public void destroyChildren() {
-        getChildFragmentManager().beginTransaction()
-                .remove(mMainFragment)
-                .remove(mSearchFragment)
-                .commitNowAllowingStateLoss();
+        // 173：mMainFragment/mSearchFragment 在 onViewCreated 前为 null（onDestroy/
+        // onFragmentDestroyed 可能在视图创建前触发），FragmentTransaction.remove(null)
+        // 首条即取 mFragmentManager 字段，空指针即 NPE；逐个判空再 remove。
+        FragmentTransaction transaction = getChildFragmentManager().beginTransaction();
+        if (mMainFragment != null) {
+            transaction.remove(mMainFragment);
+        }
+        if (mSearchFragment != null) {
+            transaction.remove(mSearchFragment);
+        }
+        transaction.commitNowAllowingStateLoss();
     }
 
     @Nullable

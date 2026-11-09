@@ -65,7 +65,8 @@ public class IssueFragment extends IssueFragmentBase {
     public void onClick(View v) {
         if (v.getId() == R.id.tv_pull) {
             startActivity(PullRequestActivity.makeIntent(getActivity(),
-                    mRepoOwner, mRepoName, mIssue.number()));
+                    // 166：mIssue.number() 为可空 Integer，makeIntent(int) 会拆箱。
+                    mRepoOwner, mRepoName, ApiHelpers.orZero(mIssue.number())));
         } else {
             super.onClick(v);
         }
@@ -73,7 +74,8 @@ public class IssueFragment extends IssueFragmentBase {
 
     @Override
     protected Observable<List<TimelineItem>> onCreateDataObservable(boolean bypassCache) {
-        final int issueNumber = mIssue.number();
+        // 166：mIssue.number() 为可空 Integer，赋给 int 会拆箱。
+        final int issueNumber = ApiHelpers.orZero(mIssue.number());
         var timelineService = ServiceFactory.getForFullPagedLists(IssueTimelineService.class, bypassCache);
 
         return ApiHelpers.PageIterator
@@ -101,15 +103,18 @@ public class IssueFragment extends IssueFragmentBase {
     public void editComment(GitHubCommentBase comment) {
         @AttrRes int highlightColorAttr = mIssue.state() == IssueState.Closed
                 ? R.attr.colorIssueClosed : R.attr.colorIssueOpen;
+        // 166：number() 为可空 Integer、comment.id() 为可空 Long，
+        // makeIntent(int, long, …) 会拆箱。
         Intent intent = EditIssueCommentActivity.makeIntent(getActivity(), mRepoOwner, mRepoName,
-                mIssue.number(), comment.id(), comment.body(), highlightColorAttr);
+                ApiHelpers.orZero(mIssue.number()), ApiHelpers.orZero(comment.id()), comment.body(), highlightColorAttr);
         mEditLauncher.launch(intent);
     }
 
     @Override
     protected Single<Response<Void>> doDeleteComment(GitHubCommentBase comment) {
         IssueCommentService service = ServiceFactory.get(IssueCommentService.class, false);
-        return service.deleteIssueComment(mRepoOwner, mRepoName, comment.id());
+        // 166：comment.id() 为可空 Long，deleteIssueComment(long) 会拆箱。
+        return service.deleteIssueComment(mRepoOwner, mRepoName, ApiHelpers.orZero(comment.id()));
     }
 
     @Override

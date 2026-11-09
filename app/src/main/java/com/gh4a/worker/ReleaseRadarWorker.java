@@ -57,6 +57,9 @@ public class ReleaseRadarWorker extends Worker {
     private static final int NOTIFICATION_ID_AUTH_FAILED = 0x524144; // "RAD"
 
     public static void schedule(Context context, int intervalMinutes) {
+        // 243：同 NotificationsWorker.schedule，入口统一钳到 [15, 1440]；
+        // 103 号的钳制只落在冷启动读路径，设置页开关路径无钳制。
+        intervalMinutes = Math.max(15, Math.min(1440, intervalMinutes));
         Constraints constraints = new Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build();
@@ -97,7 +100,7 @@ public class ReleaseRadarWorker extends Worker {
 
     // 22：MissingPermission 压制附理由——两处 notify() 前已有
     // NotificationPermission.canPostNotifications() 检查（doWork() 开头
-    // 的短路 + 通知前的守卫），lint 不认抽进 helper 的间接检查。
+    // 的短路 + saveKnownTags 前的第二次检查），lint 不认抽进 helper 的间接检查。
     @SuppressLint("MissingPermission")
     @NonNull
     @Override
@@ -109,7 +112,7 @@ public class ReleaseRadarWorker extends Worker {
         }
         // 54：无通知权限时直接成功返回，不拉取、不写 known_tags、不写
         // RadarCache。否则权限关闭期间的新发布会被记成"已知 tag"，
-        // 授权后永不再提醒。notify() 处的守卫保留作第二道防线。
+        // 授权后永不再提醒。saveKnownTags 前的第二次检查（241）是第二道防线。
         if (!NotificationPermission.canPostNotifications(context)) {
             Log.d(TAG, "Notifications disabled, skipping radar check");
             return Result.success();
@@ -147,6 +150,13 @@ public class ReleaseRadarWorker extends Worker {
                 newReleases.add(item);
             }
         }
+        // 241：第二次权限检查移到 saveKnownTags 之前（54 号残余）——权限在拉取
+        // 中途被撤时，本轮新发布不能先记成"已知"再跳过通知，否则重授权后
+        // 同一版本永不再提醒。RadarCache 只是 UI 缓存，随同跳过无妨。
+        if (!NotificationPermission.canPostNotifications(context)) {
+            Log.d(TAG, "Skipping radar update: POST_NOTIFICATIONS revoked mid-fetch");
+            return Result.success();
+        }
         saveKnownTags(prefs, login, fresh);
         // 顺手刷新 Star 更新页的缓存，打开页面即最新
         RadarCache.save(context, login, items);
@@ -157,11 +167,6 @@ public class ReleaseRadarWorker extends Worker {
         }
 
         NotificationManagerCompat nm = NotificationManagerCompat.from(context);
-        // 0.2.2：无通知权限时跳过两条通知（不抛 SecurityException）。
-        if (!NotificationPermission.canPostNotifications(context)) {
-            Log.d(TAG, "Skipping release notifications: POST_NOTIFICATIONS not granted");
-            return Result.success();
-        }
         for (ReleaseRadarFragment.RadarItem item : newReleases) {
             nm.notify(itemKey(item).hashCode(), buildRepoNotification(context, item));
         }

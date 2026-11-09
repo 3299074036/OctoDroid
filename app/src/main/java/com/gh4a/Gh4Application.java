@@ -102,7 +102,9 @@ public class Gh4Application extends Application implements
 
         SharedPreferences prefs = getPrefs();
         // Apply saved language before anything else
-        SettingsFragment.applyLanguage(prefs.getString(SettingsFragment.KEY_LANGUAGE, ""));
+        // 228：103 同款防御读取——备份错型（language 存成 int）时 getString
+        // 抛 ClassCastException，冷启动循环崩溃；错型回默认 ""。
+        SettingsFragment.applyLanguage(getLanguagePref(prefs));
 
         int prefsVersion = prefs.getInt(KEY_VERSION, 0);
         if (prefsVersion < 4) {
@@ -144,7 +146,8 @@ public class Gh4Application extends Application implements
             }
             if (prefsVersion < 4) {
                 // Convert old 'LightDark' theme to light one
-                if (prefs.getInt(SettingsFragment.KEY_THEME, THEME_LIGHT) == 2) {
+                // 228：同 getThemePref——theme 存成 string 时 getInt 抛错。
+                if (getThemePref(prefs, THEME_LIGHT) == 2) {
                     editor.putInt(SettingsFragment.KEY_THEME, THEME_LIGHT);
                 }
             }
@@ -173,11 +176,42 @@ public class Gh4Application extends Application implements
     }
 
     private void updateNotificationWorker(SharedPreferences prefs) {
-        if (isAuthorized() && prefs.getBoolean(SettingsFragment.KEY_NOTIFICATIONS, false)) {
-            NotificationsWorker.schedule(this, getNotificationIntervalMinutes(prefs));
-        } else {
+        // P12：冷启动主线程首次调 getSecurePrefs 会做 MasterKey +
+        // EncryptedSharedPreferences.create（KeyStore + 磁盘 IO），调用链
+        // onCreate → updateNotificationWorker → isAuthorized → getAuthToken
+        // → getSecurePrefs。先用明文偏好判断（登录名 + 通知开关）：无登录
+        // 或未开启时直接取消，不碰 KeyStore；需要 token 时把 isAuthorized
+        // 判定与调度移到后台线程（WorkManager 的 schedule/cancel 线程安全，
+        // 间隔在主线程先算好传进去）。anr-audit-and-fix skill：先证明执行
+        // 线程（冷启动主线程）与阻塞调用（KeyStore/磁盘 IO），再移出主线程。
+        if (!prefs.getBoolean(SettingsFragment.KEY_NOTIFICATIONS, false)
+                || getAuthLogin() == null) {
             NotificationsWorker.cancel(this);
+            return;
         }
+        final int intervalMinutes = getNotificationIntervalMinutes(prefs);
+        Background.run("update-notification-worker", () -> {
+            if (isAuthorized()) {
+                NotificationsWorker.schedule(this, intervalMinutes);
+            } else {
+                NotificationsWorker.cancel(this);
+            }
+        });
+    }
+
+    /**
+     * 228：103 同款防御读取——备份错型（language 存成 int / theme 存成
+     * string）时 getString/getInt 抛 ClassCastException，冷启动循环崩溃；
+     * 经 getAll() 按 instanceof 读，错型回默认。
+     */
+    private static String getLanguagePref(SharedPreferences prefs) {
+        Object raw = prefs.getAll().get(SettingsFragment.KEY_LANGUAGE);
+        return raw instanceof String ? (String) raw : "";
+    }
+
+    private static int getThemePref(SharedPreferences prefs, int defaultTheme) {
+        Object raw = prefs.getAll().get(SettingsFragment.KEY_THEME);
+        return raw instanceof Number ? ((Number) raw).intValue() : defaultTheme;
     }
 
     /**
@@ -203,7 +237,9 @@ public class Gh4Application extends Application implements
     }
 
     private void updateTheme(SharedPreferences prefs) {
-        int theme = prefs.getInt(SettingsFragment.KEY_THEME,
+        // 228：103 同款防御读取——theme 存成 string 时 getInt 抛
+        // ClassCastException，冷启动循环崩溃；错型回默认主题。
+        int theme = getThemePref(prefs,
                 getResources().getInteger(R.integer.default_theme));
         final int nightMode;
 
@@ -279,10 +315,12 @@ public class Gh4Application extends Application implements
         final Set<String> logins = StringUtils.getEditableStringSetFromPrefs(prefs, KEY_ALL_LOGINS);
         logins.add(login);
 
+        // 226：User.id() 可空，直接拆箱进 putLong 即 NPE（登录成功瞬间）；
+        // 缺 id 存 -1，与 getAccounts 的 id > 0 过滤一致。
         prefs.edit()
                 .putString(KEY_ACTIVE_LOGIN, login)
                 .putStringSet(KEY_ALL_LOGINS, logins)
-                .putLong(KEY_PREFIX_USER_ID + login, user.id())
+                .putLong(KEY_PREFIX_USER_ID + login, user.id() != null ? user.id() : -1)
                 .apply();
         // token 单独走加密存储，不进明文 prefs
         getSecurePrefs().edit()
@@ -304,8 +342,9 @@ public class Gh4Application extends Application implements
     }
 
     public void setCurrentAccountInfo(User user) {
+        // 226：同 addAccount，User.id() 可空，缺 id 存 -1。
         getPrefs().edit()
-                .putLong(KEY_PREFIX_USER_ID + user.login(), user.id())
+                .putLong(KEY_PREFIX_USER_ID + user.login(), user.id() != null ? user.id() : -1)
                 .apply();
     }
 
@@ -803,7 +842,26 @@ public class Gh4Application extends Application implements
             return null;
         }
         try {
-            return Uri.parse(url).buildUpon().clearQuery().build().toString();
+            Uri uri = Uri.parse(url);
+            Uri.Builder builder = uri.buildUpon().clearQuery();
+            // 214：只去 query 不够——镜像 URL 可带 userinfo
+            //（https://user:password@host/…），密码会原样进 logcat；
+            // 剥掉 userinfo，只留 host 与端口（IPv6 host 补括号）。
+            if (uri.getUserInfo() != null) {
+                String host = uri.getHost();
+                if (host == null) {
+                    return "[unparseable-url]";
+                }
+                if (host.contains(":")) {
+                    host = "[" + host + "]";
+                }
+                String authority = host;
+                if (uri.getPort() != -1) {
+                    authority += ":" + uri.getPort();
+                }
+                builder.encodedAuthority(authority);
+            }
+            return builder.build().toString();
         } catch (Exception ignored) {
             return "[unparseable-url]";
         }
@@ -840,6 +898,25 @@ public class Gh4Application extends Application implements
         StringBuffer sb = new StringBuffer();
         while (m.find()) {
             String url = m.group();
+            // 229：URL 可能含 userinfo（https://user:password@host/…），
+            // 只去 query 会让镜像密码原样进 last_crash.txt（弹窗邀请用户
+            // 截图/分享的文件）；先剥 authority 段的 userinfo。
+            int schemeEnd = url.indexOf("://");
+            if (schemeEnd >= 0) {
+                int authEnd = url.length();
+                for (int i = schemeEnd + 3; i < url.length(); i++) {
+                    char c = url.charAt(i);
+                    if (c == '/' || c == '?' || c == '#') {
+                        authEnd = i;
+                        break;
+                    }
+                }
+                int at = url.indexOf('@', schemeEnd + 3);
+                if (at >= 0 && at < authEnd) {
+                    url = url.substring(0, schemeEnd + 3) + "[userinfo-redacted]@"
+                            + url.substring(at + 1);
+                }
+            }
             int q = url.indexOf('?');
             if (q >= 0) {
                 url = url.substring(0, q) + "?[query-redacted]";
@@ -1014,6 +1091,12 @@ public class Gh4Application extends Application implements
 
     @Override
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+        // 227：key 可为 null（targetSdk 35 + Android R+ 时 clear() 回调的
+        // key 为 null，如备份恢复失败回滚的 editor.clear()）；三处
+        // key.equals(...) 无守卫即 NPE，恢复流程本身崩溃。
+        if (key == null) {
+            return;
+        }
         // 0.1.36：诊断追踪。
         com.gh4a.utils.ThemeTrace.logState(this, "LISTENER key=" + key);
         if (key.equals(SettingsFragment.KEY_THEME)) {

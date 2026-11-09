@@ -18,6 +18,7 @@ package com.gh4a.adapter;
 import android.content.Context;
 
 import com.gh4a.R;
+import com.gh4a.utils.ApiHelpers;
 import com.meisolsson.githubsdk.model.Issue;
 
 public class RepositoryIssueAdapter extends IssueAdapter {
@@ -30,8 +31,14 @@ public class RepositoryIssueAdapter extends IssueAdapter {
         super.onBindViewHolder(holder, issue);
 
         // https://api.github.com/repos/batterseapower/pinyin-toolkit/issues/132
-        String[] urlPart = issue.url().split("/");
-        holder.tvNumber.setText(mContext.getString(R.string.repo_issue_on,
-                issue.number(), urlPart[4], urlPart[5]));
+        // 166：url() 可空、短 URL 取 [4]/[5] 越界，number() 为可空 Integer；
+        // 任一缺失时只显示 #号，不拼仓库名。
+        String[] urlPart = issue.url() != null ? issue.url().split("/") : new String[0];
+        if (urlPart.length > 5) {
+            holder.tvNumber.setText(mContext.getString(R.string.repo_issue_on,
+                    ApiHelpers.orZero(issue.number()), urlPart[4], urlPart[5]));
+        } else {
+            holder.tvNumber.setText("#" + ApiHelpers.orZero(issue.number()));
+        }
     }
 }

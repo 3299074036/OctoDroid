@@ -31,6 +31,7 @@ import com.gh4a.utils.DownloadUtils;
 import com.gh4a.utils.FileUtils;
 import com.gh4a.utils.IntentUtils;
 import com.gh4a.utils.StringUtils;
+import com.google.android.material.snackbar.Snackbar;
 import com.meisolsson.githubsdk.model.GistFile;
 import com.meisolsson.githubsdk.service.gists.GistService;
 
@@ -116,6 +117,11 @@ public class GistViewerActivity extends WebViewerActivity {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
+        // 155：菜单在加载完成前即可打开，mGistFile/rawUrl() 为 null 时 Uri.parse 即 NPE。
+        if ((item.getItemId() == R.id.browser || item.getItemId() == R.id.download)
+                && (mGistFile == null || mGistFile.rawUrl() == null)) {
+            return true;
+        }
         switch (item.getItemId()) {
             case R.id.browser:
                 IntentUtils.launchBrowser(this, Uri.parse(mGistFile.rawUrl()));
@@ -138,6 +144,16 @@ public class GistViewerActivity extends WebViewerActivity {
                     if (mGistFile == null) {
                         // 文件在 gist 里被删除/改名：按加载失败处理，避免 generateHtml 空指针
                         handleLoadFailure(new java.io.FileNotFoundException(mFileName));
+                        return;
+                    }
+                    // 176：GitHub 对 >10MB 的 gist 文件直接省略 content 字段（1–10MB
+                    // 只回部分内容，content 非空）；content 为 null 时 toBase64 即 NPE，
+                    // 按加载失败处理，并提示用菜单下载入口取 rawUrl 全文。
+                    if (mGistFile.content() == null) {
+                        Snackbar.make(getRootLayout(), R.string.gist_file_too_large,
+                                Snackbar.LENGTH_LONG).show();
+                        handleLoadFailure(new java.io.IOException(
+                                "Gist file content omitted by API (file too large): " + mFileName));
                         return;
                     }
                     onDataReady();

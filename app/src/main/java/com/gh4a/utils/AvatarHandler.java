@@ -1,6 +1,8 @@
 package com.gh4a.utils;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 
 import android.content.Context;
@@ -111,7 +113,10 @@ public class AvatarHandler {
     }
 
     public static Bitmap loadUserAvatarSynchronously(Context context, User user) {
-        if (user == null) {
+        // 253：与同文件 assignAvatar 对齐，user.id() == null 时返回 null；
+        // 否则 loadBitmapFromCache/sCache.put/makeUrl 拆箱即 NPE，直出 doWork，
+        // 当轮后续各组通知全部不显示。
+        if (user == null || user.id() == null) {
             return null;
         }
         Bitmap cachedBitmap = loadBitmapFromCache(context, user.id());
@@ -259,6 +264,11 @@ public class AvatarHandler {
         }
     }
 
+    // 209：150 号同款头像 cap——头像 URL 来自服务端，可挂超大文件；
+    // response.body().bytes() 无上限读 + body 可空；超限抛 IOException
+    //（调用方已接 IOException，失败回默认头像）。
+    private static final int MAX_AVATAR_BYTES = 20 * 1024 * 1024;
+
     private static Bitmap fetchBitmap(String url) throws IOException {
         OkHttpClient client = ServiceFactory.getImageHttpClient();
         okhttp3.Request request = new okhttp3.Request.Builder()
@@ -271,7 +281,19 @@ public class AvatarHandler {
             if (!response.isSuccessful()) {
                 throw new IOException("HTTP failure code " + response.code());
             }
-            data = response.body().bytes();
+            okhttp3.ResponseBody body = response.body();
+            if (body == null) {
+                throw new IOException("Empty response body");
+            }
+            // 150：先看 Content-Length，超限直接不读；长度撒谎/缺失时
+            // 下面的流式限量读仍能兜底。
+            if (body.contentLength() > MAX_AVATAR_BYTES) {
+                throw new IOException("Avatar image too large");
+            }
+            data = readCappedBytes(body.byteStream(), MAX_AVATAR_BYTES);
+            if (data == null) {
+                throw new IOException("Avatar image too large");
+            }
         }
 
         BitmapFactory.Options options = new BitmapFactory.Options();
@@ -304,6 +326,22 @@ public class AvatarHandler {
             unscaled.recycle();
         }
         return scaled;
+    }
+
+    /** 150：流式限量读——读到上限仍有数据即返回 null（超限），不整包进内存。 */
+    private static byte[] readCappedBytes(InputStream in, int maxBytes) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int total = 0;
+        int n;
+        while ((n = in.read(buf)) >= 0) {
+            total += n;
+            if (total > maxBytes) {
+                return null;
+            }
+            out.write(buf, 0, n);
+        }
+        return out.toByteArray();
     }
 
     private static void shutdownWorker() {
@@ -364,13 +402,18 @@ public class AvatarHandler {
             if (TextUtils.isEmpty(userName)) {
                 mLetter[0] = '?';
                 if (mState.mIdentifier != null) {
-                    colorIndex = Math.abs(mState.mIdentifier.hashCode()) % COLOR_PALETTE.length;
+                    // 260：hashCode == Integer.MIN_VALUE 时 Math.abs 仍为
+                    // 负，取模得负下标即 ArrayIndexOutOfBoundsException；
+                    // floorMod 恒为非负。
+                    colorIndex = Math.floorMod(mState.mIdentifier.hashCode(),
+                            COLOR_PALETTE.length);
                 } else {
                     colorIndex = (int) (Math.random() * COLOR_PALETTE.length);
                 }
             } else {
                 mLetter[0] = Character.toUpperCase(userName.charAt(0));
-                colorIndex = Math.abs(userName.hashCode()) % COLOR_PALETTE.length;
+                // 260：同上，登录名恰好撞上 MIN_VALUE 的 hash 时头像每次绘制即崩。
+                colorIndex = Math.floorMod(userName.hashCode(), COLOR_PALETTE.length);
             }
 
             mColor = COLOR_PALETTE[colorIndex];

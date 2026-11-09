@@ -121,7 +121,13 @@ public abstract class TimelineItem {
                 String repoName = matcher.group(2);
                 int pullRequestNumber = Integer.parseInt(matcher.group(3));
 
+                // 234：reviewComment.id() 为 Long 可空，InitialCommentMarker
+                // 形参为 long；line == -1 路径是活的（DiffViewHolder:223 与
+                // TimelineItemAdapter:131 均调单参版，内部 line = -1），
+                // 缺 id 时直接拆箱即 NPE；与 117 号在 EventListFragment
+                // :178/210 的同款守卫一致，缺 id 时不建 marker。
                 IntentUtils.InitialCommentMarker initialComment = line == -1
+                        && reviewComment.id() != null
                         ? new IntentUtils.InitialCommentMarker(reviewComment.id()) : null;
 
                 return PullRequestDiffViewerActivity.makeIntent(context, repoOwner, repoName,
@@ -248,8 +254,20 @@ public abstract class TimelineItem {
          * @param comment The comment for which to return the special id.
          */
         public static String getDiffHunkId(ReviewComment comment) {
-            return comment.originalCommitId() + comment.path() +
-                    comment.originalPosition();
+            String originalCommitId = comment.originalCommitId();
+            String path = comment.path();
+            Integer originalPosition = comment.originalPosition();
+            if (originalCommitId == null || path == null || originalPosition == null) {
+                // 235：三元组任一字段为 null 时字符串拼接产生字面 "null"，
+                // 全 null 的评论一律得到同一 id "nullnullnull"，在
+                // diffHunksBySpecialId 里命中同一条目，多条无关评论被分进
+                // 同一个 hunk、回复归属错乱；回落到评论自身 id（id 再缺则
+                // 用对象标识区分，保证每条评论独立成组）。
+                Long id = comment.id();
+                return "comment:" + (id != null
+                        ? String.valueOf(id) : System.identityHashCode(comment));
+            }
+            return originalCommitId + path + originalPosition;
         }
 
         public Diff(TimelineComment timelineComment) {

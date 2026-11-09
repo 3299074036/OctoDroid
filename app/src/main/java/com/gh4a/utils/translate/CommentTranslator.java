@@ -25,14 +25,32 @@ public class CommentTranslator {
         void onTranslationChanged();
     }
 
-    /** One translatable unit of a thread: the issue/PR body, a comment or a review. */
+    /**
+     * One translatable unit of a thread: the issue/PR body, a comment or a review.
+     * <p>
+     * 244：GitHub REST 的数值 id 是按资源类型分序的（全局唯一的是 node_id，
+     * 不是 id），issue/评论/review 三类 id 同批进同一缓存时数值撞号会串位：
+     * 后译条目覆盖先译条目的缓存，切回原文会误伤另一条，在途翻译还会挡住
+     * 另一条的点按。键改为“类型 + id”，类型由构造方按条目种类填。
+     */
     public static class TranslatableItem {
+        public final String type;
         public final long id;
         public final String html;
 
-        public TranslatableItem(long id, String html) {
+        public TranslatableItem(String type, long id, String html) {
+            this.type = type;
             this.id = id;
             this.html = html;
+        }
+
+        public TranslatableItem(long id, String html) {
+            this("comment", id, html);
+        }
+
+        /** Cache key: type + id, so ids from different resource types never collide. */
+        public String key() {
+            return type + ":" + id;
         }
     }
 
@@ -49,9 +67,9 @@ public class CommentTranslator {
         void onError();
     }
 
-    private final Map<Long, String> mTranslated = new HashMap<>();
-    private final Set<Long> mTranslating = new HashSet<>();
-    private final Map<Long, ReadmeTranslator> mActiveTranslators = new HashMap<>();
+    private final Map<String, String> mTranslated = new HashMap<>();
+    private final Set<String> mTranslating = new HashSet<>();
+    private final Map<String, ReadmeTranslator> mActiveTranslators = new HashMap<>();
 
     // Batch (whole-thread) translation state. Items are translated one after
     // another to stay kind to rate-limited providers (e.g. Baidu's 1 QPS).
@@ -61,14 +79,17 @@ public class CommentTranslator {
     private BatchCallback mBatchCallback;
     private String mBatchProvider;
     private boolean mBatchCancelled;
+    // P13：批量内失败 toast 只弹一次——死提供方 + N 条评论时每条的 onError
+    // 各弹一个 translate_failed toast 会刷屏；单条点按翻译时不受影响。
+    private boolean mBatchErrorToastShown;
     private boolean mDestroyed;
 
     /**
-     * Returns the translated HTML for a comment, or null when the original
-     * should be shown.
+     * Returns the translated HTML for an item of the given type, or null when
+     * the original should be shown.
      */
-    public String getTranslatedHtml(long commentId) {
-        return mTranslated.get(commentId);
+    public String getTranslatedHtml(String type, long id) {
+        return mTranslated.get(type + ":" + id);
     }
 
     /**
@@ -109,7 +130,7 @@ public class CommentTranslator {
         }
         List<TranslatableItem> pending = new ArrayList<>();
         for (TranslatableItem item : items) {
-            if (item.html != null && !item.html.isEmpty() && !mTranslated.containsKey(item.id)) {
+            if (item.html != null && !item.html.isEmpty() && !mTranslated.containsKey(item.key())) {
                 pending.add(item);
             }
         }
@@ -154,6 +175,7 @@ public class CommentTranslator {
         mBatchCallback = callback;
         mBatchProvider = provider;
         mBatchCancelled = false;
+        mBatchErrorToastShown = false;
         translateNextBatchItem(context.getApplicationContext());
     }
 
@@ -173,7 +195,7 @@ public class CommentTranslator {
         }
         final TranslatableItem item = mBatchItems.get(mBatchDone);
         final BatchCallback callback = mBatchCallback;
-        startSingleTranslation(appContext, mBatchProvider, item.id, item.html,
+        startSingleTranslation(appContext, mBatchProvider, item.key(), item.html,
                 new SingleCallback() {
                     @Override
                     public void onSuccess() {
@@ -220,26 +242,27 @@ public class CommentTranslator {
     }
 
     /**
-     * Toggle translation for one comment: tap once to translate, tap again
+     * Toggle translation for one item: tap once to translate, tap again
      * to switch back to the original. Re-tapping while a translation is
      * in flight is ignored.
      */
-    public void toggleTranslation(Context context, long commentId, String originalHtml,
+    public void toggleTranslation(Context context, String type, long id, String originalHtml,
             Callback callback) {
         if (mDestroyed) {
             return;
         }
-        if (mTranslated.containsKey(commentId)) {
-            mTranslated.remove(commentId);
+        String key = type + ":" + id;
+        if (mTranslated.containsKey(key)) {
+            mTranslated.remove(key);
             callback.onTranslationChanged();
             return;
         }
-        if (mTranslating.contains(commentId)) {
+        if (mTranslating.contains(key)) {
             Toast.makeText(context, R.string.translating, Toast.LENGTH_SHORT).show();
             return;
         }
         TranslationUiHelper.pickProviderAndRun(context,
-                provider -> startSingleTranslation(context, provider, commentId, originalHtml,
+                provider -> startSingleTranslation(context, provider, key, originalHtml,
                         new SingleCallback() {
                             @Override
                             public void onSuccess() {
@@ -253,7 +276,7 @@ public class CommentTranslator {
                         }));
     }
 
-    private void startSingleTranslation(Context context, String provider, long commentId,
+    private void startSingleTranslation(Context context, String provider, String key,
             String originalHtml, SingleCallback callback) {
         if (mDestroyed) {
             return;
@@ -267,11 +290,11 @@ public class CommentTranslator {
             return;
         }
         String targetLang = TranslationManager.getTargetLanguage(context);
-        mTranslating.add(commentId);
+        mTranslating.add(key);
 
         final Context appContext = context.getApplicationContext();
         final ReadmeTranslator readmeTranslator = new ReadmeTranslator(translator, "auto", targetLang);
-        mActiveTranslators.put(commentId, readmeTranslator);
+        mActiveTranslators.put(key, readmeTranslator);
         readmeTranslator.translate(originalHtml, new ReadmeTranslator.Callback() {
             @Override
             public void onProgress(int done, int total) {
@@ -280,27 +303,36 @@ public class CommentTranslator {
 
             @Override
             public void onComplete(String translatedHtml) {
-                mTranslating.remove(commentId);
-                mActiveTranslators.remove(commentId);
+                mTranslating.remove(key);
+                mActiveTranslators.remove(key);
                 if (mDestroyed) {
                     return;
                 }
-                mTranslated.put(commentId, translatedHtml);
+                mTranslated.put(key, translatedHtml);
                 callback.onSuccess();
             }
 
             @Override
             public void onError(Exception e) {
-                mTranslating.remove(commentId);
-                mActiveTranslators.remove(commentId);
+                mTranslating.remove(key);
+                mActiveTranslators.remove(key);
                 if (mDestroyed) {
                     return;
                 }
-                String msg = e.getMessage() != null ? e.getMessage() : "";
-                Toast.makeText(appContext,
-                        appContext.getString(R.string.translate_failed)
-                                + (msg.isEmpty() ? "" : ": " + msg),
-                        Toast.LENGTH_LONG).show();
+                // P13：批量翻译进行中时失败 toast 只弹一次（mBatchCallback
+                // 非空即在批量内）；单条点按翻译（mBatchCallback 为空）
+                // 每次都弹，与原来一致。
+                boolean showToast = mBatchCallback == null || !mBatchErrorToastShown;
+                if (mBatchCallback != null) {
+                    mBatchErrorToastShown = true;
+                }
+                if (showToast) {
+                    String msg = e.getMessage() != null ? e.getMessage() : "";
+                    Toast.makeText(appContext,
+                            appContext.getString(R.string.translate_failed)
+                                    + (msg.isEmpty() ? "" : ": " + msg),
+                            Toast.LENGTH_LONG).show();
+                }
                 callback.onError();
             }
         });

@@ -14,6 +14,8 @@ import java.io.FileWriter;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 0.1.36：深色模式诊断追踪（临时，定论后即删）。
@@ -30,17 +32,33 @@ public class ThemeTrace {
         return new File(context.getCacheDir(), FILE_NAME);
     }
 
-    public static synchronized void log(Context context, String tag, String detail) {
+    /**
+     * P14：与 DiagTrace.log 同款——写盘移入单线程写盘器，进程启动与每次
+     * 主题切换的调用方（主线程）不再等磁盘 IO；时间戳在调用线程取。
+     */
+    private static final ExecutorService sWriter =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "ThemeTrace-writer");
+                t.setDaemon(true);
+                return t;
+            });
+
+    public static void log(Context context, String tag, String detail) {
         if (context == null) {
             return;
         }
+        final Context appContext = context.getApplicationContext();
+        final String time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+                .format(new Date());
+        sWriter.execute(() -> writeLog(appContext, tag, detail, time));
+    }
+
+    private static void writeLog(Context context, String tag, String detail, String time) {
         try {
             File f = file(context);
             if (f.exists() && f.length() > MAX_BYTES) {
                 f.delete();
             }
-            String time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
-                    .format(new Date());
             // 70：同 DiagTrace.log()，try-with-resources。
             try (BufferedWriter w = new BufferedWriter(new FileWriter(f, true))) {
                 w.write(time + " " + tag + " " + detail);

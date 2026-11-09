@@ -113,7 +113,9 @@ public class CreateReviewActivity extends AppCompatActivity implements
         PullRequestReviewService service = ServiceFactory.get(PullRequestReviewService.class, false);
         final Single<Response<Review>> resultSingle;
 
-        if (mPendingReview == null) {
+        // 154/115：mPendingReview.id() 为可空 Long，submitReview(long) 会拆箱；
+        // 无 id 的 pending review 按新建 review 提交，不崩溃。
+        if (mPendingReview == null || mPendingReview.id() == null) {
             CreateReview request = CreateReview.builder()
                     .body(body)
                     .event(desc.mCreateEvent)

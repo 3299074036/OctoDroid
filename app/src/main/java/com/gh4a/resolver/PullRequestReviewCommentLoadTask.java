@@ -70,11 +70,13 @@ public class PullRequestReviewCommentLoadTask extends UrlLoadTask {
                             commentsByDiffHunkId.put(id, comment);
                         }
 
-                        if (marker.matches(comment.id(), null)) {
+                        // 166：comment.id() 为可空 Long，matches(long, Date) 会拆箱；
+                        // pullRequestReviewId() 同为可空 Long，缺字段按 0 计。
+                        if (comment.id() != null && marker.matches(comment.id(), null)) {
                             // Once found the comment we are looking for get a correct review id from
                             // the initial diff hunk comment
                             ReviewComment initialComment = commentsByDiffHunkId.get(id);
-                            long reviewId = initialComment.pullRequestReviewId();
+                            long reviewId = ApiHelpers.orZero(initialComment.pullRequestReviewId());
 
                             return reviewService
                                     .getReview(repoOwner, repoName, pullRequestNumber, reviewId)

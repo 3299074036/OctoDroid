@@ -20,6 +20,7 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
@@ -183,12 +184,14 @@ public class ImageViewerActivity extends AppCompatActivity {
                 if (mDownloadCall == call) {
                     mDownloadCall = null;
                 }
-            }
-            synchronized (state.lock) {
-                state.bitmap = bitmap;
-                state.error = error;
-                state.done = true;
-                state.lock.notifyAll();
+                // 185：done 必须在 finally 里置位——Error（如解码 OOM）
+                // 不走 catch (Exception)，否则接管线程永远等不到通知。
+                synchronized (state.lock) {
+                    state.bitmap = bitmap;
+                    state.error = error;
+                    state.done = true;
+                    state.lock.notifyAll();
+                }
             }
 
             final Bitmap result = bitmap;
@@ -217,9 +220,17 @@ public class ImageViewerActivity extends AppCompatActivity {
             final Bitmap result;
             final Exception failure;
             synchronized (state.lock) {
+                // 185：无超时等待——旧实例的下载线程若已死且 done 未置位，
+                // 接管线程永远挂起；30 秒兜底后按失败交付（error 为 null
+                // 时 showError 走未知错误文案）。
+                long deadline = SystemClock.uptimeMillis() + 30_000;
                 while (!state.done) {
+                    long remaining = deadline - SystemClock.uptimeMillis();
+                    if (remaining <= 0) {
+                        break;
+                    }
                     try {
-                        state.lock.wait();
+                        state.lock.wait(remaining);
                     } catch (InterruptedException e) {
                         return;
                     }

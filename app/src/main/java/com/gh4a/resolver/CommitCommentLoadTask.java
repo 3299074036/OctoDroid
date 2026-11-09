@@ -66,11 +66,14 @@ public class CommitCommentLoadTask extends UrlLoadTask {
                 .cache(); // single is used multiple times -> avoid refetching data
 
         Single<Optional<GitHubFile>> fileSingle = commentSingle
-                .compose(RxUtils.filterAndMapToFirst(c -> marker.matches(c.id(), c.createdAt())))
+                // 166：c.id() 为可空 Long，matches(long, Date) 会拆箱。
+                .compose(RxUtils.filterAndMapToFirst(c -> c.id() != null && marker.matches(c.id(), c.createdAt())))
                 .zipWith(commitSingle, (comment, commit) -> {
-                    if (comment.isPresent()) {
+                    // 208：commit/files() 可空，commitFile/filename 可空。
+                    if (comment.isPresent() && commit != null && commit.files() != null) {
                         for (GitHubFile commitFile : commit.files()) {
-                            if (commitFile.filename().equals(comment.get().path())) {
+                            if (commitFile != null && commitFile.filename() != null
+                                    && commitFile.filename().equals(comment.get().path())) {
                                 return Optional.of(commitFile);
                             }
                         }

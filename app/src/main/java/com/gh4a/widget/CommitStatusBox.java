@@ -58,6 +58,10 @@ public class CommitStatusBox extends LinearLayoutCompat implements View.OnClickL
     }
 
     public void fillStatus(List<StatusWrapper> statuses, PullRequest.MergeableState mergableState) {
+        // 160：GitHub 计算合并状态中会返回 null（确认可达），按未知分支处理。
+        if (mergableState == null) {
+            mergableState = PullRequest.MergeableState.Unknown;
+        }
         final int statusIconDrawableResId;
         final int statusLabelResId;
         switch (mergableState) {
@@ -129,7 +133,10 @@ public class CommitStatusBox extends LinearLayoutCompat implements View.OnClickL
             }
 
             final int iconDrawableResId;
-            switch (status.state()) {
+            // 160：state() 可空（StatusWrapper 的 mState 滞留 null 时），缺失按未知计。
+            StatusWrapper.State state = status.state() != null
+                    ? status.state() : StatusWrapper.State.Unknown;
+            switch (state) {
                 case Failed:
                     iconDrawableResId = R.drawable.commit_status_fail;
                     failingCount += 1;

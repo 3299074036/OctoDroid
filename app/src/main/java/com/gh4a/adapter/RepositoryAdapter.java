@@ -28,7 +28,6 @@ import com.gh4a.R;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.StringUtils;
 import com.meisolsson.githubsdk.model.Repository;
-import com.vdurmont.emoji.EmojiParser;
 
 import java.util.Locale;
 
@@ -50,31 +49,37 @@ public class RepositoryAdapter extends RootAdapter<Repository, RepositoryAdapter
 
         if (!StringUtils.isBlank(repository.description())) {
             holder.tvDesc.setVisibility(View.VISIBLE);
-            holder.tvDesc.setText(EmojiParser.parseToUnicode(repository.description()));
+            holder.tvDesc.setText(StringUtils.parseEmojiToUnicode(repository.description()));
         } else {
             holder.tvDesc.setVisibility(View.GONE);
         }
 
         // 0.4.0 像素重排：原型仓库行 meta 为单行“语言  ★ 星  ⑂ Fork  体积”，
         // private/fork 改为 meta 前缀词，不再分栏显示。
+        // 166：isPrivate()/isFork() 为可空 Boolean，size() 为可空 Integer，直接拆箱即 NPE；
+        // stargazersCount()/forksCount() 为 null 时 StringBuilder 会拼出字面 "null"，一并按 0 计。
         StringBuilder meta = new StringBuilder();
-        if (repository.isPrivate()) {
+        if (Boolean.TRUE.equals(repository.isPrivate())) {
             meta.append(mContext.getString(R.string.repo_type_private)).append("  ·  ");
         }
-        if (repository.isFork()) {
+        if (Boolean.TRUE.equals(repository.isFork())) {
             meta.append(mContext.getString(R.string.fork)).append("  ·  ");
         }
         meta.append(repository.language() != null
                 ? repository.language() : mContext.getString(R.string.unknown));
-        meta.append("  ★ ").append(repository.stargazersCount());
-        meta.append("  ⑂ ").append(repository.forksCount());
-        meta.append("  ").append(Formatter.formatFileSize(mContext, 1024L * repository.size()));
+        meta.append("  ★ ").append(ApiHelpers.orZero(repository.stargazersCount()));
+        meta.append("  ⑂ ").append(ApiHelpers.orZero(repository.forksCount()));
+        meta.append("  ").append(Formatter.formatFileSize(mContext, 1024L * ApiHelpers.orZero(repository.size())));
         holder.tvMeta.setText(meta.toString());
     }
 
     @Override
     protected boolean isFiltered(CharSequence filter, Repository repo) {
         String lcFilter = filter.toString().toLowerCase(Locale.getDefault());
+        // 166：name() 可空，无名仓库不过滤命中。
+        if (repo.name() == null) {
+            return false;
+        }
         String name = repo.name().toLowerCase(Locale.getDefault());
         return name.contains(lcFilter);
     }

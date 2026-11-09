@@ -51,6 +51,7 @@ import com.meisolsson.githubsdk.model.Repository;
 import com.meisolsson.githubsdk.service.repositories.RepositoryCommitService;
 
 import java.net.HttpURLConnection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -160,6 +161,16 @@ public class CommitListFragment extends PagedDataBaseFragment<Commit> implements
     }
 
     @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        // 164：MenuProvider 在 onAttach 注册、须随视图销毁移除，否则视图重建后
+        // 旧 provider 仍在，菜单重复、旧回调打到已销毁视图。
+        if (getActivity() != null) {
+            getActivity().removeMenuProvider(this);
+        }
+    }
+
+    @Override
     protected RootAdapter<Commit, ? extends RecyclerView.ViewHolder> onCreateAdapter() {
         mAdapter = new CommitAdapter(getActivity());
         mAdapter.setContextMenuSupported(mCallback != null && mCallback.baseSelectionAllowed());
@@ -179,7 +190,16 @@ public class CommitListFragment extends PagedDataBaseFragment<Commit> implements
 
     @Override
     public void onItemClick(Commit commit) {
+        // 205：commit.url()/sha() 可空，url 形如
+        // https://api.github.com/repos/<owner>/<repo>/commits/<sha>，
+        // 段数不足时 urlPart[4]/[5] 越界；任一缺失都不跳转。
+        if (commit == null || commit.url() == null || commit.sha() == null) {
+            return;
+        }
         String[] urlPart = commit.url().split("/");
+        if (urlPart.length < 6) {
+            return;
+        }
         Intent intent = CommitActivity.makeIntent(getActivity(),
                 urlPart[4], urlPart[5], commit.sha());
         mCommitLauncher.launch(intent);
@@ -194,14 +214,23 @@ public class CommitListFragment extends PagedDataBaseFragment<Commit> implements
 
     @Override
     public boolean onContextItemSelected(MenuItem item) {
+        // 165：menuInfo 可空、position 可为负，getItemFromAdapterPosition 可返回 null。
+        if (!(item.getMenuInfo() instanceof ContextMenuAwareRecyclerView.RecyclerContextMenuInfo)) {
+            return false;
+        }
         ContextMenuAwareRecyclerView.RecyclerContextMenuInfo info =
                 (ContextMenuAwareRecyclerView.RecyclerContextMenuInfo) item.getMenuInfo();
-        if (info.position >= mAdapter.getItemCount()) {
+        if (info.position < 0 || info.position >= mAdapter.getItemCount()) {
             return false;
         }
 
         if (item.getItemId() == R.id.select_as_branch_ref) {
             Commit commit = mAdapter.getItemFromAdapterPosition(info.position);
+            // 165：commit 可空（header 行对应 index -1）；mCallback 可空
+            //（宿主未实现 ContextSelectionCallback）。
+            if (commit == null || mCallback == null) {
+                return false;
+            }
             mCallback.onCommitSelectedAsBase(commit);
             return true;
         }
@@ -220,7 +249,11 @@ public class CommitListFragment extends PagedDataBaseFragment<Commit> implements
                 .flatMap(response -> {
                     Page<Commit> commits = response.isSuccessful() ? response.body() : null;
                     if (commits != null) {
-                        final List<Commit> items = commits.items();
+                        // 169：commits.items() 可空（缺字段的分页响应），直接 isEmpty()
+                        // 即 NPE，且 null 会随 builder 流进 PagedDataBaseFragment 的 addAll；
+                        // 缺失按空页处理。
+                        final List<Commit> items = commits.items() != null
+                                ? commits.items() : Collections.<Commit>emptyList();
                         // The last page may be an empty one, so memorize the oldest commit for
                         // tracking renames in that case
                         if (!items.isEmpty()) {

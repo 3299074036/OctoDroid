@@ -54,6 +54,8 @@ public class FollowersFollowingListFragment extends PagedDataBaseFragment<User> 
     private String mLogin;
     private boolean mShowFollowers;
     private Boolean mIsFollowing;
+    // 163：关注切换在途标志，与 star/watch 切换对齐，防快速双击连发两次请求。
+    private boolean mFollowingInFlight = false;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -107,6 +109,7 @@ public class FollowersFollowingListFragment extends PagedDataBaseFragment<User> 
             } else {
                 followItem.setTitle(R.string.user_follow_action);
             }
+            followItem.setEnabled(!mFollowingInFlight);
         }
     }
 
@@ -146,6 +149,12 @@ public class FollowersFollowingListFragment extends PagedDataBaseFragment<User> 
     }
 
     private void toggleFollowingState() {
+        // 163：在途时忽略再次点击，防双击连发两次请求、状态来回翻。
+        if (mFollowingInFlight || mIsFollowing == null) {
+            return;
+        }
+        mFollowingInFlight = true;
+        getActivity().invalidateOptionsMenu();
         UserFollowerService service = ServiceFactory.get(UserFollowerService.class, false);
         Single<Response<Void>> responseSingle = mIsFollowing
                 ? service.unfollowUser(mLogin)
@@ -153,11 +162,20 @@ public class FollowersFollowingListFragment extends PagedDataBaseFragment<User> 
         responseSingle.map(ApiHelpers::mapToBooleanOrThrowOnFailure)
                 .compose(RxUtils::doInBackground)
                 .subscribe(result -> {
+                    mFollowingInFlight = false;
+                    // 162：请求在途时离开页面即 detach，getActivity() 为 null。
+                    if (!isAdded()) {
+                        return;
+                    }
                     if (mIsFollowing != null) {
                         mIsFollowing = !mIsFollowing;
                         getActivity().invalidateOptionsMenu();
                     }
                 }, error -> {
+                    mFollowingInFlight = false;
+                    if (isAdded()) {
+                        getActivity().invalidateOptionsMenu();
+                    }
                     handleActionFailure("Updating user following state failed", error);
                 });
     }

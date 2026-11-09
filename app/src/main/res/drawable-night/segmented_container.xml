@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 199：Star 分段控件容器深色变体（白天版浅灰底 #e8e8e8）。
+     未选中段文字是 ?android:attr/textColorSecondary（深色下浅色），
+     浅灰底上对比仅约 1.1:1；改深灰底，对比约 6.5:1。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#3A3A3C" />
+    <corners android:radius="20dp" />
+</shape>

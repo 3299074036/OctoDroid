@@ -18,6 +18,7 @@ import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -25,6 +26,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.gh4a.BaseActivity;
 import com.gh4a.R;
+import com.gh4a.utils.Background;
 import com.gh4a.utils.DiagTrace;
 import com.gh4a.utils.ThemeTrace;
 import com.gh4a.utils.UiUtils;
@@ -50,6 +52,10 @@ public class DiagnosticLogActivity extends BaseActivity {
     private static final int FILTER_ALL = 0;
     private static final int FILTER_TRACE = 1;
     private static final int FILTER_CRASH = 2;
+
+    // 178：过滤条件与实时开关须随旋转恢复。
+    private static final String STATE_FILTER = "filter";
+    private static final String STATE_LIVE = "live";
 
     private static class Entry {
         String time;
@@ -118,7 +124,21 @@ public class DiagnosticLogActivity extends BaseActivity {
         findViewById(R.id.diag_clear_button).setOnClickListener(v -> confirmClear());
         findViewById(R.id.diag_export_button).setOnClickListener(v -> showExportOptions());
 
+        // 178：旋转后恢复过滤条件与实时开关（字段 + 芯片/实时 UI 一并恢复）。
+        if (savedInstanceState != null) {
+            mFilter = savedInstanceState.getInt(STATE_FILTER, FILTER_ALL);
+            mLive = savedInstanceState.getBoolean(STATE_LIVE, true);
+        }
         reload();
+        setFilter(mFilter);
+        setLive(mLive);
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putInt(STATE_FILTER, mFilter);
+        outState.putBoolean(STATE_LIVE, mLive);
     }
 
     @Override
@@ -187,20 +207,44 @@ public class DiagnosticLogActivity extends BaseActivity {
         }
     }
 
+    // P11：主线程 1 秒轮询读文件——loadEntries() 读 trace（上限 512KB）
+    // 与崩溃文件（各 64KB）并逐行拆分，放主线程会掉帧/ANR（anr-audit
+    // skill Path A：执行线程是主线程 Handler，调用是整文件读 + 解析）。
+    // 指纹（文件 stat，便宜）仍留主线程轮询；读文件 + 解析走 Background，
+    // 结果回主线程应用；进行中不再叠加，Activity 已销毁丢弃结果。
+    private boolean mReloadInFlight;
+
     private void reload() {
         mFingerprint = fingerprint();
-        boolean atTop = true;
+        // atTop 进 lambda 必须 effectively final，先一次算好不再改。
+        final boolean atTop;
         if (mList.getLayoutManager() instanceof LinearLayoutManager) {
             atTop = ((LinearLayoutManager) mList.getLayoutManager())
                     .findFirstVisibleItemPosition() <= 0;
+        } else {
+            atTop = true;
         }
-        mAll.clear();
-        mAll.addAll(loadEntries());
-        Collections.sort(mAll, (a, b) -> b.time.compareTo(a.time));
-        applyFilter();
-        if (atTop && !mShown.isEmpty()) {
-            mList.scrollToPosition(0);
+        if (mReloadInFlight) {
+            return;
         }
+        mReloadInFlight = true;
+        final Context appContext = getApplicationContext();
+        Background.run("diag-reload", () -> {
+            List<Entry> entries = loadEntries(appContext);
+            mHandler.post(() -> {
+                mReloadInFlight = false;
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                mAll.clear();
+                mAll.addAll(entries);
+                Collections.sort(mAll, (a, b) -> b.time.compareTo(a.time));
+                applyFilter();
+                if (atTop && !mShown.isEmpty()) {
+                    mList.scrollToPosition(0);
+                }
+            });
+        });
     }
 
     private void applyFilter() {
@@ -216,11 +260,11 @@ public class DiagnosticLogActivity extends BaseActivity {
         mList.setVisibility(mShown.isEmpty() ? View.GONE : View.VISIBLE);
     }
 
-    private List<Entry> loadEntries() {
+    private List<Entry> loadEntries(Context context) {
         List<Entry> out = new ArrayList<>();
-        loadTraceFile(out, DiagTrace.traceFile(this));
-        loadTraceFile(out, ThemeTrace.file(this));
-        for (File f : DiagTrace.crashFiles(this)) {
+        loadTraceFile(out, DiagTrace.traceFile(context));
+        loadTraceFile(out, ThemeTrace.file(context));
+        for (File f : DiagTrace.crashFiles(context)) {
             out.add(loadCrashEntry(f));
         }
         return out;
@@ -327,23 +371,38 @@ public class DiagnosticLogActivity extends BaseActivity {
         new AlertDialog.Builder(this)
                 .setItems(items, (d, which) -> {
                     if (which == 0) {
-                        shareExport();
+                        makeExportFile(this::shareExport);
                     } else if (which == 1) {
-                        saveToDownloads();
+                        makeExportFile(this::saveToDownloads);
                     } else {
-                        copyExport();
+                        makeExportFile(this::copyExport);
                     }
                 })
                 .show();
     }
 
-    private File makeExportFile() {
-        return DiagTrace.exportFile(this);
+    /**
+     * P14：导出在后台线程做（读约 1MB 再写出），完成后回主线程回调；
+     * 导出期间禁用导出按钮防重复点击；Activity 已销毁时丢弃结果。
+     */
+    private void makeExportFile(java.util.function.Consumer<File> onReady) {
+        View exportButton = findViewById(R.id.diag_export_button);
+        exportButton.setEnabled(false);
+        final Context appContext = getApplicationContext();
+        Background.run("diag-export", () -> {
+            File f = DiagTrace.exportFile(appContext);
+            mHandler.post(() -> {
+                exportButton.setEnabled(true);
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                onReady.accept(f);
+            });
+        });
     }
 
-    private void shareExport() {
+    private void shareExport(File f) {
         try {
-            File f = makeExportFile();
             if (f == null || !f.exists()) {
                 Toast.makeText(this, R.string.diagnostic_log_export_failed,
                         Toast.LENGTH_SHORT).show();
@@ -363,14 +422,13 @@ public class DiagnosticLogActivity extends BaseActivity {
         }
     }
 
-    private void saveToDownloads() {
+    private void saveToDownloads(File f) {
         try {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 Toast.makeText(this, R.string.diagnostic_log_download_unsupported,
                         Toast.LENGTH_SHORT).show();
                 return;
             }
-            File f = makeExportFile();
             if (f == null || !f.exists()) {
                 Toast.makeText(this, R.string.diagnostic_log_export_failed,
                         Toast.LENGTH_SHORT).show();
@@ -409,9 +467,8 @@ public class DiagnosticLogActivity extends BaseActivity {
         }
     }
 
-    private void copyExport() {
+    private void copyExport(File f) {
         try {
-            File f = makeExportFile();
             if (f == null || !f.exists()) {
                 Toast.makeText(this, R.string.diagnostic_log_export_failed,
                         Toast.LENGTH_SHORT).show();
@@ -483,7 +540,13 @@ public class DiagnosticLogActivity extends BaseActivity {
             }
             h.itemView.setOnClickListener(v -> {
                 e.expanded = !e.expanded;
-                notifyItemChanged(h.getAdapterPosition());
+                // 177：实时模式下 mShown 随时新增条目，holder 可能在点击前已被回收，
+                // getAdapterPosition() 返回 NO_POSITION(-1)，notifyItemChanged(-1) 即抛错。
+                // 注意：onBindViewHolder 的形参已叫 position，这里用 pos 避免重定义。
+                int pos = h.getAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) {
+                    notifyItemChanged(pos);
+                }
             });
         }
 

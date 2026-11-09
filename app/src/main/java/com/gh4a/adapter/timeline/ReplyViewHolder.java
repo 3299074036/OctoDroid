@@ -5,6 +5,7 @@ import android.widget.Button;
 
 import com.gh4a.R;
 import com.gh4a.model.TimelineItem;
+import com.gh4a.utils.ApiHelpers;
 
 class ReplyViewHolder extends TimelineItemAdapter.TimelineItemViewHolder<TimelineItem.Reply>
         implements View.OnClickListener {
@@ -29,7 +30,8 @@ class ReplyViewHolder extends TimelineItemAdapter.TimelineItemViewHolder<Timelin
 
     @Override
     public void bind(TimelineItem.Reply item) {
-        boolean selected = item.timelineComment.comment().id() == mCallback.getSelectedCommentId();
+        // 166：comment.id() 为可空 Long，与 long 比较/传参会拆箱。
+        boolean selected = ApiHelpers.orZero(item.timelineComment.comment().id()) == mCallback.getSelectedCommentId();
         mReplyButton.setTag(item.timelineComment);
         mReplyButton.setText(selected ? R.string.reply_selected : R.string.reply);
     }
@@ -39,7 +41,7 @@ class ReplyViewHolder extends TimelineItemAdapter.TimelineItemViewHolder<Timelin
         if (v.getId() == R.id.btn_reply) {
             TimelineItem.TimelineComment timelineComment =
                     (TimelineItem.TimelineComment) v.getTag();
-            mCallback.reply(timelineComment.comment().id());
+            mCallback.reply(ApiHelpers.orZero(timelineComment.comment().id()));
         }
     }
 }

@@ -301,7 +301,10 @@ public class HttpImageGetter {
             for (int i = 0; i < mViewRefs.size(); i++) {
                 TextView existing = mViewRefs.get(i).get();
                 if (existing == null) {
-                    mViewRefs.remove(i);
+                    // 249：remove(i) 后不回退 i，下一个元素一次循环内未被
+                    // 检查——连续两个 stale 弱引用时第二个残留，且被跳过
+                    // 的正好是待绑定的 view 时 alreadyPresent 漏判致重复入列。
+                    mViewRefs.remove(i--);
                 } else if (existing == view) {
                     alreadyPresent = true;
                 }
@@ -315,7 +318,9 @@ public class HttpImageGetter {
             for (int i = 0; i < mViewRefs.size(); i++) {
                 TextView existing = mViewRefs.get(i).get();
                 if (existing == null || existing == view) {
-                    mViewRefs.remove(i);
+                    // 249：同 addView，remove 后 i--，否则连续两个待删/
+                    // 失效项时第二个残留。
+                    mViewRefs.remove(i--);
                 }
             }
         }
@@ -495,7 +500,17 @@ public class HttpImageGetter {
                         if (isGif) {
                             if (canLoadGif()) {
                                 GifDrawable d = new GifDrawable(responseBody);
-                                d.setBounds(0, 0, d.getIntrinsicWidth(), d.getIntrinsicHeight());
+                                // 248：GIF 头声明的逻辑屏尺寸不在 150 号的
+                                // 字节数卡控内；文件很小、头声明数万×数万时
+                                // 原先按 intrinsic 全尺寸排版/绘制。按 bitmap
+                                // 路同款对半砍到 < mMaxWidth 再定 bounds。
+                                int width = d.getIntrinsicWidth();
+                                int height = d.getIntrinsicHeight();
+                                while (width >= mMaxWidth && width > 0) {
+                                    width /= 2;
+                                    height /= 2;
+                                }
+                                d.setBounds(0, 0, width, height);
                                 return d;
                             } else {
                                 return mGifPlaceholderDrawable;

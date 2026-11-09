@@ -65,7 +65,8 @@ public class PullRequestDiffCommentLoadTask extends UrlLoadTask {
                 .toSingle(page -> prService.getPullRequestFiles(mRepoOwner, mRepoName, mPullRequestNumber, page));
 
         return commentsSingle
-                .compose(RxUtils.filterAndMapToFirst(c -> mMarker.matches(c.id(), c.createdAt())))
+                // 166：c.id() 为可空 Long，matches(long, Date) 会拆箱。
+                .compose(RxUtils.filterAndMapToFirst(c -> c.id() != null && mMarker.matches(c.id(), c.createdAt())))
                 .zipWith(filesSingle, (commentOpt, files) -> commentOpt.map(comment -> {
                     for (GitHubFile commitFile : files) {
                         if (commitFile.filename().equals(comment.path())) {
@@ -80,6 +81,11 @@ public class PullRequestDiffCommentLoadTask extends UrlLoadTask {
                         GitHubFile file = result.get().second;
                         if (foundComment && file != null && !FileUtils.isImage(file.filename())) {
                             return Single.zip(pullRequestSingle, commentsSingle, (pr, comments) -> {
+                                // 156：head/sha 可空；缺失时回 Optional.empty() 走
+                                // 外层浏览器兜底，而非在 combiner 里 NPE 崩溃。
+                                if (pr.head() == null || pr.head().sha() == null) {
+                                    return Optional.<Intent>empty();
+                                }
                                 //noinspection CodeBlock2Expr
                                 return Optional.of(PullRequestDiffViewerActivity.makeIntent(
                                         mActivity, mRepoOwner, mRepoName, mPullRequestNumber,

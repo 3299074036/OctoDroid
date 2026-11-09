@@ -156,11 +156,19 @@ public class StringUtils {
         return ssb;
     }
 
+    /**
+     * 219：EmojiParser.parseToUnicode(null) 即 NPE（emoji-java 5.1.1 无 null 守卫）。
+     * 全树统一走这里，null 按空串处理，不再各处直接调 EmojiParser。
+     */
+    public static String parseEmojiToUnicode(@Nullable String text) {
+        return text == null ? "" : EmojiParser.parseToUnicode(text);
+    }
+
     public static void replaceLabelPlaceholder(Context context, SpannableStringBuilder text,
                                                Label label) {
         int pos = text.toString().indexOf("[label]");
         if (label != null && pos >= 0) {
-            String labelName = EmojiParser.parseToUnicode(label.name());
+            String labelName = parseEmojiToUnicode(label.name());
             int length = labelName.length();
             text.replace(pos, pos + 7, labelName);
             text.setSpan(new IssueLabelSpan(context, label, false), pos, pos + length, 0);
@@ -187,8 +195,11 @@ public class StringUtils {
             return null;
         }
 
-        int start = input.substring(0, pos).split("\n").length;
-        int end = start + match.split("\n").length - 1;
+        // 269 新单测：行号是 1-based（JS highlightLines 用 from-1 取下标）。
+        // split("\n") 默认丢掉末尾空串，"a\n".split("\n") 长度是 1 不是 2，
+        // 匹配正好在行首时行号会少算 1 行；用 limit -1 保留末尾空串。
+        int start = input.substring(0, pos).split("\n", -1).length;
+        int end = start + match.split("\n", -1).length - 1;
         return new int[] { start, end };
     }
 

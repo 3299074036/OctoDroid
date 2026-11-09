@@ -65,23 +65,35 @@ WORKERS = 6
 MAX_FAILURE_RATE = 0.05
 
 
-def hyd(L, v):
+def hyd(L, v, _seen=None):
     if isinstance(v, dict):
-        return {k: hyd_ref(L, x) for k, x in v.items()}
+        return {k: hyd_ref(L, x, _seen) for k, x in v.items()}
     if isinstance(v, list):
-        return [hyd_ref(L, x) for x in v]
+        return [hyd_ref(L, x, _seen) for x in v]
     return v
 
 
-def hyd_ref(L, x):
+def hyd_ref(L, x, _seen=None):
     if isinstance(x, int):
         if x == -1:
             return None
         if 0 <= x < len(L):
-            return hyd(L, L[x])
+            # 210：索引自引用/环（如 L[i] 指回自身）会使 hyd/hyd_ref
+            # 无限递归直至 RecursionError；_seen 只记当前展开路径上
+            # 的索引（兄弟分支仍可正常展开，DAG 不受影响），环上
+            # 重复出现的索引按原值返回，不再展开。
+            if _seen is None:
+                _seen = set()
+            if x in _seen:
+                return x
+            _seen.add(x)
+            try:
+                return hyd(L, L[x], _seen)
+            finally:
+                _seen.discard(x)
         return x
     if isinstance(x, (dict, list)):
-        return hyd(L, x)
+        return hyd(L, x, _seen)
     return x
 
 
@@ -246,7 +258,12 @@ def process(full):
         if (isinstance(el, dict) and "owner" in el and "repo" in el
                 and ("releases" in el or "subgroup" in el
                      or "starCount" in el)):
-            r = hyd(L, el)
+            # 210：环保护之外的兜底——极深嵌套仍可能 RecursionError，
+            # 按坏载荷计入失败仓库，不让单个仓库杀死整批 worker。
+            try:
+                r = hyd(L, el)
+            except RecursionError:
+                return {"fullName": full, "error": "bad-json"}
             releases = []
             for rel in r.get("releases") or []:
                 if not isinstance(rel, dict):
@@ -260,7 +277,12 @@ def process(full):
                                for a in (rel.get("assets") or [])
                                if isinstance(a, dict)],
                 })
-            first = releases[0] if releases else {}
+            # 271：不假设 releases[] 按最新在前——取 publishAt 最大者
+            # 当最新版（与 generate.py 的 select_installable_release
+            # 同款口径）；publishAt 缺失按最空处理。hiwiki 载荷的
+            # publishAt 为统一 ISO 格式，按串比较即按时间比较。
+            latest = max(releases, key=lambda r: r.get("publishAt") or "") \
+                if releases else {}
             return {
                 "fullName": "%s/%s" % (r.get("owner"), r.get("repo")),
                 "category": r.get("category"),
@@ -268,8 +290,8 @@ def process(full):
                 "tags": r.get("tags") or [],
                 "stars": r.get("starCount"),
                 "language": r.get("language"),
-                "latestTag": first.get("tag"),
-                "lastReleaseTime": first.get("publishAt")
+                "latestTag": latest.get("tag"),
+                "lastReleaseTime": latest.get("publishAt")
                 or r.get("lastReleaseTime"),
                 "pushedAt": r.get("pushedAt"),
                 "ownerAvatar": r.get("ownerAvatar"),

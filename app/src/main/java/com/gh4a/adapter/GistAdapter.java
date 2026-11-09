@@ -60,8 +60,9 @@ public class GistAdapter extends RootAdapter<Gist, GistAdapter.ViewHolder> {
         holder.tvTitle.setText(TextUtils.isEmpty(gist.description())
                 ? mContext.getString(R.string.gist_no_description) : gist.description());
         holder.tvSha.setText(gist.id());
-        holder.tvFiles.setText(String.valueOf(gist.files().size()));
-        holder.tvPrivate.setVisibility(gist.isPublic() ? View.GONE : View.VISIBLE);
+        // 166：files() 可空，isPublic() 为可空 Boolean，直接拆箱即 NPE。
+        holder.tvFiles.setText(String.valueOf(gist.files() != null ? gist.files().size() : 0));
+        holder.tvPrivate.setVisibility(Boolean.TRUE.equals(gist.isPublic()) ? View.GONE : View.VISIBLE);
     }
 
     public static class ViewHolder extends RecyclerView.ViewHolder {

@@ -5,6 +5,7 @@ import android.content.Context;
 import com.gh4a.Gh4Application;
 import com.gh4a.fragment.JsonCache;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -63,8 +64,16 @@ public class RecentHistoryManager {
         return entries;
     };
 
+    // 252：无有效登录时 getAuthLogin() 返回 null，文件名会成字面量
+    // recent_history_null——无登录态的浏览记录落入与任何账号无关的共享
+    // 文件，登录后成孤儿、既不可见也不清理。login 为 null 时返回 null，
+    // 调用方直接不记录（record 提前 return，getEntries 返回空列表）。
+    @Nullable
     private static JsonCache<List<Entry>> cacheFor(Context context) {
         String login = Gh4Application.get().getAuthLogin();
+        if (login == null) {
+            return null;
+        }
         return new JsonCache<>(PREFS_NAME + "_" + login, TO_JSON, FROM_JSON);
     }
 
@@ -101,6 +110,10 @@ public class RecentHistoryManager {
     }
 
     private static void record(Context context, Entry entry) {
+        JsonCache<List<Entry>> cache = cacheFor(context);
+        if (cache == null) {
+            return;
+        }
         List<Entry> entries = getEntries(context);
         // Dedupe: move existing entry to front instead of duplicating
         // (also covers activity recreation on rotation)
@@ -119,15 +132,27 @@ public class RecentHistoryManager {
 
     @NonNull
     public static List<Entry> getEntries(Context context) {
-        List<Entry> entries = cacheFor(context).load(context, KEY_ITEMS);
+        JsonCache<List<Entry>> cache = cacheFor(context);
+        if (cache == null) {
+            return new ArrayList<>();
+        }
+        List<Entry> entries = cache.load(context, KEY_ITEMS);
         return entries != null ? entries : new ArrayList<>();
     }
 
     public static void clear(Context context) {
-        cacheFor(context).clear(context, KEY_ITEMS);
+        JsonCache<List<Entry>> cache = cacheFor(context);
+        if (cache == null) {
+            return;
+        }
+        cache.clear(context, KEY_ITEMS);
     }
 
     private static void saveEntries(Context context, List<Entry> entries) {
-        cacheFor(context).save(context, KEY_ITEMS, null, entries);
+        JsonCache<List<Entry>> cache = cacheFor(context);
+        if (cache == null) {
+            return;
+        }
+        cache.save(context, KEY_ITEMS, null, entries);
     }
 }

@@ -72,7 +72,8 @@
         <ImageView
             android:id="@+id/send_button"
             style="@style/ImageButton"
-            android:src="@drawable/send_button" />
+            android:src="@drawable/send_button"
+            android:contentDescription="@string/send_comment"/>
 
     </LinearLayout>
 

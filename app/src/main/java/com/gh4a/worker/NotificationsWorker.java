@@ -72,6 +72,12 @@ public class NotificationsWorker extends Worker {
     private static final Object sPrefsLock = new Object();
 
     public static void schedule(Context context, int intervalMinutes) {
+        // 243：间隔此前不钳制；手写/篡改备份把间隔写成 <15 并恢复后，设置页
+        // 开关一次即以 <15 分钟建 PeriodicWorkRequest 抛
+        // IllegalArgumentException（103 号的钳制只落在冷启动读路径）。
+        // schedule() 入口统一钳到 [15, 1440]，与
+        // Gh4Application.getNotificationIntervalMinutes 的口径一致。
+        intervalMinutes = Math.max(15, Math.min(1440, intervalMinutes));
         Constraints constraints = new Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build();
@@ -464,7 +470,10 @@ public class NotificationsWorker extends Worker {
 
     private String determineNotificationTypeLabel(NotificationThread notification) {
         // 顺带（:340 的前置守卫）：subject() 可空，否则同行调用仍 NPE。
-        if (notification.subject() == null) {
+        // 242：subject.type() 同样可空（javap 核实 @Nullable），switch 的
+        // selector 为 null 即抛 NPE，当轮通知全丢；与 subject() == null
+        // 分支一致，缺 type 时返回空串。
+        if (notification.subject() == null || notification.subject().type() == null) {
             return "";
         }
         final Resources res = getApplicationContext().getResources();

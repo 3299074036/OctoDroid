@@ -37,7 +37,6 @@ import com.meisolsson.githubsdk.model.User;
 import com.meisolsson.githubsdk.model.git.GitComment;
 import com.meisolsson.githubsdk.model.git.GitCommit;
 import com.meisolsson.githubsdk.model.git.GitUser;
-import com.vdurmont.emoji.EmojiParser;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -120,10 +119,12 @@ public class CommitFragment extends LoadingFragmentBase implements OnClickListen
 
         ImageView ivGravatar = mContentView.findViewById(R.id.iv_gravatar);
         User author = mCommit.author();
+        // 166：commit.commit() 可空，缺 commit 子对象即 NPE，先取一次再判空。
+        GitCommit gitCommit = mCommit.commit();
         if (author != null) {
             AvatarHandler.assignAvatar(ivGravatar, author);
         } else {
-            GitUser commitAuthor = mCommit.commit().author();
+            GitUser commitAuthor = gitCommit != null ? gitCommit.author() : null;
             String email = commitAuthor != null ? commitAuthor.email() : null;
             ivGravatar.setImageDrawable(new AvatarHandler.DefaultAvatarDrawable(null, email));
         }
@@ -137,17 +138,20 @@ public class CommitFragment extends LoadingFragmentBase implements OnClickListen
         TextView tvMessage = mContentView.findViewById(R.id.tv_message);
         TextView tvTitle = mContentView.findViewById(R.id.tv_title);
 
-        String message = mCommit.commit().message();
+        String message = gitCommit != null ? gitCommit.message() : null;
+        if (message == null) {
+            message = "";
+        }
         int pos = message.indexOf('\n');
         String title = pos > 0 ? message.substring(0, pos) : message;
-        title = EmojiParser.parseToUnicode(title);
+        title = StringUtils.parseEmojiToUnicode(title);
         int length = message.length();
         while (pos > 0 && pos < length && Character.isWhitespace(message.charAt(pos))) {
             pos++;
         }
         message = pos > 0 && pos < length ? message.substring(pos) : null;
         if (message != null) {
-            message = EmojiParser.parseToUnicode(message);
+            message = StringUtils.parseEmojiToUnicode(message);
         }
 
         tvTitle.setText(title);
@@ -155,14 +159,15 @@ public class CommitFragment extends LoadingFragmentBase implements OnClickListen
         tvTitle.setVisibility(StringUtils.isBlank(title) ? View.GONE : View.VISIBLE);
         tvMessage.setVisibility(StringUtils.isBlank(message) ? View.GONE : View.VISIBLE);
 
-        GitCommit commit = mCommit.commit();
+        GitCommit commit = gitCommit;
 
         TextView tvAuthor = mContentView.findViewById(R.id.tv_author);
         tvAuthor.setText(ApiHelpers.getAuthorName(app, mCommit));
 
         TextView tvTimestamp = mContentView.findViewById(R.id.tv_timestamp);
+        // 166：author() 可空，先取到 date 再进 null 安全的 formatRelativeTime。
         tvTimestamp.setText(StringUtils.formatRelativeTime(
-                activity, commit.author().date(), true));
+                activity, commit != null && commit.author() != null ? commit.author().date() : null, true));
 
         View committerContainer = mContentView.findViewById(R.id.committer);
 
@@ -173,7 +178,9 @@ public class CommitFragment extends LoadingFragmentBase implements OnClickListen
             AvatarHandler.assignAvatar(commitGravatar, mCommit.committer());
             String committerText = getString(R.string.commit_details,
                     ApiHelpers.getCommitterName(app, mCommit),
-                    StringUtils.formatRelativeTime(activity, commit.committer().date(), true));
+                    // 166：committer() 可空，先取到 date 再进 null 安全的 formatRelativeTime。
+                    StringUtils.formatRelativeTime(activity,
+                            commit != null && commit.committer() != null ? commit.committer().date() : null, true));
             StringUtils.applyBoldTagsAndSetText(commitExtra, committerText);
 
             committerContainer.setVisibility(View.VISIBLE);
@@ -205,6 +212,10 @@ public class CommitFragment extends LoadingFragmentBase implements OnClickListen
             GitHubFile file = files.get(i);
             final LinearLayout parent;
 
+            // 166：status() 可空，switch(null) 即 NPE；缺字段跳过该文件。
+            if (file.status() == null) {
+                continue;
+            }
             switch (file.status()) {
                 case "added":
                     parent = llAdded;
@@ -226,8 +237,9 @@ public class CommitFragment extends LoadingFragmentBase implements OnClickListen
                     continue;
             }
 
-            totalAdditions += file.additions();
-            totalDeletions += file.deletions();
+            // 166：additions()/deletions() 为可空 Integer，直接拆箱即 NPE。
+            totalAdditions += ApiHelpers.orZero(file.additions());
+            totalDeletions += ApiHelpers.orZero(file.deletions());
 
             View fileView = getLayoutInflater().inflate(R.layout.commit_filename, parent, false);
             TextView fileNameView = fileView.findViewById(R.id.filename);
@@ -271,12 +283,15 @@ public class CommitFragment extends LoadingFragmentBase implements OnClickListen
     private void fillFileStats(View fileView, GitHubFile file, ForegroundColorSpan additionsSpan,
             ForegroundColorSpan deletionsSpan) {
         TextView statsView = fileView.findViewById(R.id.stats);
-        if (file.additions() > 0 || file.deletions() > 0) {
+        // 166：additions()/deletions() 为可空 Integer，直接拆箱即 NPE。
+        int additions = ApiHelpers.orZero(file.additions());
+        int deletions = ApiHelpers.orZero(file.deletions());
+        if (additions > 0 || deletions > 0) {
             SpannableStringBuilder stats = new SpannableStringBuilder();
-            stats.append("+").append(String.valueOf(file.additions()));
+            stats.append("+").append(String.valueOf(additions));
             int addLength = stats.length();
             stats.setSpan(additionsSpan, 0, addLength, 0);
-            stats.append("\u00a0\u00a0\u00a0-").append(String.valueOf(file.deletions()));
+            stats.append("\u00a0\u00a0\u00a0-").append(String.valueOf(deletions));
             stats.setSpan(deletionsSpan, addLength, stats.length(), 0);
             statsView.setText(stats);
             statsView.setVisibility(View.VISIBLE);
@@ -287,6 +302,10 @@ public class CommitFragment extends LoadingFragmentBase implements OnClickListen
 
     private void fillFileCommentsCount(View fileView, GitHubFile file,
             List<? extends PositionalCommentBase> comments) {
+        // 166：comments 可空（mComments 可为 null），直接 for-each 即 NPE。
+        if (comments == null) {
+            return;
+        }
         int commentCount = 0;
         for (PositionalCommentBase comment : comments) {
             if (TextUtils.equals(file.filename(), comment.path())) {

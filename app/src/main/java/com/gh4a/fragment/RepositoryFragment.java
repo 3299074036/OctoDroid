@@ -72,7 +72,6 @@ import com.meisolsson.githubsdk.service.activity.WatchingService;
 import com.meisolsson.githubsdk.service.repositories.RepositoryContentService;
 import com.meisolsson.githubsdk.service.search.SearchService;
 import com.gh4a.widget.OverviewRow;
-import com.vdurmont.emoji.EmojiParser;
 
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
@@ -412,7 +411,7 @@ public class RepositoryFragment extends LoadingFragmentBase implements
             if (stringId != 0) {
                 view.setText(getString(stringId, text));
             } else {
-                view.setText(EmojiParser.parseToUnicode(text));
+                view.setText(StringUtils.parseEmojiToUnicode(text));
             }
             view.setVisibility(View.VISIBLE);
         } else {
@@ -760,6 +759,10 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     mStarWatchInFlight = false;
                     mStarsRow.setEnabled(true);
                     mStarsRow.setIconClickListener(this);
+                    // 162：同款结构，detach 后 updateStargazerUi 内的 getResources() 即 NPE。
+                    if (!isAdded()) {
+                        return;
+                    }
                     if (mIsStarring != null) {
                         mIsStarring = !mIsStarring;
                         mRepository = mRepository.toBuilder()
@@ -776,6 +779,9 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     mStarWatchInFlight = false;
                     mStarsRow.setEnabled(true);
                     mStarsRow.setIconClickListener(this);
+                    if (!isAdded()) {
+                        return;
+                    }
                     handleActionFailure("Updating repo starring state failed", error);
                     updateStargazerUi();
                 });
@@ -904,6 +910,10 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     mStarWatchInFlight = false;
                     mWatcherRow.setEnabled(true);
                     mWatcherRow.setIconClickListener(this);
+                    // 162：同款结构，detach 后 updateWatcherUi 内的 getResources() 即 NPE。
+                    if (!isAdded()) {
+                        return;
+                    }
                     if (mIsWatching != null) {
                         mIsWatching = result;
                         mRepository = mRepository.toBuilder()
@@ -915,6 +925,9 @@ public class RepositoryFragment extends LoadingFragmentBase implements
                     mStarWatchInFlight = false;
                     mWatcherRow.setEnabled(true);
                     mWatcherRow.setIconClickListener(this);
+                    if (!isAdded()) {
+                        return;
+                    }
                     handleActionFailure("Updating repo watching state failed", error);
                     updateWatcherUi();
                 });

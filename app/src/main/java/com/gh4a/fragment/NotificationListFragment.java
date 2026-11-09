@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Parcelable;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -323,7 +324,9 @@ public class NotificationListFragment extends LoadingListFragmentBase implements
             NotificationHolder newItem = mNewItems.get(newPos);
             if (oldItem.notification == null || newItem.notification == null) {
                 return oldItem.notification == null && newItem.notification == null
-                        && oldItem.repository.fullName().equals(newItem.repository.fullName());
+                        // 154/115：repository 可空，fullName 用空安全比较。
+                        && TextUtils.equals(oldItem.repository != null ? oldItem.repository.fullName() : null,
+                                newItem.repository != null ? newItem.repository.fullName() : null);
             }
             return oldItem.notification.id().equals(newItem.notification.id());
         }
@@ -357,7 +360,9 @@ public class NotificationListFragment extends LoadingListFragmentBase implements
             NotificationHolder holder = notifications.get(i);
             if (holder.notification == null) {
                 Repository repo = holder.repository;
-                if (repoOwner.equals(repo.owner().login())
+                // 154/115：repository/owner 可空，判空后再比对。
+                if (repo != null && repo.owner() != null
+                        && repoOwner.equals(repo.owner().login())
                         && repoName.equals(repo.name())) {
                     scrollToAndHighlightPosition(i);
                     break;

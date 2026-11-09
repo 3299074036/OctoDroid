@@ -75,11 +75,20 @@ public class WikiActivity extends WebViewerActivity {
     @Override
     protected String generateHtml(String cssTheme, boolean addTitleHeader) {
         String title = addTitleHeader ? getDocumentTitle() : null;
-        return wrapWithMarkdownStyling(mWikiPageFeed.getContent(), cssTheme, title);
+        // 189：mWikiPageFeed 可为 null（readCompressedValueFromBundle 在
+        // feed 字节缺失时返回 null，见 getActionBarTitle 的 BUG-13）；
+        // wrapWithMarkdownStyling 对 null html 有兜底（空内容）。
+        return wrapWithMarkdownStyling(
+                mWikiPageFeed != null ? mWikiPageFeed.getContent() : null,
+                cssTheme, title);
     }
 
     @Override
     protected String getDocumentTitle() {
+        // 189：同上，feed/title 为空时回落仓库名（与 getActionBarTitle 同款）。
+        if (mWikiPageFeed == null || mWikiPageFeed.getTitle() == null) {
+            return mRepoName != null ? mRepoName : "";
+        }
         return getString(R.string.wiki_print_document_title, mWikiPageFeed.getTitle(), mUserLogin, mRepoName);
     }
 

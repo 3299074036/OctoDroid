@@ -47,7 +47,7 @@
             android:name=".activities.Github4AndroidActivity"
             android:launchMode="singleTop"
             android:exported="true"
-            android:configChanges="orientation|screenSize" >
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density" >
             <!-- 0.1.12：桌面图标改走 activity-alias（见下方 6 个 Launcher* 别名）：
                  主 Activity 不再直接挂 LAUNCHER 入口，只保留 gh4a://oauth 深链，
                  故换主题色改图标时深链始终解析到主 Activity，不受别名开关影响。 -->
@@ -143,7 +143,7 @@
         <activity android:name=".activities.CommitActivity" android:exported="false" />
         <activity android:name=".activities.CommitDiffViewerActivity"
             android:exported="false"
-            android:configChanges="orientation|screenSize" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density" />
         <activity android:name=".activities.CommitHistoryActivity" android:exported="false" />
         <activity android:name=".activities.CompareActivity" android:exported="false" />
         <activity android:name=".activities.ContributorListActivity" android:exported="false" />
@@ -174,10 +174,10 @@
             android:windowSoftInputMode="stateHidden" />
         <activity android:name=".activities.FileViewerActivity"
             android:exported="false"
-            android:configChanges="orientation|screenSize" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density" />
         <activity android:name=".activities.ImageViewerActivity"
             android:exported="false"
-            android:configChanges="orientation|screenSize" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density" />
         <activity android:name=".activities.CreateReviewActivity"
             android:exported="false"
             android:theme="@style/BottomSheetTheme"
@@ -188,7 +188,7 @@
         <activity android:name=".activities.GistListActivity" android:exported="false" />
         <activity android:name=".activities.GistViewerActivity"
             android:exported="false"
-            android:configChanges="orientation|screenSize" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density" />
         <activity android:name=".activities.IssueActivity" android:exported="false" />
         <activity android:name=".activities.IssueEditActivity" android:exported="false" />
         <activity android:name=".activities.IssueLabelListActivity" android:exported="false" />
@@ -199,7 +199,7 @@
         <activity android:name=".activities.PullRequestActivity" android:exported="false" />
         <activity android:name=".activities.PullRequestDiffViewerActivity"
             android:exported="false"
-            android:configChanges="orientation|screenSize" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density" />
         <activity android:name=".activities.ReleaseInfoActivity" android:exported="false" />
         <activity android:name=".activities.ReleaseListActivity" android:exported="false" />
         <activity android:name=".activities.RepositoryActivity" android:exported="false" />
@@ -215,7 +215,7 @@
         <activity android:name=".activities.WatcherListActivity" android:exported="false" />
         <activity android:name=".activities.WikiActivity"
             android:exported="false"
-            android:configChanges="orientation|screenSize" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density" />
         <activity android:name=".activities.WikiListActivity" android:exported="false" />
         <activity android:name=".activities.home.HomeActivity" android:exported="false" />
         <activity android:name=".activities.ReviewActivity" android:exported="false" />

@@ -91,6 +91,11 @@ public class IssueListFragment extends PagedDataBaseFragment<Issue> {
     public void onViewCreated(View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        // 167：mIssueState 取自 arguments，缺 "state" 时为 null，switch(null) 即 NPE；
+        // 缺失按默认 open 处理。
+        if (mIssueState == null) {
+            mIssueState = ApiHelpers.IssueState.OPEN;
+        }
         switch (mIssueState) {
             case ApiHelpers.IssueState.CLOSED:
                 setHighlightColors(R.attr.colorIssueClosed, R.attr.colorIssueClosedDark);
@@ -107,6 +112,10 @@ public class IssueListFragment extends PagedDataBaseFragment<Issue> {
 
     @Override
     public void onItemClick(Issue issue) {
+        // 167：issue 可为 null（空条目点击），直接解引用即 NPE。
+        if (issue == null) {
+            return;
+        }
         Intent intent = issue.pullRequest() != null
                 ? PullRequestActivity.makeIntent(getActivity(), issue)
                 : IssueActivity.makeIntent(getActivity(), issue);

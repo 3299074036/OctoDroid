@@ -1,5 +1,7 @@
 package com.gh4a.activities.home;
 
+import android.os.Bundle;
+
 import androidx.annotation.StringRes;
 import androidx.fragment.app.Fragment;
 
@@ -21,6 +23,20 @@ public class DiscoverHubFactory extends FragmentFactory {
 
     public void setTrendRange(int range) {
         mTrendingFactory.setRange(range);
+    }
+
+    // 190：DiscoverHubFactory 持有 TrendingFactory，但此前不透传保存/
+    // 恢复，mRange 随旋转丢失；两处都透传下去。
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        mTrendingFactory.onSaveInstanceState(outState);
+    }
+
+    @Override
+    protected void onRestoreInstanceState(Bundle state) {
+        super.onRestoreInstanceState(state);
+        mTrendingFactory.onRestoreInstanceState(state);
     }
 
     @Override

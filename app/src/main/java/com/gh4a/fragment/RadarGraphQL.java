@@ -56,17 +56,20 @@ public class RadarGraphQL {
 
     /** Single GraphQL request returning radar items, newest first. */
     public static Single<List<ReleaseRadarFragment.RadarItem>> fetch(String login) {
-        // 0.1.20 F-11/D-02: dispose 时取消在途 GraphQL 调用（与官方列表同款）。
-        return Single.fromCallable(() -> doFetch(login))
-                .doOnDispose(GraphQLClient::cancelActiveCall);
+        // 159：每调用一个 handle，dispose 只取消自己的在途调用（旧单槽 sActiveCall
+        // 会跨调用取消另一方的请求）。
+        GraphQLClient.CallHandle handle = new GraphQLClient.CallHandle();
+        return Single.fromCallable(() -> doFetch(login, handle))
+                .doOnDispose(handle::cancel);
     }
 
-    private static List<ReleaseRadarFragment.RadarItem> doFetch(String login) throws Exception {
+    private static List<ReleaseRadarFragment.RadarItem> doFetch(String login,
+            GraphQLClient.CallHandle handle) throws Exception {
         // 0.1.20 D-02: 请求体拼装、HTTP、401/errors 处理收敛到 GraphQLClient；
         // 本类只留查询串与结果解析。parse() 仍自带 errors 检查（无害的二次检查）。
         JSONObject vars = new JSONObject();
         vars.put("login", login);
-        return parse(GraphQLClient.execute(QUERY, vars));
+        return parse(GraphQLClient.execute(QUERY, vars, handle));
     }
 
     private static List<ReleaseRadarFragment.RadarItem> parse(String json) throws Exception {

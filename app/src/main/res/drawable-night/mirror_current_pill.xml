@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 198：镜像源行内“当前”小标记深色变体（白天版浅绿底 #d8ecc9）。
+     文字是 @color/mirror_current_green 深色值 #7cc36a 浅绿，浅绿底上
+     对比仅约 1.7:1；改深绿底，对比约 5.7:1。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="9dp" />
+    <solid android:color="#1E3D1A" />
+</shape>

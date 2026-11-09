@@ -47,7 +47,15 @@ public class PullRequestDiffLoadTask extends DiffLoadTask {
         PullRequestService service = ServiceFactory.get(PullRequestService.class, false);
         return service.getPullRequest(mRepoOwner, mRepoName, mPullRequestNumber)
                 .map(ApiHelpers::throwOnFailure)
-                .map(pr -> pr.head().sha());
+                .map(pr -> {
+                    // 156：head/sha 可空；缺失时抛错，由 UrlLoadTask 接住走
+                    // getFallbackIntent（浏览器打开 PR）而非 NPE 崩溃。
+                    if (pr.head() == null || pr.head().sha() == null) {
+                        throw new IllegalStateException(
+                                "Pull request head sha is missing");
+                    }
+                    return pr.head().sha();
+                });
     }
 
     @Override

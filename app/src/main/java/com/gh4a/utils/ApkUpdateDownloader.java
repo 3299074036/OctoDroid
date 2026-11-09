@@ -1,5 +1,6 @@
 package com.gh4a.utils;
 
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -216,7 +217,13 @@ public class ApkUpdateDownloader {
                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                     Uri.parse("package:" + context.getPackageName()));
             settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(settingsIntent);
+            // 258：无该设置页的定制 ROM 上调起即抛 ActivityNotFoundException
+            //（195 号同家族、不同位置）；捕获后 Toast，不崩溃。
+            try {
+                context.startActivity(settingsIntent);
+            } catch (ActivityNotFoundException e) {
+                Toast.makeText(context, R.string.apk_install_failed, Toast.LENGTH_LONG).show();
+            }
             return;
         }
         Uri apkUri = FileProvider.getUriForFile(context,
@@ -225,6 +232,11 @@ public class ApkUpdateDownloader {
                 .setDataAndType(apkUri, "application/vnd.android.package-archive")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        context.startActivity(installIntent);
+        // 258：无可用包安装器的设备上调起即抛 ActivityNotFoundException。
+        try {
+            context.startActivity(installIntent);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(context, R.string.apk_install_failed, Toast.LENGTH_LONG).show();
+        }
     }
 }

@@ -632,6 +632,12 @@ public class HtmlUtils {
         }
 
         private void appendVideoLink(String videoUrl) {
+            // 246：<video> 无 src（如 <video><source src="…"></video>）时
+            // videoUrl 为 null；不拦下会在下面挂 LinkSpan(null)，一点即
+            // Uri.parse(null) 抛 NPE（对照 endA 只在 href != null 时挂 LinkSpan）。
+            if (videoUrl == null) {
+                return;
+            }
             mSpannableStringBuilder.append("\uD83C\uDFA5 "); // movie camera emoji
             String videoLinkText = mContext.getString(R.string.view_video);
             mSpannableStringBuilder.append(videoLinkText);

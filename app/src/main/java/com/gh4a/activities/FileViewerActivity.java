@@ -257,26 +257,30 @@ public class FileViewerActivity extends WebViewerActivity
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        Uri.Builder urlBuilder = IntentUtils.createBaseUriForRepo(mRepoOwner, mRepoName)
-                .appendPath("blob")
-                .appendPath(mRef);
-        for (String element: mPath.split("\\/")) {
-            urlBuilder.appendPath(element);
-        }
-        Uri url = urlBuilder.build();
-
+        // 174：mRef/mPath 可空（无 ref 的 deep link/缺字段），菜单在加载前即可点；
+        // blob 链接只在 browser/share 时才需要，缺失时跳过该操作（view_raw 不依赖链接）。
         switch (item.getItemId()) {
-            case R.id.browser:
+            case R.id.browser: {
+                Uri url = buildBlobUrl();
+                if (url == null) {
+                    return true;
+                }
                 IntentUtils.launchBrowser(this, url);
                 return true;
+            }
             case R.id.download:
                 DownloadUtils.enqueueDownloadWithPermissionCheck(this, buildRawFileUrl(),
                         FileUtils.getMimeTypeFor(mPath), FileUtils.getFileName(mPath), null);
                 return true;
-            case R.id.share:
+            case R.id.share: {
+                Uri url = buildBlobUrl();
+                if (url == null) {
+                    return true;
+                }
                 IntentUtils.share(this, getString(R.string.share_file_subject,
                         FileUtils.getFileName(mPath), mRepoOwner + "/" + mRepoName), url);
                 return true;
+            }
             case MENU_ITEM_HISTORY:
                 startActivity(CommitHistoryActivity.makeIntent(this,
                         mRepoOwner, mRepoName, mRef, mPath, mContent != null ? mContent.type() : null, false));
@@ -302,7 +306,11 @@ public class FileViewerActivity extends WebViewerActivity
                 if (mLastTouchedLine > 0) {
                     String subject = getString(R.string.share_line_subject, mLastTouchedLine, mPath,
                             mRepoOwner + "/" + mRepoName);
-                    IntentUtils.share(this, subject, createUrl());
+                    // 174：createUrl() 在 mRef/mPath 缺失时返回 null，无链接可分享即跳过。
+                    Uri url = createUrl();
+                    if (url != null) {
+                        IntentUtils.share(this, subject, url);
+                    }
                 }
                 return true;
         }
@@ -331,15 +339,29 @@ public class FileViewerActivity extends WebViewerActivity
         return !displayingMarkdown && super.shouldWrapLines();
     }
 
-    private Uri createUrl() {
-        Uri.Builder builder = IntentUtils.createBaseUriForRepo(mRepoOwner, mRepoName)
+    // 174：mRepoOwner/mRepoName/mRef/mPath 任一缺失时 appendPath(null)/split(null)
+    // 即 NPE；缺失返回 null，调用方跳过该操作。
+    @Nullable
+    private Uri buildBlobUrl() {
+        if (mRepoOwner == null || mRepoName == null || mRef == null || mPath == null) {
+            return null;
+        }
+        Uri.Builder urlBuilder = IntentUtils.createBaseUriForRepo(mRepoOwner, mRepoName)
                 .appendPath("blob")
                 .appendPath(mRef);
-        for (String element: mPath.split("\\/")) {
-            builder.appendPath(element);
+        for (String element : mPath.split("\\/")) {
+            urlBuilder.appendPath(element);
         }
-        builder.fragment("L" + mLastTouchedLine);
-        return builder.build();
+        return urlBuilder.build();
+    }
+
+    @Nullable
+    private Uri createUrl() {
+        Uri blobUrl = buildBlobUrl();
+        if (blobUrl == null) {
+            return null;
+        }
+        return blobUrl.buildUpon().fragment("L" + mLastTouchedLine).build();
     }
 
     private String buildRawFileUrl() {
@@ -373,7 +395,8 @@ public class FileViewerActivity extends WebViewerActivity
         HtmlUtils.writeCssInclude(content, "markdown", cssTheme);
         content.append("</head><body>");
         if (title != null) {
-            content.append("<h2>").append(title).append("</h2>");
+            // 152：标题含仓库/文件名，进 HTML 前转义（与 WebViewerActivity 同款）。
+            content.append("<h2>").append(TextUtils.htmlEncode(title)).append("</h2>");
         }
         content.append("<img src='").append(imageUrl).append("' />");
         content.append("</body></html>");

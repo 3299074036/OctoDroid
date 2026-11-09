@@ -103,8 +103,13 @@ public class StarGroupManager {
             return false;
         }
         List<String> groups = getGroups(context, login);
-        if (groups.contains(name)) {
-            return false;
+        // 238：本地分组重名校验此前大小写敏感，与官方列表侧 B-L8（37 号）
+        // 的不分大小写口径分裂，可建出 "Test" 与 "test" 两个几乎相同的
+        // 分组，入组/展示时混淆；改为 equalsIgnoreCase 与官方侧对齐。
+        for (String group : groups) {
+            if (group.equalsIgnoreCase(name)) {
+                return false;
+            }
         }
         groups.add(name);
         saveGroups(context, login, groups);

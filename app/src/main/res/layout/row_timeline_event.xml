@@ -49,6 +49,7 @@
         android:scaleType="center"
         android:src="@drawable/overflow"
         android:visibility="gone"
-        tools:visibility="visible" />
+        tools:visibility="visible"
+        android:contentDescription="@string/comment_options"/>
 
 </LinearLayout>

@@ -26,6 +26,11 @@ public class StatusWrapper {
         mLabel = status.context();
         mDescription = status.description();
         mTargetUrl = status.targetUrl();
+        // 160：state() 可空（缺 state 字段），switch 前判空走未知分支。
+        if (status.state() == null) {
+            mState = State.Unknown;
+            return;
+        }
         switch (status.state()) {
             case Error:
             case Failure:
@@ -44,6 +49,12 @@ public class StatusWrapper {
         mLabel = checkRun.name();
         mTargetUrl = checkRun.detailsUrl();
 
+        // 160：state() 可空（缺 state 字段），先判空走未知分支。
+        if (checkRun.state() == null) {
+            mState = State.Unknown;
+            mDescription = context.getString(R.string.check_pending_description);
+            return;
+        }
         switch (checkRun.state()) {
             case Waiting:
             case Requested:
@@ -66,7 +77,10 @@ public class StatusWrapper {
                 } else if (runtimeDesc != null) {
                     mDescription = runtimeDesc;
                 }
-                switch (checkRun.conclusion()) {
+                // 160：conclusion() 在 Completed 分支内仍可空，缺失按未知计。
+                if (checkRun.conclusion() == null) {
+                    mState = State.Unknown;
+                } else switch (checkRun.conclusion()) {
                     case Failure:
                     case TimedOut:
                     case Cancelled:

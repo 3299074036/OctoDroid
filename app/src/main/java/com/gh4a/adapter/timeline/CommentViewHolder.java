@@ -140,7 +140,8 @@ class CommentViewHolder
 
         // Body (translated variant gets its own image-getter cache entry,
         // so toggling back to the original doesn't show stale content)
-        String translatedBody = mCallback.getTranslatedBodyHtml(item.comment().id());
+        // 166：comment.id() 为可空 Long，getTranslatedBodyHtml(long) 会拆箱。
+        String translatedBody = mCallback.getTranslatedBodyHtml(ApiHelpers.orZero(item.comment().id()));
         if (translatedBody != null) {
             mImageGetter.bind(tvDesc, translatedBody, item.comment().id() + "-translated");
         } else {

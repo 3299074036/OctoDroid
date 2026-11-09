@@ -154,6 +154,10 @@ public class ReleaseInfoActivity extends BaseActivity implements
             return true;
         }
         if (item.getItemId() == R.id.browser) {
+            // 155/186：菜单在数据加载完成前即可点，mRelease/htmlUrl() 为 null 时 Uri.parse 即 NPE。
+            if (mRelease == null || mRelease.htmlUrl() == null) {
+                return true;
+            }
             IntentUtils.launchBrowser(this, Uri.parse(mRelease.htmlUrl()));
             return true;
         }

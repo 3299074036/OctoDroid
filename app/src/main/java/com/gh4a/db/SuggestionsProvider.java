@@ -54,6 +54,25 @@ public class SuggestionsProvider extends ContentProvider {
                 || SELECTION_TYPE_AND_SUGGESTION_EQ.equals(selection);
     }
 
+    /**
+     * 232：白名单只验 selection 模板，不验 selectionArgs——模板含 ?
+     * 占位符而 args 为 null 或个数不对时，SQLiteQueryBuilder.query 会抛
+     * SQLite 绑定异常而非返回空游标；当前唯一调用方传参正确（不可达），
+     * 属 Provider 加固缺口，未来新增调用方传错参即崩溃。
+     */
+    private static boolean hasMatchingSelectionArgs(String selection, String[] selectionArgs) {
+        if (selection == null) {
+            return selectionArgs == null || selectionArgs.length == 0;
+        }
+        int placeholders = 0;
+        for (int i = 0; i < selection.length(); i++) {
+            if (selection.charAt(i) == '?') {
+                placeholders++;
+            }
+        }
+        return selectionArgs != null && selectionArgs.length == placeholders;
+    }
+
     /** sortOrder 只接受白名单列名 + asc/desc；不合法时回落默认 date desc。 */
     private static String sanitizeSortOrder(String sortOrder) {
         if (sortOrder == null) {
@@ -152,6 +171,10 @@ public class SuggestionsProvider extends ContentProvider {
             Log.e(TAG, "query: invalid selection");
             return null;
         }
+        if (!hasMatchingSelectionArgs(selection, selectionArgs)) {
+            Log.e(TAG, "query: selectionArgs mismatch");
+            return null;
+        }
         sortOrder = sanitizeSortOrder(sortOrder);
         projection = sanitizeProjection(projection);
 
@@ -171,6 +194,12 @@ public class SuggestionsProvider extends ContentProvider {
     @Override
     public Uri insert(@NonNull Uri uri, ContentValues values) {
         if (sURIMatcher.match(uri) != MATCH_ALL) {
+            return null;
+        }
+        // 232：values == null 时 db.insert(table, null, null) 抛
+        // IllegalArgumentException；空值直接拒绝。
+        if (values == null) {
+            Log.e(TAG, "insert: null values");
             return null;
         }
 
@@ -196,6 +225,10 @@ public class SuggestionsProvider extends ContentProvider {
                 // S-L4：与 query() 同款 selection 白名单。
                 if (!isAllowedSelection(selection)) {
                     Log.e(TAG, "update: invalid selection");
+                    return 0;
+                }
+                if (!hasMatchingSelectionArgs(selection, selectionArgs)) {
+                    Log.e(TAG, "update: selectionArgs mismatch");
                     return 0;
                 }
                 count = db.update(DbHelper.SUGGESTIONS_TABLE, values, selection, selectionArgs);
@@ -226,6 +259,10 @@ public class SuggestionsProvider extends ContentProvider {
         // S-L4：与 query() 同款 selection 白名单。
         if (!isAllowedSelection(selection)) {
             Log.e(TAG, "delete: invalid selection");
+            return 0;
+        }
+        if (!hasMatchingSelectionArgs(selection, selectionArgs)) {
+            Log.e(TAG, "delete: selectionArgs mismatch");
             return 0;
         }
 

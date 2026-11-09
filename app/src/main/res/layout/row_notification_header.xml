@@ -50,7 +50,8 @@
                 android:background="?selectableItemBackgroundBorderless"
                 android:paddingLeft="@dimen/content_padding"
                 android:paddingRight="@dimen/content_padding"
-                android:src="@drawable/mark_read_all" />
+                android:src="@drawable/mark_read_all"
+                android:contentDescription="@string/mark_all_as_read"/>
 
         </LinearLayout>
 

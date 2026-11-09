@@ -88,6 +88,17 @@ public class CommitActivity extends BaseFragmentPagerActivity implements
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // 206：owner/repo/sha 任一为空时 Retrofit @Path (null) 在主线程抛
+        // IllegalArgumentException；不加载，直接浏览器打开仓库提交列表
+        //（owner/repo 也空则无处可去，直接结束）。
+        if (mObjectSha == null || mRepoOwner == null || mRepoName == null) {
+            if (mRepoOwner != null && mRepoName != null) {
+                IntentUtils.launchBrowser(this, IntentUtils.createBaseUriForRepo(mRepoOwner, mRepoName)
+                        .appendPath("commits").build());
+            }
+            finish();
+            return;
+        }
         setContentShown(false);
         loadCommit(false);
         loadComments(false);
@@ -182,6 +193,11 @@ public class CommitActivity extends BaseFragmentPagerActivity implements
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
+        // 206：sha/owner/repo 为空时 appendPath(null) 即 NPE；无有效
+        // 提交时菜单项无意义，走默认处理。
+        if (mObjectSha == null || mRepoOwner == null || mRepoName == null) {
+            return super.onOptionsItemSelected(item);
+        }
         Uri diffUri = IntentUtils.createBaseUriForRepo(mRepoOwner, mRepoName)
                 .appendPath("commit")
                 .appendPath(mObjectSha)
@@ -250,10 +266,18 @@ public class CommitActivity extends BaseFragmentPagerActivity implements
     @Nullable
     @Override
     protected Uri getActivityUri() {
+        // 206：owner/repo 为空拼不出合法 URI，返 null（方法本身 @Nullable）；
+        // sha 为空回落仓库提交列表。
+        if (mRepoOwner == null || mRepoName == null) {
+            return null;
+        }
         Uri.Builder builder = IntentUtils.createBaseUriForRepo(mRepoOwner, mRepoName);
         if (mPullRequestNumber > 0) {
             builder.appendPath("pull")
                     .appendPath(String.valueOf(mPullRequestNumber));
+        }
+        if (mObjectSha == null) {
+            return builder.appendPath("commits").build();
         }
         return builder.appendPath("commit")
                 .appendPath(mObjectSha)

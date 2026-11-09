@@ -16,9 +16,9 @@ import android.widget.TextView;
 
 import com.gh4a.ColorPickerDialog;
 import com.gh4a.R;
+import com.gh4a.utils.StringUtils;
 import com.gh4a.utils.UiUtils;
 import com.meisolsson.githubsdk.model.Label;
-import com.vdurmont.emoji.EmojiParser;
 
 public class IssueLabelAdapter extends
         RootAdapter<IssueLabelAdapter.EditableLabel, IssueLabelAdapter.ViewHolder> {
@@ -149,11 +149,17 @@ public class IssueLabelAdapter extends
         }
 
         assignColor(holder, label.editedColor != null ? label.editedColor : label.color());
-        holder.label.setText(EmojiParser.parseToUnicode(label.name()));
+        holder.label.setText(StringUtils.parseEmojiToUnicode(label.name()));
         holder.editor.setText(label.editedName != null ? label.editedName : label.name());
     }
 
     private void assignColor(ViewHolder holder, String colorString) {
+        // 220：colorString 可空（label.color() 可空），直接拼 "#null" 进
+        // parseColor 即抛 IllegalArgumentException；缺颜色时用默认灰色
+        // 兜底（与 ApiHelpers.colorForLabel 的 "#999999" 口径一致）。
+        if (colorString == null) {
+            colorString = "999999";
+        }
         int color = Color.parseColor("#" + colorString);
         int textColor = UiUtils.textColorForBackground(mContext, color);
 

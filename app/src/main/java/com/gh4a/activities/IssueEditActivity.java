@@ -62,6 +62,7 @@ import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.AvatarHandler;
 import com.gh4a.utils.RxUtils;
 import com.gh4a.utils.SingleFactory;
+import com.gh4a.utils.StringUtils;
 import com.gh4a.utils.UiUtils;
 import com.gh4a.widget.MarkdownButtonsBar;
 import com.gh4a.widget.MarkdownPreviewWebView;
@@ -77,7 +78,6 @@ import com.meisolsson.githubsdk.service.issues.IssueMilestoneService;
 import com.meisolsson.githubsdk.service.issues.IssueService;
 import com.meisolsson.githubsdk.service.repositories.RepositoryCollaboratorService;
 import com.meisolsson.githubsdk.service.repositories.RepositoryContentService;
-import com.vdurmont.emoji.EmojiParser;
 
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
@@ -268,8 +268,9 @@ public class IssueEditActivity extends BasePagerActivity implements
         return !isEditingExistingIssue()
                 ? getString(R.string.issue_create)
                 : isPullRequest
-                        ? getString(R.string.pull_request_edit_title, mEditIssue.number())
-                        : getString(R.string.issue_edit_title, mEditIssue.number());
+                        // 154/115：number() 为可空 Integer，%d 格式化会拆箱，缺字段按 0 计。
+                        ? getString(R.string.pull_request_edit_title, ApiHelpers.orZero(mEditIssue.number()))
+                        : getString(R.string.issue_edit_title, ApiHelpers.orZero(mEditIssue.number()));
     }
 
     @Nullable
@@ -384,9 +385,10 @@ public class IssueEditActivity extends BasePagerActivity implements
         }
         if (mEditIssue.pullRequest() != null) {
             return PullRequestActivity.makeIntent(this, mRepoOwner, mRepoName,
-                    mEditIssue.number());
+                    // 154/115：number() 为可空 Integer，makeIntent(int) 会拆箱。
+                    ApiHelpers.orZero(mEditIssue.number()));
         }
-        return IssueActivity.makeIntent(this, mRepoOwner, mRepoName, mEditIssue.number());
+        return IssueActivity.makeIntent(this, mRepoOwner, mRepoName, ApiHelpers.orZero(mEditIssue.number()));
     }
 
     private void showMilestonesDialog() {
@@ -674,7 +676,9 @@ public class IssueEditActivity extends BasePagerActivity implements
         RepositoryContentService service = ServiceFactory.get(RepositoryContentService.class, false);
         return ApiHelpers.PageIterator
                 .first(page -> service.getDirectoryContents(mRepoOwner, mRepoName, path, null, page),
-                        c -> c.name().toLowerCase(Locale.US).startsWith("issue_template"))
+                        // 197：Content.name() 可空，toLowerCase 即 NPE。
+                        c -> c.name() != null
+                                && c.name().toLowerCase(Locale.US).startsWith("issue_template"))
                 .flatMap(contentOpt -> RxUtils.mapToSingle(contentOpt, content -> {
                     if (content.type() == ContentType.Directory) {
                         return ApiHelpers.PageIterator
@@ -686,7 +690,9 @@ public class IssueEditActivity extends BasePagerActivity implements
                 .map(contentsOpt -> contentsOpt.map(contents -> {
                     List<Content> files = new ArrayList<>();
                     for (Content c : contents) {
-                        if (c.type() == ContentType.File && c.name().endsWith(".md")) {
+                        // 197：同上，name 为 null 时 endsWith 即 NPE。
+                        if (c.type() == ContentType.File && c.name() != null
+                                && c.name().endsWith(".md")) {
                             files.add(c);
                         }
                     }
@@ -903,7 +909,10 @@ public class IssueEditActivity extends BasePagerActivity implements
             for (int i = 1; i <= all.size(); i++) {
                 Milestone m = all.get(i - 1);
                 milestones[i] = m.title();
-                if (selectedMilestone != null && m.number().equals(selectedMilestone.number())) {
+                // 154 补：Milestone.number() 可空，原 m.number().equals(...) 在
+                // number 为 null 时 NPE；ObjectsCompat.equals 双向判空。
+                if (selectedMilestone != null
+                        && ObjectsCompat.equals(m.number(), selectedMilestone.number())) {
                     selected = i;
                 }
             }
@@ -1055,7 +1064,7 @@ public class IssueEditActivity extends BasePagerActivity implements
             public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
                 final Label label = mAllLabels.get(position);
                 holder.colorView.setBackgroundColor(ApiHelpers.colorForLabel(label));
-                holder.titleView.setText(EmojiParser.parseToUnicode(label.name()));
+                holder.titleView.setText(StringUtils.parseEmojiToUnicode(label.name()));
                 holder.titleView.setTag(label);
                 holder.titleView.setOnClickListener(view -> {
                     if (mSelectedLabels.contains(label)) {

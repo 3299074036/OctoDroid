@@ -49,8 +49,12 @@ public class SearchAdapter extends RootAdapter<Object, RecyclerView.ViewHolder> 
             return mUserAdapter.getItemViewType((User) item) + 10000;
         } else if (item instanceof Repository) {
             return mRepoAdapter.getItemViewType((Repository) item) + 20000;
-        } else {
+        } else if (item instanceof SearchCode) {
             return mCodeAdapter.getItemViewType((SearchCode) item) + 30000;
+        } else {
+            // 202：原 else 分支把任何非 User/Repository 都强转 SearchCode，
+            // 未知类型即 CCE；回落普通行类型，不崩溃。
+            return 30000 + CUSTOM_VIEW_TYPE_START;
         }
     }
 
@@ -70,9 +74,10 @@ public class SearchAdapter extends RootAdapter<Object, RecyclerView.ViewHolder> 
             mUserAdapter.onBindViewHolder((UserAdapter.ViewHolder) holder, (User) item);
         } else if (item instanceof Repository) {
             mRepoAdapter.onBindViewHolder((RepositoryAdapter.ViewHolder) holder, (Repository) item);
-        } else {
+        } else if (item instanceof SearchCode) {
             mCodeAdapter.onBindViewHolder((CodeSearchAdapter.ViewHolder) holder, (SearchCode) item);
         }
+        // 202：未知类型不绑定（与 getItemViewType 回落对应），不强转。
     }
 
     public static class CodeSearchAdapter extends RootAdapter<SearchCode, CodeSearchAdapter.ViewHolder> {
@@ -102,7 +107,13 @@ public class SearchAdapter extends RootAdapter<Object, RecyclerView.ViewHolder> 
 
                 for (int i = 0; i < matches.size(); i++) {
                     TextMatch match = matches.get(i);
-                    SpannableStringBuilder builder = new SpannableStringBuilder(match.fragment());
+                    // 202：fragment() 可空，SpannableStringBuilder(null) 即 NPE；
+                    // 空值按 "" 计（后续 span 下标守卫仍生效）。
+                    if (match == null) {
+                        continue;
+                    }
+                    SpannableStringBuilder builder = new SpannableStringBuilder(
+                            match.fragment() != null ? match.fragment() : "");
 
                     List<TextMatch.MatchItem> items = match.matches();
                     if (items != null) {

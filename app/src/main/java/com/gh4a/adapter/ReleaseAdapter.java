@@ -50,10 +50,11 @@ public class ReleaseAdapter extends RootAdapter<Release, ReleaseAdapter.ViewHold
     }
 
     private String formatReleaseType(Release release) {
-        if (release.draft()) {
+        // 166：draft()/prerelease() 为可空 Boolean，直接拆箱即 NPE。
+        if (Boolean.TRUE.equals(release.draft())) {
             return mContext.getString(R.string.release_type_draft);
         }
-        if (release.prerelease()) {
+        if (Boolean.TRUE.equals(release.prerelease())) {
             return mContext.getString(R.string.release_type_prerelease);
         }
         return mContext.getString(R.string.release_type_final);

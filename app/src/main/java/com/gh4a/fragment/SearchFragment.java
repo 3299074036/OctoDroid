@@ -856,6 +856,10 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
 
     private void openFileViewer(SearchCode result, int matchIndex) {
         Repository repo = result.repository();
+        // 155：url()/repository() 均可空，Uri.parse(null)/owner() 即 NPE；缺失时无法打开查看器。
+        if (result.url() == null || repo == null || repo.owner() == null) {
+            return;
+        }
         Uri uri = Uri.parse(result.url());
         String ref = uri.getQueryParameter("ref");
         TextMatch textMatch = matchIndex >= 0 ? result.textMatches().get(matchIndex) : null;

@@ -62,10 +62,15 @@ public class UserListsGraphQL {
     }
 
     private static String execute(String query, JSONObject variables) throws Exception {
+        return execute(query, variables, null);
+    }
+
+    private static String execute(String query, JSONObject variables,
+            GraphQLClient.CallHandle handle) throws Exception {
         // 0.1.20 D-02: 请求执行收敛到 GraphQLClient（本方法仅作委托，
-        // 保持 fetchLists 等内部调用点不变；F-11 的取消由 GraphQLClient
-        // 的 sActiveCall + 下方 doOnDispose 承载）。
-        return GraphQLClient.execute(query, variables);
+        // 保持 fetchLists 等内部调用点不变；F-11 的取消由调用方持有的
+        // CallHandle + 下方 doOnDispose 承载，见 159）。
+        return GraphQLClient.execute(query, variables, handle);
     }
 
     /**
@@ -155,6 +160,9 @@ public class UserListsGraphQL {
     }
 
     public static Single<List<UserList>> fetchLists(String login) {
+        // 159：每调用一个 handle，dispose 只取消自己的在途调用（旧单槽 sActiveCall
+        // 会跨调用取消 RadarGraphQL 的请求）；本方法内多次顺序 execute 共用它。
+        GraphQLClient.CallHandle handle = new GraphQLClient.CallHandle();
         return Single.fromCallable(() -> {
             List<UserList> lists = new ArrayList<>();
             String listsCursor = null;
@@ -169,7 +177,7 @@ public class UserListsGraphQL {
                 // 直接返回为部分列表；首屏即失败仍抛错（调用方走失败回退）。
                 String json;
                 try {
-                    json = execute(LISTS_PAGE_QUERY, vars);
+                    json = execute(LISTS_PAGE_QUERY, vars, handle);
                 } catch (Exception e) {
                     if (isCancelled(e) || lists.isEmpty()) {
                         throw e;
@@ -210,7 +218,7 @@ public class UserListsGraphQL {
                             // 不拖垮其余列表；取消则照常抛错。
                             String itemJson;
                             try {
-                                itemJson = execute(LIST_ITEMS_PAGE_QUERY, itemVars);
+                                itemJson = execute(LIST_ITEMS_PAGE_QUERY, itemVars, handle);
                             } catch (Exception e) {
                                 if (isCancelled(e)) {
                                     throw e;
@@ -241,7 +249,7 @@ public class UserListsGraphQL {
                 }
             } while (listsCursor != null);
             return lists;
-        }).doOnDispose(GraphQLClient::cancelActiveCall);
+        }).doOnDispose(handle::cancel);
     }
 
     private static final String REPO_ID_QUERY =

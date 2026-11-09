@@ -41,12 +41,26 @@ import okhttp3.Response;
 public class DownloadUtils {
     public static void enqueueDownloadWithPermissionCheck(final BaseActivity activity,
             final Download download) {
+        // 247：Download.name()/htmlUrl() 均为 @Nullable（githubsdk 0.7.0.23
+        // javap 核实）；name 为 null 时一路走到 sanitizeFileName 抛
+        // IllegalArgumentException，url 为 null 时 Request.Builder().url(null)
+        // 抛 IllegalArgumentException，两处都在主线程、无 try/catch。
+        // 入口先拦，toast 失败后返回。
+        if (download.htmlUrl() == null || download.name() == null) {
+            Toast.makeText(activity, R.string.download_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
         enqueueDownloadWithPermissionCheck(activity, download.htmlUrl(), download.contentType(),
                 download.name(), download.description());
     }
 
     public static void enqueueDownloadWithPermissionCheck(final BaseActivity activity,
             final ReleaseAsset asset) {
+        // 247：同上，ReleaseAsset.url()/name() 均为 @Nullable。
+        if (asset.url() == null || asset.name() == null) {
+            Toast.makeText(activity, R.string.download_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
         handleDownloadPermissionCheck(activity, () -> enqueueDownload(activity, asset));
     }
 
@@ -142,8 +156,19 @@ public class DownloadUtils {
                 });
             }
             private void notifyDownloadFailed() {
-                handler.post(() -> Toast.makeText(context,
-                        R.string.download_failed, Toast.LENGTH_LONG).show());
+                handler.post(() -> {
+                    // 251：与 completeDownload 同款守卫——重定向解析在途时
+                    // 用户离开页面，随后网络失败；API 23–25 上以已销毁
+                    // Activity 的 context 弹 Toast 可抛 BadTokenException。
+                    if (context instanceof Activity) {
+                        Activity activity = (Activity) context;
+                        if (activity.isFinishing() || activity.isDestroyed()) {
+                            return;
+                        }
+                    }
+                    Toast.makeText(context,
+                            R.string.download_failed, Toast.LENGTH_LONG).show();
+                });
             }
             @Override
             public void onFailure(Call call, IOException e) {

@@ -504,6 +504,10 @@ public class EditorBottomSheet extends FrameLayout implements View.OnClickListen
         final SavedState ss = new SavedState(superState);
 
         ss.isInAdvancedMode = isInAdvancedMode();
+        // 153：高级编辑框的文本只活在 mAdvancedEditor 里，旋转重建时该 View
+        // 尚未 inflate，框架按 id 恢复不到它；把当前评论文本随状态一起保存。
+        Editable commentText = getCommentText();
+        ss.commentText = commentText != null ? commentText.toString() : null;
 
         return ss;
     }
@@ -519,14 +523,20 @@ public class EditorBottomSheet extends FrameLayout implements View.OnClickListen
         super.onRestoreInstanceState(ss.getSuperState());
 
         setAdvancedMode(ss.isInAdvancedMode);
+        // 153：恢复已保存的评论文本（setAdvancedMode 只会把旧 basic 文本拷过来）。
+        if (ss.commentText != null) {
+            setCommentText(ss.commentText, true);
+        }
     }
 
     private static class SavedState extends BaseSavedState {
         boolean isInAdvancedMode;
+        String commentText;
 
         public SavedState(Parcel source) {
             super(source);
             isInAdvancedMode = source.readByte() == 1;
+            commentText = source.readString();
         }
 
         public SavedState(Parcelable superState) {
@@ -537,6 +547,7 @@ public class EditorBottomSheet extends FrameLayout implements View.OnClickListen
         public void writeToParcel(Parcel out, int flags) {
             super.writeToParcel(out, flags);
             out.writeByte((byte) (isInAdvancedMode ? 1 : 0));
+            out.writeString(commentText);
         }
 
         public static final Parcelable.Creator<SavedState> CREATOR =

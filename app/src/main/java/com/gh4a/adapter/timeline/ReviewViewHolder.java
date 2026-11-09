@@ -121,7 +121,8 @@ class ReviewViewHolder
         mAvatarContainer.setTag(review.user());
 
         formatTitle(review);
-        String translatedBody = mCallback.getTranslatedBody(review.id());
+        // 166：review.id() 为可空 Long，getTranslatedBody(long) 会拆箱。
+        String translatedBody = mCallback.getTranslatedBody(ApiHelpers.orZero(review.id()));
         if (translatedBody != null) {
             mImageGetter.bind(mBodyView, translatedBody, review.id() + "-translated");
         } else {
@@ -214,6 +215,10 @@ class ReviewViewHolder
 
     @DrawableRes
     private int getEventIconResId(Review review) {
+        // 166：state() 可空，switch(null) 即 NPE；缺失按默认图标处理。
+        if (review.state() == null) {
+            return R.drawable.timeline_event_review;
+        }
         switch (review.state()) {
             case Approved: return R.drawable.timeline_event_approved;
             case ChangesRequested: return R.drawable.timeline_event_requested_changes;
@@ -223,7 +228,10 @@ class ReviewViewHolder
 
     private void formatTitle(final Review review) {
         int textResId;
-        switch (review.state()) {
+        // 166：state() 可空，switch(null) 即 NPE；缺失按默认 Commented 文案处理。
+        if (review.state() == null) {
+            textResId = R.string.pull_request_event_review_reviewed;
+        } else switch (review.state()) {
             case Approved:
                 textResId = R.string.pull_request_event_review_approved;
                 break;
@@ -296,11 +304,18 @@ class ReviewViewHolder
 
         switch (item.getItemId()) {
             case R.id.share:
+                // 155：review/htmlUrl() 均可空，Uri.parse(null) 即 NPE。
+                if (review == null || review.htmlUrl() == null) {
+                    return true;
+                }
                 IntentUtils.share(mContext, "Pull Request #" + mIssueNumber + " - Review",
                         Uri.parse(review.htmlUrl()));
                 return true;
 
             case R.id.browser:
+                if (review == null || review.htmlUrl() == null) {
+                    return true;
+                }
                 IntentUtils.launchBrowser(mContext, Uri.parse(review.htmlUrl()));
                 return true;
         }

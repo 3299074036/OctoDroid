@@ -28,72 +28,86 @@
             <ImageView
                 android:id="@+id/md_h1"
                 style="@style/ImageButton"
-                android:src="@drawable/md_h1" />
+                android:src="@drawable/md_h1"
+                android:contentDescription="@string/md_desc_h1"/>
 
             <ImageView
                 android:id="@+id/md_h2"
                 style="@style/ImageButton"
-                android:src="@drawable/md_h2" />
+                android:src="@drawable/md_h2"
+                android:contentDescription="@string/md_desc_h2"/>
 
             <ImageView
                 android:id="@+id/md_h3"
                 style="@style/ImageButton"
-                android:src="@drawable/md_h3" />
+                android:src="@drawable/md_h3"
+                android:contentDescription="@string/md_desc_h3"/>
 
             <ImageView
                 android:id="@+id/md_bold"
                 style="@style/ImageButton"
-                android:src="@drawable/md_bold" />
+                android:src="@drawable/md_bold"
+                android:contentDescription="@string/md_desc_bold"/>
 
             <ImageView
                 android:id="@+id/md_italic"
                 style="@style/ImageButton"
-                android:src="@drawable/md_italic" />
+                android:src="@drawable/md_italic"
+                android:contentDescription="@string/md_desc_italic"/>
 
             <ImageView
                 android:id="@+id/md_strikethrough"
                 style="@style/ImageButton"
-                android:src="@drawable/md_strikethrough" />
+                android:src="@drawable/md_strikethrough"
+                android:contentDescription="@string/md_desc_strikethrough"/>
 
             <ImageView
                 android:id="@+id/md_bullet_list"
                 style="@style/ImageButton"
-                android:src="@drawable/md_bullet_list" />
+                android:src="@drawable/md_bullet_list"
+                android:contentDescription="@string/md_desc_bullet_list"/>
 
             <ImageView
                 android:id="@+id/md_number_list"
                 style="@style/ImageButton"
-                android:src="@drawable/md_number_list" />
+                android:src="@drawable/md_number_list"
+                android:contentDescription="@string/md_desc_number_list"/>
 
             <ImageView
                 android:id="@+id/md_task_list"
                 style="@style/ImageButton"
-                android:src="@drawable/md_task_list" />
+                android:src="@drawable/md_task_list"
+                android:contentDescription="@string/md_desc_task_list"/>
 
             <ImageView
                 android:id="@+id/md_divider"
                 style="@style/ImageButton"
-                android:src="@drawable/md_divider" />
+                android:src="@drawable/md_divider"
+                android:contentDescription="@string/md_desc_divider"/>
 
             <ImageView
                 android:id="@+id/md_code"
                 style="@style/ImageButton"
-                android:src="@drawable/md_code" />
+                android:src="@drawable/md_code"
+                android:contentDescription="@string/md_desc_code"/>
 
             <ImageView
                 android:id="@+id/md_quote"
                 style="@style/ImageButton"
-                android:src="@drawable/md_quote" />
+                android:src="@drawable/md_quote"
+                android:contentDescription="@string/md_desc_quote"/>
 
             <ImageView
                 android:id="@+id/md_link"
                 style="@style/ImageButton"
-                android:src="@drawable/md_link" />
+                android:src="@drawable/md_link"
+                android:contentDescription="@string/md_desc_link"/>
 
             <ImageView
                 android:id="@+id/md_image"
                 style="@style/ImageButton"
-                android:src="@drawable/md_image" />
+                android:src="@drawable/md_image"
+                android:contentDescription="@string/md_desc_image"/>
 
         </GridLayout>
 

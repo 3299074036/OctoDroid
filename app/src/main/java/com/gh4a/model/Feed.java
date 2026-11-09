@@ -33,7 +33,12 @@ import androidx.annotation.Nullable;
 
 @Root(name = "entry", strict = false)
 public class Feed implements Parcelable {
-    @Element(name = "id")
+    // 233：id / link / content / thumbnail 在服务端残缺 entry 里可缺失；
+    // SimpleXML 的 strict=false 只容忍未知元素，不豁免缺失的必填元素——
+    // 任一 entry 缺 content 即整篇 feed 解析失败。全部改 required=false，
+    // apply() 与下游已对 null 有守卫（generatePreview / getTitleFromUrl /
+    // determineUserId 均判空）。
+    @Element(name = "id", required = false)
     private String id;
 
     @Nullable
@@ -41,14 +46,14 @@ public class Feed implements Parcelable {
     private Date published;
 
     @Path(value = "link")
-    @Attribute(name = "href")
+    @Attribute(name = "href", required = false)
     private String link;
 
     @Nullable
     @Element(name = "title", required = false)
     private String title;
 
-    @Element(name = "content")
+    @Element(name = "content", required = false)
     private String content;
 
     @Nullable
@@ -57,7 +62,7 @@ public class Feed implements Parcelable {
     private String author;
 
     @Path(value = "thumbnail")
-    @Attribute(name = "url")
+    @Attribute(name = "url", required = false)
     private String avatarUrl;
 
     @Nullable

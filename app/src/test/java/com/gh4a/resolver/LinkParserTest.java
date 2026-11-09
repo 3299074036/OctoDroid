@@ -180,6 +180,8 @@ public class LinkParserTest {
         assertThat("Organization name is incorrect", extras.getString("login"), is("android"));
     }
 
+    // 268：此前缺 @Test 注解，JUnit 不执行，组织 /repositories/ 分支无测试覆盖。
+    @Test
     public void organizationLink_leadingToRepositories__loadsOrganizationRepos() {
         LinkParser.ParseResult result = parseLink("https://github.com/orgs/android/repositories/");
         UserReposLoadTask loadTask = assertThatLoadTaskIs(result.loadTask, UserReposLoadTask.class);

@@ -74,8 +74,10 @@ public class NotificationAdapter extends
             NotificationHolder item = getItem(i);
 
             // Passing both repository and notification as null will mark everything as read
+            // 154/115：item.repository 可空（缺 repository 的通知），先判空。
             if ((repository == null && notification == null)
-                    || (repository != null && item.repository.equals(repository))
+                    || (repository != null && item.repository != null
+                            && item.repository.equals(repository))
                     || (item.notification != null && item.notification.equals(notification))) {
                 item.setIsRead(true);
             }
@@ -85,6 +87,8 @@ public class NotificationAdapter extends
             if (isMarkingSingleNotification) {
                 if (item.notification == null) {
                     if (previousRepoItem != null && unreadNotificationsInSameRepoCount == 0
+                            && previousRepoItem.repository != null
+                            && notification.repository() != null
                             && previousRepoItem.repository.equals(notification.repository())) {
                         previousRepoItem.setIsRead(true);
                     }
@@ -101,8 +105,10 @@ public class NotificationAdapter extends
         }
 
         // Additional check for the very last notification
+        // 154/115：previousRepoItem.repository / notification.repository() 均可空。
         if (isMarkingSingleNotification && previousRepoItem != null
                 && unreadNotificationsInSameRepoCount == 0
+                && previousRepoItem.repository != null && notification.repository() != null
                 && previousRepoItem.repository.equals(notification.repository())) {
             previousRepoItem.setIsRead(true);
         }
@@ -140,7 +146,8 @@ public class NotificationAdapter extends
             holder.ivAction.setVisibility(item.isRead() ? View.GONE : View.VISIBLE);
             holder.tvTitle.setText(ApiHelpers.formatRepoName(mContext, item.repository));
 
-            User owner = item.repository.owner();
+            // 154/115：repository 可空时无 owner，assignAvatar(null) 本身 null 安全。
+            User owner = item.repository != null ? item.repository.owner() : null;
             AvatarHandler.assignAvatar(holder.ivAvatar, owner);
             holder.ivAvatar.setTag(owner);
             holder.ivAvatar.setAlpha(alpha);

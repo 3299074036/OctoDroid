@@ -11,7 +11,6 @@
     <string name="closing_msg">正在关闭\u2026</string>
     <string name="opening_msg">正在打开\u2026</string>
     <string name="merging_msg">正在合并\u2026</string>
-    <string name="reviewing_msg">正在添加审查\u2026</string>
     <string name="authenticating">正在验证身份\u2026</string>
     <string name="search">搜索</string>
     <string name="search_code">搜索代码</string>
@@ -63,8 +62,6 @@
     <string name="settings_category_network">网络加速</string>
     <string name="settings_category_updates">更新</string>
     <string name="settings_category_translation">翻译</string>
-    <string name="settings_section_browsing_account_network">浏览与账号网络</string>
-    <string name="settings_section_updates_translation">更新与翻译</string>
     <string name="settings_category_about_updates">关于与更新</string>
     <string name="settings_category_about">关于</string>
     <string name="check_update">检查更新</string>
@@ -80,6 +77,8 @@
     <string name="update_no_apk">发现新版本 %1$s，但该版本没有安装包</string>
     <string name="downloading_update">正在下载更新…</string>
     <string name="allow_install_unknown_apps">请先允许安装未知应用，然后重试</string>
+    <!-- 258：无该设置页的定制 ROM / 无可用包安装器的设备上，调起安装即抛 ActivityNotFoundException -->
+    <string name="apk_install_failed">无法打开安装程序</string>
     <string name="apk_signature_mismatch">更新包签名与已安装应用不一致，已阻止安装</string>
     <string name="apk_download_signature_mismatch">下载的 APK 签名与已安装的同包名应用不一致，文件已删除</string>
     <string name="apk_signature_unverified">该 APK 对应的应用未安装，发布者签名无法验证，安装请谨慎</string>
@@ -162,7 +161,6 @@
     <string name="ellipse" translatable="false">\u2026</string>
     <string name="view_more">查看更多\u2026</string>
     <string name="view_video">查看视频</string>
-    <string name="pulls">拉取请求</string>
     <string name="issue_milestone_hint">里程碑</string>
     <string name="issue_assignee_hint">指派人</string>
     <string name="link_not_openable">无法打开链接</string>
@@ -177,7 +175,6 @@
     <string name="download_mobile_warning_message">要使用移动网络下载此文件吗？\n您也可以选择在下次连接 Wi-Fi 时再下载。</string>
     <string name="download_now_button">立即下载</string>
     <string name="download_wifi_button">使用 Wi-Fi 下载</string>
-    <string name="download_permission_rationale">下载文件需要写入 USB 存储或 SD 卡的权限。</string>
     <string name="load_auth_failure_notice">您的登录凭据已失效，请重新登录。</string>
     <string name="unset">未设置</string>
     <string name="copyright_notice">\u00a9 2026 7Z1H</string>
@@ -187,8 +184,6 @@
     <string name="mentioned">提到我的</string>
     <string name="participating">我参与的</string>
     <string name="my_repositories">我的仓库</string>
-    <string name="my_issues">我的议题</string>
-    <string name="my_pull_requests">我的拉取请求</string>
     <string name="start_page">启动页</string>
     <string name="start_page_last_selected">上次选择的</string>
     <string name="comment_editor_locked_hint">只有协作者才能发表评论</string>
@@ -210,7 +205,6 @@
     <string name="mark_repository_as_read_question">要将 %1$s 的所有通知标为已读吗？</string>
     <string name="mark_all_as_read_question">要将所有通知标为已读吗？</string>
     <string name="unread">未读</string>
-    <string name="undo">撤销</string>
     <string name="raw">原始文本</string>
     <string name="view_in_file">在文件中查看</string>
     <string name="reviewed_files">已审查的文件：</string>
@@ -311,7 +305,8 @@
     <string name="event_delete_tag_title">删除了 [b]%2$s[/b] 上的标签 [b]%1$s[/b]</string>
     <string name="event_pr_open_title">在 [b]%2$s[/b] 上发起了拉取请求 [b]%1$d[/b]</string>
     <string name="event_pr_close_title">关闭了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
-    <string name="event_pr_merge_title">[b]%2$s[/b] 上的拉取请求 [b]%1$d[/b] 已被合并[/b]</string>
+    <!-- 265：原先 [b] 2 个、[/b] 3 个不平衡，解析器会把尾部多余 [/b] 原样显示出来 -->
+    <string name="event_pr_merge_title">[b]%2$s[/b] 上的拉取请求 [b]%1$d[/b] 已被合并</string>
     <string name="event_pr_reopen_title">重新打开了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
     <string name="event_pr_update_title">更新了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
     <string name="event_pr_assign_title">指派了 [b]%2$s[/b] 上的拉取请求 [b]%1$d[/b]</string>
@@ -341,7 +336,6 @@
 
     <string name="user_following">正在关注</string>
     <string name="user_followers">关注者</string>
-    <string name="user_members">成员</string>
     <string name="user_created_at">%1$s 加入</string>
     <string name="user_pub_repos">仓库</string>
     <string name="user_news_feed">动态</string>
@@ -354,7 +348,6 @@
     <!-- Repository -->
     <string name="repo_forks">复刻</string>
     <string name="repo_language">使用 %1$s 编写</string>
-    <string name="repo_watchers">关注者</string>
     <string name="repo_stargazers">星标数</string>
     <string name="repo_watch_action">关注</string>
     <string name="repo_star_action">加星标</string>
@@ -367,7 +360,6 @@
     <string name="repo_collaborators">协作者</string>
     <string name="repo_discussions">讨论</string>
     <string name="repo_files">文件</string>
-    <string name="repo_short">仓库</string>
     <string name="repo_no_readme">没有找到 README 文件</string>
     <string name="repo_issue_on">%2$s/%3$s 上的 #%1$d</string>
     <string name="repo_activity">动态</string>
@@ -498,6 +490,7 @@
     <string name="issue_error_delete_milestone">删除里程碑失败</string>
     <string name="issue_error_milestone_title">请输入标题</string>
     <string name="issue_label_new">新建标签</string>
+    <string name="issue_label_empty_name">请输入标签名称</string>
     <string name="issue_milestone_new">新建里程碑</string>
     <string name="issue_milestone_edit">编辑里程碑</string>
     <string name="issue_milestone_open_issues">%d 个开放</string>
@@ -534,14 +527,12 @@
     <string name="issue_reason_duplicate_description">与另一个议题重复</string>
     <string name="issue_reason_completed">已完成</string>
     <string name="issue_reason_completed_description">已完成、已关闭、已修复、已解决</string>
-    <string name="close_issue">关闭议题</string>
     <string name="issue_template_dialog_title">选择议题类型</string>
 
     <!-- Pull Request -->
     <string name="pull_request_title">拉取请求</string>
     <string name="review_title_format">拉取请求 #%1$d - 审查</string>
     <string name="pull_request_conversation">会话</string>
-    <string name="pull_request_add_review">审查</string>
     <string name="pull_request_files">文件</string>
     <string name="pull_requests">拉取请求</string>
     <string name="pull_requests_open">开放的拉取请求</string>
@@ -584,10 +575,6 @@
     <string name="pull_request_review_event_comment">评论</string>
     <string name="pull_request_review_event_approve">批准</string>
     <string name="pull_request_review_event_request_changes">请求更改</string>
-    <string name="pull_request_review_body">审查摘要</string>
-    <string name="pull_request_review_description">请在下方留下对本次审查的评论。</string>
-    <string name="pull_request_review_button_affirm">评论</string>
-    <string name="pull_request_review_error">为拉取请求 #%1$d 添加审查失败</string>
     <string name="pull_request_review_changes">审查</string>
     <string name="review_create_error">创建审查失败</string>
 
@@ -595,8 +582,6 @@
     <string name="object_view_file_at">查看文件 @ %1$s</string>
 
     <!-- Gist -->
-    <string name="mine">我的</string>
-    <string name="starred">已加星标</string>
     <string name="gists">Gist</string>
     <string name="gist_title">Gist %1$s</string>
     <string name="gist_no_description">&lt;无描述&gt;</string>
@@ -623,8 +608,6 @@
     <string name="recent_wiki">最近的 Wiki 更新</string>
 
     <!-- Bookmarks -->
-    <string name="bookmark_saved">书签已保存</string>
-    <string name="bookmark_removed">书签已移除</string>
 
     <!-- Search -->
     <string name="search_type">搜索类型</string>
@@ -706,9 +689,6 @@
     <string name="notification_interval">通知检查频率</string>
     <string name="detach">在新窗口中打开</string>
 
-    <string name="theme_light">白天</string>
-    <string name="theme_dark">夜间</string>
-    <string name="theme_system">跟随系统设置</string>
 
     <string name="use_custom_tabs">使用内置浏览器</string>
     <string name="open_links_inside_app">在应用内打开链接</string>
@@ -745,7 +725,6 @@
     <string name="translate_failed">翻译失败，请检查网络和翻译设置</string>
     <string name="translate_no_provider">未配置翻译服务</string>
     <string name="translate_cancelled">已取消翻译</string>
-    <string name="translate_thread">翻译整帖</string>
     <string name="translate_thread_progress">翻译中 %1$d/%2$d</string>
     <string name="translate_provider_switched">已切换到%1$s</string>
     <string name="translate_nothing_to_translate">没有可翻译的内容</string>
@@ -767,12 +746,9 @@
     <string name="recent_history_repo">仓库</string>
 
     <!-- Release radar -->
-    <string name="release_radar">Star 更新</string>
     <string name="no_release_radar_items">Star 的仓库最近没有新版本</string>
 
     <!-- Star groups -->
-    <string name="star_groups">Star 分组</string>
-    <string name="star_group_create">新建分组</string>
     <string name="star_group_create_title">分组名称</string>
     <string name="star_group_create_new">新建分组\u2026</string>
     <string name="star_group_assign_title">加入分组</string>
@@ -849,7 +825,6 @@
     <string name="mirror_manual_subtitle">手动选择，不再自动切换</string>
     <string name="mirror_current_none">无</string>
     <string name="mirror_batch_delete">批量删除</string>
-    <string name="mirror_batch_hint">已进入批量删除：勾选要删除的镜像源，点下方“删除”。批量模式下行首是复选框，铅笔和垃圾桶图标隐藏。</string>
     <string name="mirror_batch_selected">已选 %1$d 个</string>
     <string name="mirror_batch_delete_confirm">确定删除选中的 %1$d 个镜像源吗？</string>
     <string name="mirror_current_pill">当前</string>
@@ -893,7 +868,6 @@
     <string name="download_record_deleted">已删除记录</string>
     <!-- 深色模式 -->
     <string name="dark_mode">深色模式</string>
-    <string name="dark_mode_manual">手动</string>
     <string name="dark_mode_system">跟随系统</string>
     <string name="dark_mode_scheduled">定时</string>
     <string name="dark_mode_schedule_time">深色时段</string>
@@ -912,8 +886,6 @@
 
     <string name="me_section_functions">功能</string>
     <string name="me_section_browsing_network">浏览与网络</string>
-    <string name="me_section_translation_about">翻译与关于</string>
-    <string name="me_activity_hint">点进动态流 ›</string>
 
     <string name="switch_account">切换账号</string>
 
@@ -929,13 +901,8 @@
     <string name="search_type_repo_desc">搜仓库名与描述</string>
     <string name="search_type_user_desc">搜用户与组织</string>
     <string name="search_type_code_desc">搜代码内容</string>
-    <string name="me_star_badge_note">底栏 Star 角标，默认开启</string>
-    <string name="me_mirror_speed_test">测速</string>
-    <string name="me_mirror_add">新增镜像</string>
     <string name="me_mirror_edit">修改</string>
     <string name="me_mirror_delete">删除</string>
-    <string name="me_account_switch_hint">点整行切换账号</string>
-    <string name="me_star_update_reminder">Star 仓库新版本提醒</string>
     <string name="diagnostic_log">诊断日志</string>
     <string name="diagnostic_log_empty">暂无诊断日志</string>
     <string name="diagnostic_log_live">实时收集中 · 自动滚动</string>
@@ -960,7 +927,6 @@
     <string name="store_home">首页</string>
     <string name="store_explore">探索</string>
     <string name="store_rank">排行榜</string>
-    <string name="store_tags">标签</string>
     <string name="store_hot">热门软件</string>
     <string name="store_recent_updated">最近更新</string>
     <string name="store_newest">最新入库</string>
@@ -973,7 +939,6 @@
     </plurals>
     <string name="store_newest_updated_today">作者更新于今天</string>
     <string name="store_submit">提交仓库</string>
-    <string name="store_submit_hint">输入 GitHub 仓库链接，拉取最新 Release 预览后加入本地关注</string>
     <string name="store_submit_url_label">GitHub 仓库地址</string>
     <string name="store_submit_url_hint">https://github.com/owner/repo</string>
     <string name="store_submit_preview">Release 预览</string>
@@ -990,30 +955,12 @@
     <string name="store_no_release">该仓库暂无 Release</string>
     <string name="store_preview_assets">最新版本有 %1$d 个安装包</string>
     <string name="store_removed">已下架记录</string>
-    <string name="store_removed_hint">被移除的仓库、原因与日期</string>
     <string name="store_removed_note">以下仓库已从本地关注中移除，此处仅作记录。</string>
     <string name="store_removed_empty">暂无已下架记录</string>
-    <string name="store_removed_reason_deleted">仓库已删除或设为私有</string>
-    <string name="store_mirror">镜像源设置</string>
-    <string name="store_mirror_hint">下载加速：GitHub 官方／ghproxy／CF Worker／自定义</string>
     <string name="store_mirror_current">当前镜像：%1$s</string>
     <string name="store_filter_platform">系统</string>
     <string name="store_filter_category">用途</string>
     <string name="store_filter_all">全部</string>
-    <string name="store_explore_count">共 %1$d 个仓库 · 累计 %2$s 星 · 其中 %3$d 个近 7 天发布了新版本</string>
-    <string name="store_rank_sample_note">基于热门样本聚合，非全库总量。</string>
-    <string name="store_rank_language">编程语言榜</string>
-    <string name="store_rank_lang_sub">%1$s 星 · %2$d 款</string>
-    <string name="store_tag_results">标签“%1$s”下 %2$d 款</string>
-    <string name="store_detail">软件详情</string>
-    <string name="store_latest">最新版本</string>
-    <string name="store_history">历史版本</string>
-    <string name="store_install_latest">安装最新</string>
-    <string name="store_all_versions">全部版本</string>
-    <string name="store_open_repo">打开仓库主页</string>
-    <string name="store_install_guide">安装指南</string>
-    <string name="store_no_assets">暂无安装包</string>
-    <string name="store_deleted_repo">该仓库已删除或设为私有，已记入已下架记录。</string>
     <string name="store_fetch_failed">加载失败，点一下重试</string>
     <string name="store_empty_result">没有符合条件的仓库</string>
     <string name="store_cat_tool">工具</string>
@@ -1029,19 +976,6 @@
     <string name="store_platform_extension">浏览器扩展</string>
     <string name="store_platform_archive">压缩包</string>
     <string name="store_platform_other">其他</string>
-    <string name="store_guide_apk">APK：直接安装到 Android 设备</string>
-    <string name="store_guide_ipa">IPA：需侧载安装</string>
-    <string name="store_guide_exe">EXE：双击运行安装程序</string>
-    <string name="store_guide_dmg">DMG：拖入“应用程序”文件夹</string>
-    <string name="store_guide_pkg">PKG：双击运行安装包</string>
-    <string name="store_guide_appimage">AppImage：赋予执行权限后直接运行</string>
-    <string name="store_guide_deb">DEB：双击或用 dpkg -i 安装</string>
-    <string name="store_guide_rpm">RPM：用 rpm -i 或包管理器安装</string>
-    <string name="store_guide_zip">压缩包：解压后按说明安装</string>
-    <string name="store_discover">发现</string>
-    <string name="store_chart_trending">趋势</string>
-    <string name="store_chart_releases">最新发布</string>
-    <string name="store_chart_popular">最热门</string>
     <string name="store_cat_ai">AI</string>
     <string name="store_cat_networking">网络</string>
     <string name="store_platform_all">全部</string>
@@ -1082,4 +1016,23 @@
     <string name="radar_stage_refresh_failed_cache">刷新失败，显示的是缓存数据</string>
     <string name="radar_stage_load_failed">加载失败 %1$s</string>
     <string name="star_list_stale_retry">缓存数据，点按重试</string>
+    <!-- 267：可交互 ImageView 的无障碍标签（读屏用户识别按钮功能） -->
+    <string name="md_desc_h1">一级标题</string>
+    <string name="md_desc_h2">二级标题</string>
+    <string name="md_desc_h3">三级标题</string>
+    <string name="md_desc_bold">粗体</string>
+    <string name="md_desc_italic">斜体</string>
+    <string name="md_desc_strikethrough">删除线</string>
+    <string name="md_desc_bullet_list">无序列表</string>
+    <string name="md_desc_number_list">有序列表</string>
+    <string name="md_desc_task_list">任务列表</string>
+    <string name="md_desc_divider">分隔线</string>
+    <string name="md_desc_code">代码</string>
+    <string name="md_desc_quote">引用</string>
+    <string name="md_desc_link">链接</string>
+    <string name="md_desc_image">图片</string>
+    <string name="send_comment">发送评论</string>
+    <string name="comment_options">评论选项</string>
+    <string name="notification_options">通知选项</string>
+    <string name="use_suggestion">使用此建议</string>
 </resources>

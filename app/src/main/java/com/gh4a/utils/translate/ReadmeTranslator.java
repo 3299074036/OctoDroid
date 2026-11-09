@@ -8,7 +8,9 @@ import com.gh4a.utils.Background;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -27,14 +29,26 @@ import java.util.regex.Pattern;
  * on the main thread.
  */
 public class ReadmeTranslator {
-    private static final Pattern TAG_PATTERN = Pattern.compile("<[^>]+>|[^<]+");
+    private static final Pattern TAG_PATTERN = Pattern.compile("<[^>]+>|[^<]+|<");
     private static final Pattern TAG_NAME_PATTERN =
             Pattern.compile("<\\s*/?\\s*([a-zA-Z][a-zA-Z0-9]*)");
+    // 240：待解码的实体（decodeEntities 用）；单遍替换，不重复解码。
+    private static final Pattern ENTITY_PATTERN = Pattern.compile(
+            "&(#\\d+|#[xX][0-9a-fA-F]+|amp|lt|gt|quot|apos|nbsp);");
     // Tags whose content should not be translated
     private static final String[] SKIP_TAGS = {"pre", "code", "script", "style"};
     // Probe timeout: fail fast on a dead provider instead of burning the
     // full network timeout on every segment (looks like a freeze).
     private static final int PROBE_TIMEOUT_SECONDS = 10;
+
+    // P13：probe 结果按 provider 缓存短 TTL——整 thread 批量翻译时每条
+    // 评论都新建 ReadmeTranslator，每次 doTranslate 都先跑一次 probe
+    //（Baidu 下还先睡满 1.1s 节流），N 条即 N 次计费调用 + N 倍耗时。
+    // 成功与失败都缓存 60s：批量内只探一次；死提供方时后续条目直接
+    // fail-fast，不再重复烧 probe 调用。键为 provider 类 + 语言对。
+    private static final long PROBE_CACHE_TTL_MS = 60_000;
+    private static final Map<String, Long> sProbeOkAt = new HashMap<>();
+    private static final Map<String, Long> sProbeFailAt = new HashMap<>();
 
     public interface Callback {
         /** Called on main thread as segments complete. */
@@ -95,7 +109,7 @@ public class ReadmeTranslator {
             mMainHandler.post(() -> callback.onComplete(empty));
             return;
         }
-        probeProvider();
+        probeProviderIfNeeded();
         // Translate segments in parallel: sequential translation of a long
         // README takes minutes, parallel cuts it to a fraction of that.
         // Each provider declares its own safe concurrency (Baidu: 1 QPS).
@@ -157,6 +171,41 @@ public class ReadmeTranslator {
     }
 
     /**
+     * P13：批量内只探一次的缓存版 probe。60s 内同一 provider + 语言对
+     * 探活成功过即跳过；60s 内探活失败过即直接 fail-fast，不再重复发
+     * probe 翻译调用。
+     */
+    private void probeProviderIfNeeded() throws Exception {
+        String key = mTranslator.getClass().getName()
+                + "|" + mSourceLang + "|" + mTargetLang;
+        synchronized (ReadmeTranslator.class) {
+            Long okAt = sProbeOkAt.get(key);
+            if (okAt != null
+                    && System.currentTimeMillis() - okAt < PROBE_CACHE_TTL_MS) {
+                return;
+            }
+            Long failAt = sProbeFailAt.get(key);
+            if (failAt != null
+                    && System.currentTimeMillis() - failAt < PROBE_CACHE_TTL_MS) {
+                throw new IOException(
+                        "translation provider check failed (recent probe failed)");
+            }
+        }
+        try {
+            probeProvider();
+        } catch (Exception e) {
+            synchronized (ReadmeTranslator.class) {
+                sProbeFailAt.put(key, System.currentTimeMillis());
+            }
+            throw e;
+        }
+        synchronized (ReadmeTranslator.class) {
+            sProbeOkAt.put(key, System.currentTimeMillis());
+            sProbeFailAt.remove(key);
+        }
+    }
+
+    /**
      * Translate a tiny probe text with a short timeout before starting the
      * real work. A dead/unreachable provider would otherwise burn the full
      * network timeout on every single segment, making the app look frozen
@@ -215,11 +264,14 @@ public class ReadmeTranslator {
         while (m.find()) {
             String token = m.group();
             Segment s = new Segment();
-            if (token.startsWith("<")) {
+            // 240：只有带标签名的 <... 才是标签；getTagName 为空的
+            // <... token（裸 < 比较、x < 3 and y > z）按文本段处理
+            //（原先或被当成标签跳过翻译、或裸 < 直接丢弃）。
+            String tagName = token.startsWith("<") ? getTagName(token) : null;
+            if (tagName != null && !tagName.isEmpty()) {
                 s.isTag = true;
                 s.text = token;
                 s.translatable = false;
-                String tagName = getTagName(token);
                 if (isSkipTag(tagName)) {
                     if (token.startsWith("</")) {
                         skipDepth = Math.max(0, skipDepth - 1);
@@ -229,8 +281,8 @@ public class ReadmeTranslator {
                 }
             } else {
                 s.isTag = false;
-                s.text = token;
-                // decode common entities for translation, re-encode after
+                // 按注释承诺先解码实体再翻译，拼回前重编码（见 buildHtml）。
+                s.text = decodeEntities(token);
                 s.translatable = skipDepth == 0;
             }
             segments.add(s);
@@ -255,10 +307,51 @@ public class ReadmeTranslator {
         return false;
     }
 
+    /** 240：解码常见实体再翻译（单遍替换，不重复解码）；未知/非法实体原样保留。 */
+    private static String decodeEntities(String text) {
+        Matcher m = ENTITY_PATTERN.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String entity = m.group(1);
+            String replacement;
+            switch (entity) {
+                case "amp": replacement = "&"; break;
+                case "lt": replacement = "<"; break;
+                case "gt": replacement = ">"; break;
+                case "quot": replacement = "\""; break;
+                case "apos": replacement = "'"; break;
+                case "nbsp": replacement = "\u00A0"; break;
+                default: {
+                    // 数字实体：&#60; / &#x3c;
+                    int codePoint;
+                    try {
+                        if (entity.charAt(1) == 'x' || entity.charAt(1) == 'X') {
+                            codePoint = Integer.parseInt(entity.substring(2), 16);
+                        } else {
+                            codePoint = Integer.parseInt(entity.substring(1));
+                        }
+                    } catch (NumberFormatException e) {
+                        codePoint = -1;
+                    }
+                    replacement = codePoint >= 0
+                            && Character.isValidCodePoint(codePoint)
+                            ? new String(Character.toChars(codePoint))
+                            : m.group();
+                    break;
+                }
+            }
+            m.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
     private static String buildHtml(List<Segment> segments) {
         StringBuilder sb = new StringBuilder();
         for (Segment s : segments) {
-            sb.append(s.text);
+            // 240：文本段（含译文）拼回前 HTML 转义，否则译文里的 </& 会
+            // 破坏渲染结构；标签段原样拼回。
+            sb.append(s.isTag ? s.text : TextUtils.htmlEncode(s.text));
         }
         return sb.toString();
     }

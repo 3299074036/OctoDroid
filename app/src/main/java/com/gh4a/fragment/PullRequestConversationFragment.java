@@ -63,6 +63,7 @@ import java.net.HttpURLConnection;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -91,8 +92,16 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
             boolean isCollaborator, IntentUtils.InitialCommentMarker initialComment) {
         PullRequestConversationFragment f = new PullRequestConversationFragment();
 
-        Repository repo = pr.base().repo();
-        Bundle args = buildArgs(repo.owner().login(), repo.name(),
+        // 156：head 仓库被删的 PR 也可能 base.repo 缺失（base()/repo()/owner() 均可空），
+        // 此时用 issue 链接回退取仓库名，不直接解引用。
+        Repository repo = pr.base() != null ? pr.base().repo() : null;
+        Pair<String, String> repoOwnerAndName;
+        if (repo != null && repo.owner() != null) {
+            repoOwnerAndName = new Pair<>(repo.owner().login(), repo.name());
+        } else {
+            repoOwnerAndName = ApiHelpers.extractRepoOwnerAndNameFromIssue(issue);
+        }
+        Bundle args = buildArgs(repoOwnerAndName.first, repoOwnerAndName.second,
                 issue, isCollaborator, initialComment);
         args.putParcelable("pr", pr);
         f.setArguments(args);
@@ -131,7 +140,9 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
         super.onCreateOptionsMenu(menu, inflater);
         inflater.inflate(R.menu.pull_request_fragment_menu, menu);
 
-        if (mPullRequest == null || mPullRequest.head().repo() == null
+        // 156：head() 可空（head 仓库被删的 PR），先判 head 再取 repo。
+        if (mPullRequest == null || mPullRequest.head() == null
+                || mPullRequest.head().repo() == null
                 || mPullRequest.state() == IssueState.Open) {
             menu.removeItem(R.id.delete_branch);
         } else {
@@ -192,7 +203,8 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
 
     @Override
     protected Single<List<TimelineItem>> onCreateDataSingle(boolean bypassCache) {
-        final int issueNumber = mIssue.number();
+        // 166：mIssue.number() 为可空 Integer，赋给 int 会拆箱。
+        final int issueNumber = ApiHelpers.orZero(mIssue.number());
         var timelineService = ServiceFactory.getForFullPagedLists(IssueTimelineService.class, bypassCache);
         var reviewService = ServiceFactory.getForFullPagedLists(PullRequestReviewService.class, bypassCache);
         var prCommentService = ServiceFactory.getForFullPagedLists(PullRequestReviewCommentService.class, bypassCache);
@@ -213,7 +225,9 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
 
         // For reviews with pending state we have to manually load the comments
         Single<LongSparseArray<List<ReviewComment>>> pendingReviewCommentsByIdSingle = reviewsSingle
-                .compose(RxUtils.filter(r -> r.state() == ReviewState.Pending))
+                // 166：r.id() 为可空 Long，Single.just(null) 抛 NPE、getReviewComments(long)
+                // 会拆箱；无 id 的 pending 审阅无法取评论，直接跳过。
+                .compose(RxUtils.filter(r -> r.state() == ReviewState.Pending && r.id() != null))
                 .toObservable()
                 .flatMap(reviews -> {
                     List<Observable<Pair<Long, List<ReviewComment>>>> obsList = new ArrayList<>();
@@ -242,12 +256,19 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
 
             for (Review review : prReviews) {
                 TimelineItem.TimelineReview timelineReview = new TimelineItem.TimelineReview(review);
-                reviewsById.put(review.id(), timelineReview);
+                // 166：review.id() 为可空 Long，LongSparseArray.put(long, …) 会拆箱。
+                reviewsById.put(ApiHelpers.orZero(review.id()), timelineReview);
                 reviewItems.add(timelineReview);
 
                 if (review.state() == ReviewState.Pending) {
-                    for (ReviewComment pendingComment : pendingReviewCommentsById.get(review.id())) {
-                        timelineReview.addComment(pendingComment, null, true);
+                    // 166：get() 无对应项时返回 null（无 id 的 pending 审阅已被上游过滤），
+                    // 直接 for-each 即 NPE。
+                    List<ReviewComment> pendingComments =
+                            pendingReviewCommentsById.get(ApiHelpers.orZero(review.id()));
+                    if (pendingComments != null) {
+                        for (ReviewComment pendingComment : pendingComments) {
+                            timelineReview.addComment(pendingComment, null, true);
+                        }
                     }
                 }
             }
@@ -324,24 +345,27 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
                 ? R.attr.colorPullRequestMerged
                 : mPullRequest.state() == IssueState.Closed
                         ? R.attr.colorIssueClosed : R.attr.colorIssueOpen;
+        // 166：number() 为可空 Integer、comment.id() 为可空 Long，
+        // makeIntent(int, long, …) 会拆箱。
         Intent intent = comment instanceof ReviewComment
                 ? EditPullRequestCommentActivity.makeIntent(getActivity(), mRepoOwner, mRepoName,
-                mPullRequest.number(), comment.id(), 0L, comment.body(), highlightColorAttr)
+                ApiHelpers.orZero(mPullRequest.number()), ApiHelpers.orZero(comment.id()), 0L, comment.body(), highlightColorAttr)
                 : EditIssueCommentActivity.makeIntent(getActivity(), mRepoOwner, mRepoName,
-                        mIssue.number(), comment.id(), comment.body(), highlightColorAttr);
+                        ApiHelpers.orZero(mIssue.number()), ApiHelpers.orZero(comment.id()), comment.body(), highlightColorAttr);
         mEditLauncher.launch(intent);
     }
 
 
     @Override
     protected Single<Response<Void>> doDeleteComment(GitHubCommentBase comment) {
+        // 166：comment.id() 为可空 Long，deleteComment/deleteIssueComment(long) 会拆箱。
         if (comment instanceof ReviewComment) {
             PullRequestReviewCommentService service =
                     ServiceFactory.get(PullRequestReviewCommentService.class, false);
-            return service.deleteComment(mRepoOwner, mRepoName, comment.id());
+            return service.deleteComment(mRepoOwner, mRepoName, ApiHelpers.orZero(comment.id()));
         } else {
             IssueCommentService service = ServiceFactory.get(IssueCommentService.class, false);
-            return service.deleteIssueComment(mRepoOwner, mRepoName, comment.id());
+            return service.deleteIssueComment(mRepoOwner, mRepoName, ApiHelpers.orZero(comment.id()));
         }
     }
 
@@ -382,7 +406,8 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
 
     private void restorePullRequestBranch() {
         PullRequestMarker head = mPullRequest.head();
-        if (head.repo() == null) {
+        // 156：head/repo/owner 均可空，缺失时无法恢复分支，直接返回。
+        if (head == null || head.repo() == null || head.repo().owner() == null) {
             return;
         }
         String owner = head.repo().owner().login();
@@ -408,6 +433,10 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
         GitService service = ServiceFactory.get(GitService.class, false);
 
         PullRequestMarker head = mPullRequest.head();
+        // 156：head/repo/owner 均可空，缺失时无法删除分支，直接返回。
+        if (head == null || head.repo() == null || head.repo().owner() == null) {
+            return;
+        }
         String owner = head.repo().owner().login();
         String repo = head.repo().name();
 
@@ -421,8 +450,23 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
                 }, error -> handleActionFailure("Deleting PR branch failed", error));
     }
 
+    // 168：updatedAt() 可空，直接 compareTo 即 NPE；缺失按最早处理（排最后）。
     private static final Comparator<Status> STATUS_TIMESTAMP_COMPARATOR =
-            (lhs, rhs) -> rhs.updatedAt().compareTo(lhs.updatedAt());
+            (lhs, rhs) -> compareUpdatedAtDesc(lhs.updatedAt(), rhs.updatedAt());
+
+    private static int compareUpdatedAtDesc(Date lhs, Date rhs) {
+        if (lhs == null && rhs == null) {
+            return 0;
+        }
+        if (lhs == null) {
+            return 1;
+        }
+        if (rhs == null) {
+            return -1;
+        }
+        return rhs.compareTo(lhs);
+    }
+
     private static final Comparator<Status> STATUS_AND_CONTEXT_COMPARATOR = new Comparator<Status>() {
         @Override
         public int compare(Status lhs, Status rhs) {
@@ -431,11 +475,27 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
             if (lhsSeverity != rhsSeverity) {
                 return lhsSeverity < rhsSeverity ? 1 : -1;
             } else {
-                return lhs.context().compareTo(rhs.context());
+                // 168：context() 可空，直接 compareTo 即 NPE；缺失排最后。
+                String lhsContext = lhs.context();
+                String rhsContext = rhs.context();
+                if (lhsContext == null && rhsContext == null) {
+                    return 0;
+                }
+                if (lhsContext == null) {
+                    return 1;
+                }
+                if (rhsContext == null) {
+                    return -1;
+                }
+                return lhsContext.compareTo(rhsContext);
             }
         }
 
         private int getStateSeverity(Status status) {
+            // 168：state() 可空，switch(null) 即 NPE；缺失按默认 severity 1 处理。
+            if (status == null || status.state() == null) {
+                return 1;
+            }
             switch (status.state()) {
                 case Success: return 0;
                 case Error:
@@ -455,7 +515,13 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
         commitStatusBox.setVisibility(View.VISIBLE);
 
         var repoService = ServiceFactory.getForFullPagedLists(RepositoryStatusService.class, force);
-        String sha = mPullRequest.head().sha();
+        // 156：head/sha 可空（head 仓库被删的 PR），无 sha 则状态无从加载，隐藏状态盒。
+        PullRequestMarker head = mPullRequest.head();
+        if (head == null || head.sha() == null) {
+            commitStatusBox.setVisibility(View.GONE);
+            return;
+        }
+        String sha = head.sha();
 
         Single<List<Status>> statusSingle = ApiHelpers.PageIterator
                 .toSingle(page -> repoService.getStatuses(mRepoOwner, mRepoName, sha, page))
@@ -486,8 +552,11 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
                     HashMap<String, CheckRun> filteredRuns = new HashMap<>();
                     for (CheckRun run : checkRuns) {
                         CheckRun existing = filteredRuns.get(run.name());
+                        // 168：守卫只覆盖了 run.startedAt()==null，existing.startedAt()
+                        // 为 null 时 after(null) 即 NPE；既有项无时间时新项直接取代。
                         if (existing == null
                                 || run.startedAt() == null
+                                || existing.startedAt() == null
                                 || run.startedAt().after(existing.startedAt())) {
                             filteredRuns.put(run.name(), run);
                         }
@@ -515,6 +584,10 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
         GitService service = ServiceFactory.get(GitService.class, force);
 
         PullRequestMarker head = mPullRequest.head();
+        // 156：head 可空，缺失时无从取 head 引用。
+        if (head == null) {
+            return;
+        }
         Repository repo = head.repo();
         Single<Optional<GitReference>> refSingle = repo != null && repo.owner() != null
                 ? service.getGitReference(repo.owner().login(), repo.name(), head.ref())

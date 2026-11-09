@@ -60,6 +60,13 @@ public class AccountManageActivity extends BaseActivity implements
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // 191：确认删除的对话框是 DialogFragment，旋转后由 FragmentManager
+        // 恢复，但 mPendingDeleteLogin 是 Activity 字段、旋转后为 null，
+        // onConfirmed 会静默返回、删账号点确认没反应；随实例状态保存恢复。
+        if (savedInstanceState != null) {
+            mPendingDeleteLogin =
+                    savedInstanceState.getString("account_manage:pending_delete_login");
+        }
         setContentView(R.layout.activity_account_manage);
 
         RecyclerView recyclerView = findViewById(R.id.recycler_view);
@@ -72,6 +79,13 @@ public class AccountManageActivity extends BaseActivity implements
                         .show(getSupportFragmentManager(), "loginmode"));
 
         reloadAccounts();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        // 191：见 onCreate。
+        outState.putString("account_manage:pending_delete_login", mPendingDeleteLogin);
     }
 
     @Override

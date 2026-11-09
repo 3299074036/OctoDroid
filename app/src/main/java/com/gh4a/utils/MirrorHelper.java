@@ -8,6 +8,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 
+import com.gh4a.Gh4Application;
 import com.gh4a.R;
 import com.gh4a.fragment.SettingsFragment;
 
@@ -30,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import okhttp3.Call;
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -120,7 +122,15 @@ public class MirrorHelper {
         if (!norm.regionMatches(true, 0, "https://", 0, 8)) {
             return false;
         }
-        String host = extractHost(norm);
+        // 245：校验用的 host 必须取自 OkHttp 自身的解析（HttpUrl），不再手写
+        // extractHost——OkHttp 按 WHATWG 解析：'\' 视为 '/'（authority 终结符），
+        // host 经 IDN.toASCII 做 NFKC/IDNA 归一（全角数字、全角句点映射为 ASCII）。
+        // 手写解析取出的 host 与实际发请求的 host 不一致时，回环/内网地址可绕过
+        // 校验入库（实测：https://127.0.0.1\evil.com/、https://１２７．０．０．１/ 均放行，
+        // 而 OkHttp 实际请求的 host 是 127.0.0.1）。
+        // HttpUrl 解析失败（畸形地址）直接拒绝：这种地址本来也发不出请求。
+        HttpUrl parsed = HttpUrl.parse(norm);
+        String host = parsed == null ? null : parsed.host();
         if (host == null || host.isEmpty()) {
             return false;
         }
@@ -909,11 +919,15 @@ public class MirrorHelper {
                 }
             }
         } catch (IOException e) {
-            Log.d(TAG, "Speed probe failed: " + target.url, e);
+            // 214：target.url 可带镜像密码（userinfo），原样进 logcat；
+            // 经 redactUrlForLog 剥 userinfo 与 query 再记。
+            Log.d(TAG, "Speed probe failed: "
+                    + Gh4Application.redactUrlForLog(target.url), e);
         } catch (RuntimeException e) {
             // 畸形地址（如无 scheme 的自定义地址）抛 IllegalArgumentException：
             // 返回不可用条目而不是静默丢弃，让用户在列表里看得到 (L-8)
-            Log.d(TAG, "Speed probe bad URL: " + target.url, e);
+            Log.d(TAG, "Speed probe bad URL: "
+                    + Gh4Application.redactUrlForLog(target.url), e);
         }
         return new MirrorSpeedResult(target.name, target.url, target.presetValue, -1);
     }

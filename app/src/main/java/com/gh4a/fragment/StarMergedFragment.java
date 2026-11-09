@@ -43,7 +43,6 @@ import com.gh4a.utils.UserListDialogHelper;
 import com.gh4a.utils.StringUtils;
 import com.meisolsson.githubsdk.model.Repository;
 import com.meisolsson.githubsdk.service.activity.StarringService;
-import com.vdurmont.emoji.EmojiParser;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -1143,12 +1142,16 @@ public class StarMergedFragment extends Fragment {
 
     /** 0.1.64：新建官方列表后直接把该仓库归属到新列表。 */
     private void showCreateListDialogForAssign(Repository repository) {
-        UserListDialogHelper.showCreateListDialog(requireActivity(),
-                mOfficialLists, mDisposables, newList -> {
-                    if (!isAdded()) return;
-                    List<String> ids = new ArrayList<>();
-                    ids.add(newList.id);
-                    assignToOfficialLists(repository.fullName(), ids);
+        // 215：建组请求原挂 Fragment 的 mDisposables，旋转即 dispose 中断；
+        // 改走只收名称的对话框 + ViewModel 的 createListAndAssign（126
+        // 同款，RepositoryFragment 已在用），请求挂 ViewModel，旋转不中断。
+        UserListDialogHelper.showCreateListNameDialog(requireActivity(),
+                mOfficialLists, (name, isPrivate) -> {
+                    if (mMoveViewModel == null) {
+                        return;
+                    }
+                    mMoveViewModel.createListAndAssign(
+                            repository.fullName(), name, isPrivate);
                 });
     }
 
@@ -1192,12 +1195,17 @@ public class StarMergedFragment extends Fragment {
 
     /** 0.1.64：+ 新增分组（名称 + 设为私密开关，默认公开）。 */
     private void showCreateListDialog() {
-        UserListDialogHelper.showCreateListDialog(requireActivity(),
-                mOfficialLists, mDisposables, newList -> {
-                    if (!isAdded()) return;
-                    Toast.makeText(getActivity(), R.string.star_list_created,
-                            Toast.LENGTH_SHORT).show();
-                    refetchLists();
+        // 215：同上；创建走 ViewModel 单发操作，成功后 onSingleOpChanged
+        // Toast + 重拉（与旧回调同款）。
+        UserListDialogHelper.showCreateListNameDialog(requireActivity(),
+                mOfficialLists, (name, isPrivate) -> {
+                    if (mMoveViewModel == null) {
+                        return;
+                    }
+                    mMoveViewModel.runSingleOp(
+                            UserListsGraphQL.createList(name, isPrivate),
+                            R.string.star_list_created,
+                            R.string.star_list_create_failed, null);
                 });
     }
 
@@ -1324,12 +1332,15 @@ public class StarMergedFragment extends Fragment {
 
     /** 0.1.64：移组框里新建列表后按当前选中集合批量移入新列表。 */
     private void showCreateListDialogForMove() {
-        UserListDialogHelper.showCreateListDialog(requireActivity(),
-                mOfficialLists, mDisposables, newList -> {
-                    if (!isAdded()) return;
-                    List<String> ids = new ArrayList<>();
-                    ids.add(newList.id);
-                    startBatchMove(ids);
+        // 215：同上；建组 + 批量移入整条链走 ViewModel
+        //（createListAndStartMove），旋转不中断。
+        UserListDialogHelper.showCreateListNameDialog(requireActivity(),
+                mOfficialLists, (name, isPrivate) -> {
+                    if (mMoveViewModel == null) {
+                        return;
+                    }
+                    mMoveViewModel.createListAndStartMove(
+                            new ArrayList<>(mSelectedRepos), name, isPrivate);
                 });
     }
 
@@ -1830,7 +1841,7 @@ public class StarMergedFragment extends Fragment {
                 h.title.setText(ApiHelpers.formatRepoName(holder.itemView.getContext(), repo));
                 if (!StringUtils.isBlank(repo.description())) {
                     h.desc.setVisibility(View.VISIBLE);
-                    h.desc.setText(EmojiParser.parseToUnicode(repo.description()));
+                    h.desc.setText(StringUtils.parseEmojiToUnicode(repo.description()));
                 } else {
                     h.desc.setVisibility(View.GONE);
                 }

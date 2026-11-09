@@ -153,12 +153,20 @@ public class StargazerListFragment extends PagedDataBaseFragment<User> {
                 .compose(RxUtils::doInBackground)
                 .subscribe(result -> {
                     mStarringInFlight = false;
+                    // 162：请求在途时离开页面即 detach，getActivity() 为 null，
+                    // 回调里直接 invalidateOptionsMenu 即 NPE；先复位在途标志再判。
+                    if (!isAdded()) {
+                        return;
+                    }
                     if (mIsStarring != null) {
                         mIsStarring = !mIsStarring;
                         getActivity().invalidateOptionsMenu();
                     }
                 }, error -> {
                     mStarringInFlight = false;
+                    if (!isAdded()) {
+                        return;
+                    }
                     getActivity().invalidateOptionsMenu();
                     handleActionFailure("Updating repo starring state failed", error);
                 });

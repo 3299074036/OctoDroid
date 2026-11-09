@@ -12,6 +12,8 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 0.1.38：通用诊断追踪（正式诊断日志的写盘层）。
@@ -42,17 +44,42 @@ public class DiagTrace {
         return new File(dir(context), TRACE_NAME);
     }
 
-    public static synchronized void log(Context context, String tag, String detail) {
+    /**
+     * P14：写盘移出调用线程——单线程写盘器保序（trace 行不乱序），冷启动、
+     * 切 Tab、主题切换等主线程调用方不再等磁盘 IO。时间戳在调用线程取，
+     * 记的是事件时刻而非写盘时刻；context 只取 applicationContext 入队，
+     * 不让已销毁的 Activity 被后台任务持有。recordCrash 不走这里：崩溃
+     * 路径必须同步落盘（进程可能随即退出）。
+     */
+    private static final ExecutorService sWriter =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "DiagTrace-writer");
+                t.setDaemon(true);
+                return t;
+            });
+
+    public static void log(Context context, String tag, String detail) {
         if (context == null) {
             return;
         }
+        final Context appContext = context.getApplicationContext();
+        final String time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+                .format(new Date());
+        sWriter.execute(() -> {
+            // 与 exportFile 的 synchronized static 同一把锁：导出读文件
+            // 时等在途的写完成，不读到半行。
+            synchronized (DiagTrace.class) {
+                writeLog(appContext, tag, detail, time);
+            }
+        });
+    }
+
+    private static void writeLog(Context context, String tag, String detail, String time) {
         try {
             File f = traceFile(context);
             if (f.exists() && f.length() > MAX_BYTES) {
                 f.delete();
             }
-            String time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
-                    .format(new Date());
             // 70：try-with-resources——旧写法 w.write() 抛异常时 w.close()
             // 走不到（fd 泄漏，文件可能留半行）。
             try (BufferedWriter w = new BufferedWriter(new FileWriter(f, true))) {

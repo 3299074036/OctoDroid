@@ -33,8 +33,8 @@ import com.gh4a.utils.AvatarHandler;
 import com.gh4a.utils.StringUtils;
 import com.meisolsson.githubsdk.model.Commit;
 import com.meisolsson.githubsdk.model.User;
+import com.meisolsson.githubsdk.model.git.GitCommit;
 import com.meisolsson.githubsdk.model.git.GitUser;
-import com.vdurmont.emoji.EmojiParser;
 
 public class CommitAdapter extends RootAdapter<Commit, CommitAdapter.ViewHolder> {
     public CommitAdapter(Context context) {
@@ -52,28 +52,35 @@ public class CommitAdapter extends RootAdapter<Commit, CommitAdapter.ViewHolder>
     @Override
     public void onBindViewHolder(ViewHolder holder, Commit commit) {
         User author = commit.author();
+        // 154/115：commit.commit() 可空（缺 commit 子对象即 NPE），先取一次再判空。
+        GitCommit gitCommit = commit.commit();
         if (author != null && !TextUtils.isEmpty(author.login())) {
             AvatarHandler.assignAvatar(holder.ivGravatar, author);
         } else {
-            GitUser commitAuthor = commit.commit().author();
+            GitUser commitAuthor = gitCommit != null ? gitCommit.author() : null;
             String userName = commitAuthor != null ? commitAuthor.name() : null;
             String email = commitAuthor != null ? commitAuthor.email() : null;
             holder.ivGravatar.setImageDrawable(new AvatarHandler.DefaultAvatarDrawable(userName, email));
         }
         holder.ivGravatar.setTag(commit);
 
-        String message = commit.commit().message();
+        String message = gitCommit != null ? gitCommit.message() : null;
+        if (message == null) {
+            message = "";
+        }
         int pos = message.indexOf('\n');
         if (pos > 0) {
             message = message.substring(0, pos);
         }
-        message = EmojiParser.parseToUnicode(message);
+        message = StringUtils.parseEmojiToUnicode(message);
 
         holder.tvDesc.setText(message);
-        holder.tvSha.setText(commit.sha().substring(0, 10));
+        // 154/115：sha 可空且可能短于 10 位，判空并钳长度（保持原 10 位显示）。
+        String sha = commit.sha();
+        holder.tvSha.setText(sha == null ? "" : (sha.length() > 10 ? sha.substring(0, 10) : sha));
         holder.ivDescriptionIndicator.setVisibility(pos > 0 ? View.VISIBLE : View.GONE);
 
-        int comments = commit.commit().commentCount();
+        int comments = gitCommit != null ? ApiHelpers.orZero(gitCommit.commentCount()) : 0;
         if (comments > 0) {
             holder.tvComments.setText(String.valueOf(comments));
             holder.tvComments.setVisibility(View.VISIBLE);
@@ -82,8 +89,10 @@ public class CommitAdapter extends RootAdapter<Commit, CommitAdapter.ViewHolder>
         }
 
         holder.tvExtra.setText(ApiHelpers.getAuthorName(mContext, commit));
+        // 154/115：author()/date() 均可空，先取到 date 再进 null 安全的 formatRelativeTime。
+        GitUser gitAuthor = gitCommit != null ? gitCommit.author() : null;
         holder.tvTimestamp.setText(
-                StringUtils.formatRelativeTime(mContext, commit.commit().author().date(), true));
+                StringUtils.formatRelativeTime(mContext, gitAuthor != null ? gitAuthor.date() : null, true));
     }
 
     @Override

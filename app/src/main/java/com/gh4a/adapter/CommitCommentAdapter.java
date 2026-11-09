@@ -46,6 +46,7 @@ import com.meisolsson.githubsdk.model.git.GitComment;
 import com.meisolsson.githubsdk.model.request.ReactionRequest;
 import com.meisolsson.githubsdk.service.reactions.ReactionService;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -82,8 +83,13 @@ public class CommitCommentAdapter extends RootAdapter<GitComment, CommitCommentA
                     return true;
 
                 case R.id.share:
+                    // 155：htmlUrl() 可空，Uri.parse(null) 即 NPE；id() 为可空 Long，
+                    // %d 格式化会拆箱，缺字段按 0 计。
+                    if (item.htmlUrl() == null) {
+                        return true;
+                    }
                     String subject = mContext.getString(R.string.share_commit_comment_subject,
-                            item.id(), mRepoOwner + "/" + mRepoName);
+                            ApiHelpers.orZero(item.id()), mRepoOwner + "/" + mRepoName);
                     IntentUtils.share(mContext, subject, Uri.parse(item.htmlUrl()));
                     return true;
             }
@@ -173,7 +179,8 @@ public class CommitCommentAdapter extends RootAdapter<GitComment, CommitCommentA
         holder.ivGravatar.setTag(user);
 
         holder.tvTimestamp.setText(StringUtils.formatRelativeTime(mContext, createdAt, true));
-        if (createdAt.equals(updatedAt)) {
+        // 217：createdAt 可空，直接 equals 即 NPE；缺 created_at 时不显示“已编辑”。
+        if (createdAt != null && createdAt.equals(updatedAt)) {
             holder.tvEditTimestamp.setVisibility(View.GONE);
         } else {
             holder.tvEditTimestamp.setText(StringUtils.formatRelativeTime(mContext, updatedAt, true));
@@ -204,6 +211,11 @@ public class CommitCommentAdapter extends RootAdapter<GitComment, CommitCommentA
     @Override
     public Single<List<Reaction>> loadReactionDetails(ReactionBar.Item item, boolean bypassCache) {
         final GitComment comment = ((ViewHolder) item).mBoundItem;
+        // 216：comment.id() 为 Long 可空，ReactionService 形参为 long，
+        // 缺 id 时直接拆箱即 NPE；无 id 的评论没有可拉取的 reaction。
+        if (comment.id() == null) {
+            return Single.just(new ArrayList<>());
+        }
         var service = ServiceFactory.getForFullPagedLists(ReactionService.class, bypassCache);
         return ApiHelpers.PageIterator
                 .toSingle(page -> service.getCommitCommentReactions(mRepoOwner, mRepoName, comment.id(), page));
@@ -217,6 +229,10 @@ public class CommitCommentAdapter extends RootAdapter<GitComment, CommitCommentA
     @Override
     public Single<Reaction> addReaction(ReactionBar.Item item, String content) {
         GitComment comment = ((ViewHolder) item).mBoundItem;
+        // 216：同 loadReactionDetails，缺 id 时短路（调用方只记日志，不崩溃）。
+        if (comment.id() == null) {
+            return Single.error(new IllegalStateException("Commit comment has no id"));
+        }
         ReactionService service = ServiceFactory.get(ReactionService.class, false);
         ReactionRequest request = ReactionRequest.builder().content(content).build();
         return service.createCommitCommentReaction(mRepoOwner, mRepoName, comment.id(), request)
@@ -226,6 +242,10 @@ public class CommitCommentAdapter extends RootAdapter<GitComment, CommitCommentA
     @Override
     public Single<Boolean> deleteReaction(ReactionBar.Item item, long reactionId) {
         GitComment comment = ((ViewHolder) item).mBoundItem;
+        // 216：同上，缺 id 时按“未删除”短路。
+        if (comment.id() == null) {
+            return Single.just(false);
+        }
         ReactionService service = ServiceFactory.get(ReactionService.class, false);
         return service.deleteCommitCommentReaction(mRepoOwner, mRepoName, comment.id(), reactionId)
                 .map(ApiHelpers::mapToTrueOnSuccess);

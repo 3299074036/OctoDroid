@@ -9,8 +9,10 @@ import com.meisolsson.githubsdk.core.ByteArrayResponseConverterFactory;
 import com.meisolsson.githubsdk.core.GitHubPaginationInterceptor;
 import com.meisolsson.githubsdk.core.ServiceGenerator;
 import com.meisolsson.githubsdk.core.StringResponseConverterFactory;
+import com.meisolsson.githubsdk.model.GitHubEventType;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -18,10 +20,14 @@ import java.util.concurrent.TimeUnit;
 import okhttp3.Cache;
 import okhttp3.CacheControl;
 import okhttp3.Interceptor;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
 import okhttp3.logging.HttpLoggingInterceptor;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import retrofit2.Retrofit;
 import retrofit2.adapter.rxjava2.RxJava2CallAdapterFactory;
 import retrofit2.converter.moshi.MoshiConverterFactory;
@@ -35,6 +41,94 @@ public class ServiceFactory {
             .setLevel(HttpLoggingInterceptor.Level.BASIC);
 
     private final static Interceptor PAGINATION_INTERCEPTOR = new GitHubPaginationInterceptor();
+
+    /**
+     * 213：GitHub 一加新事件类型，SDK 的 GitHubEventType.valueOf 即抛
+     * IllegalArgumentException，整页解析失败（111 号只把整页降级为空页）。
+     * 这里在 Moshi 解析前把未知类型条目从 events 响应里剥掉：已知类型
+     * 正常显示，只有新类型条目缺失，下一页照常加载。Moshi 层覆盖
+     * GitHubEventType 适配器对 SDK 的自定义 GitHubEventAdapter 无效
+     * （实测见 /tmp/sdkx/MoshiSdkTest.java：自定义 @FromJson 直接调
+     * valueOf），故只能在 OkHttp 层过滤。任何解析问题都 fail-open
+     * （原样返回），绝不因过滤本身丢整页；111 兜底保留。
+     */
+    private final static Interceptor UNKNOWN_EVENT_TYPE_INTERCEPTOR = chain -> {
+        Response response = chain.proceed(chain.request());
+        // fail-open 用的原字节：body 一旦读出即被消费，任何提前返回都
+        // 必须用它重建 body，否则下游 converter 读到空体。
+        byte[] rawBytes = null;
+        try {
+            if (!isEventsRequest(chain.request())
+                    || !response.isSuccessful()
+                    || response.body() == null) {
+                return response;
+            }
+            MediaType contentType = response.body().contentType();
+            if (contentType == null || !"json".equalsIgnoreCase(contentType.subtype())) {
+                return response;
+            }
+            rawBytes = response.body().bytes();
+            String bodyString = new String(rawBytes,
+                    contentType.charset(StandardCharsets.UTF_8));
+            JSONArray events = new JSONArray(bodyString);
+            JSONArray kept = new JSONArray();
+            boolean dropped = false;
+            for (int i = 0; i < events.length(); i++) {
+                JSONObject event = events.optJSONObject(i);
+                if (event != null && isUnknownEventType(event.optString("type", null))) {
+                    dropped = true;
+                    continue;
+                }
+                kept.put(events.get(i));
+            }
+            if (!dropped) {
+                // 无改动：原字节重建，与原响应逐字节一致。
+                return response.newBuilder()
+                        .body(ResponseBody.create(contentType, rawBytes))
+                        .build();
+            }
+            Log.d(Gh4Application.LOG_TAG,
+                    "Stripped unknown GitHub event type(s) from events response");
+            byte[] bytes = kept.toString().getBytes(StandardCharsets.UTF_8);
+            return response.newBuilder()
+                    .body(ResponseBody.create(contentType, bytes))
+                    .build();
+        } catch (Exception e) {
+            // fail-open：过滤失败时返回原响应（body 已消费则用原字节
+            // 重建），解析层/111 兜底接手。
+            if (rawBytes != null && response.body() != null) {
+                return response.newBuilder()
+                        .body(ResponseBody.create(response.body().contentType(), rawBytes))
+                        .build();
+            }
+            return response;
+        }
+    };
+
+    /** 仅 events 系端点（9 个 EventService 方法的路径都含 events /
+     * received_events 段）需要剥未知类型；其余端点原样放行。 */
+    private static boolean isEventsRequest(Request request) {
+        for (String segment : request.url().pathSegments()) {
+            if ("events".equals(segment) || "received_events".equals(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** type 缺失不归本拦截器管（留给解析层/111 兜底）；type 存在但
+     * GitHubEventType 里没有即未知。 */
+    private static boolean isUnknownEventType(String type) {
+        if (type == null) {
+            return false;
+        }
+        try {
+            GitHubEventType.valueOf(type);
+            return false;
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
+    }
 
     private final static Interceptor CACHE_STATUS_INTERCEPTOR = chain -> {
         Response response = chain.proceed(chain.request());
@@ -132,12 +226,12 @@ public class ServiceFactory {
     public static <S> S get(Class<S> serviceClass, boolean bypassCache, String acceptHeader,
             String token, Integer pageSize) {
         String key = makeKey(serviceClass, bypassCache, acceptHeader, token, pageSize);
-        S service = (S) sCache.get(key);
-        if (service == null) {
-            service = createService(serviceClass, bypassCache, acceptHeader, token, pageSize);
-            sCache.put(key, service);
-        }
-        return service;
+        // 230：check-then-put 非原子——ConcurrentHashMap 只保证单次操作
+        // 原子，并发两线程可同时 get 到 null、各自建一份 Retrofit/
+        // OkHttpClient（各带连接池 + Dispatcher 线程池），后 put 者覆盖，
+        // 丢弃的一份白建；computeIfAbsent 让 get-or-create 一次原子完成。
+        return (S) sCache.computeIfAbsent(key, k ->
+                createService(serviceClass, bypassCache, acceptHeader, token, pageSize));
     }
 
     private static String makeKey(Class<?> serviceClass, boolean bypassCache,
@@ -168,6 +262,7 @@ public class ServiceFactory {
             final String acceptHeader, final String token, final Integer pageSize) {
         OkHttpClient.Builder clientBuilder = sApiHttpClient.newBuilder()
                 .addInterceptor(PAGINATION_INTERCEPTOR)
+                .addInterceptor(UNKNOWN_EVENT_TYPE_INTERCEPTOR)
                 .addNetworkInterceptor(ETAG_WORKAROUND_INTERCEPTOR)
                 .addNetworkInterceptor(CACHE_MAX_AGE_INTERCEPTOR)
                 .addInterceptor(chain -> {
@@ -234,11 +329,20 @@ public class ServiceFactory {
 
     static void initClient(Context context) {
         int twentyMB = 20 * 1024 * 1024;
-        sApiHttpClient = new OkHttpClient.Builder()
-                .cache(new Cache(new File(context.getCacheDir(), "api-http"), twentyMB))
-                .build();
-        sImageHttpClient = sApiHttpClient.newBuilder()
-                .cache(new Cache(new File(context.getCacheDir(), "image-http"), twentyMB))
+        // 231：存储不可用时 getCacheDir() 返回 null，new File((File) null, …)
+        // 即 NPE，发生在 Gh4Application.onCreate，应用无法启动；
+        // 无缓存目录时建无缓存 client（功能不受影响，只是不走磁盘缓存）。
+        File cacheDir = context.getCacheDir();
+        OkHttpClient.Builder apiBuilder = new OkHttpClient.Builder();
+        if (cacheDir != null) {
+            apiBuilder.cache(new Cache(new File(cacheDir, "api-http"), twentyMB));
+        }
+        sApiHttpClient = apiBuilder.build();
+        OkHttpClient.Builder imageBuilder = sApiHttpClient.newBuilder();
+        if (cacheDir != null) {
+            imageBuilder.cache(new Cache(new File(cacheDir, "image-http"), twentyMB));
+        }
+        sImageHttpClient = imageBuilder
                 .addInterceptor(MirrorHelper.mirrorInterceptor(context))
                 .build();
     }

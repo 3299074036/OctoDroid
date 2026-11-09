@@ -95,7 +95,8 @@ class DiffViewHolder extends TimelineItemAdapter.TimelineItemViewHolder<Timeline
         mFileTextView.setTextColor(isClickable ? mAccentColor : mSecondaryTextColor);
 
         String diffHunk = comment.diffChunk();
-        if (diffHunk.isEmpty()) {
+        // 203：diffChunk() 可空，isEmpty() 即 NPE；空值按无 diff 段处理。
+        if (diffHunk == null || diffHunk.isEmpty()) {
             mDiffHunkTextView.setVisibility(View.GONE);
         } else {
             mDiffHunkTextView.setVisibility(View.VISIBLE);

@@ -240,7 +240,10 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     @Override
     public void onRefresh() {
         if (mListHeaderView != null) {
-            getActivity().invalidateOptionsMenu();
+            // 167：onRefresh 可在 detach 后触发，getActivity() 为 null 即 NPE。
+            if (getActivity() != null) {
+                getActivity().invalidateOptionsMenu();
+            }
             fillLabels(null);
         }
         if (mImageGetter != null) {
@@ -523,7 +526,9 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
 
     /** Bind the issue/PR body, preferring the translated HTML when available. */
     private void bindIssueBody(TextView descriptionView, String bodyHtml) {
-        String translated = mCommentTranslator != null ? mCommentTranslator.getTranslatedHtml(mIssue.id()) : null;
+        // 244：issue 正文与评论/review 共用同一翻译缓存，键须带类型，
+        // 否则数值 id 撞号时译文串位。
+        String translated = mCommentTranslator != null ? mCommentTranslator.getTranslatedHtml("issue", mIssue.id()) : null;
         if (translated != null) {
             mImageGetter.bind(descriptionView, translated, mIssue.id() + "-translated");
         } else {
@@ -544,11 +549,11 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     }
 
     @Override
-    public void translateBody(long id, String bodyHtml) {
+    public void translateBody(String type, long id, String bodyHtml) {
         if (getActivity() == null || mCommentTranslator == null) {
             return;
         }
-        mCommentTranslator.toggleTranslation(getActivity(), id, bodyHtml, () -> {
+        mCommentTranslator.toggleTranslation(getActivity(), type, id, bodyHtml, () -> {
             // 115：mIssue.id() 为 Long，与 long 比较会拆箱 NPE
             if (mIssue.id() != null && id == mIssue.id()) {
                 refreshIssueBody();
@@ -560,8 +565,8 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     }
 
     @Override
-    public String getTranslatedBody(long id) {
-        return mCommentTranslator != null ? mCommentTranslator.getTranslatedHtml(id) : null;
+    public String getTranslatedBody(String type, long id) {
+        return mCommentTranslator != null ? mCommentTranslator.getTranslatedHtml(type, id) : null;
     }
 
     // ThreadTranslateController.Host
@@ -575,7 +580,11 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
     public List<CommentTranslator.TranslatableItem> collectThreadItems() {
         List<CommentTranslator.TranslatableItem> items = new ArrayList<>();
         if (mIssue != null && !StringUtils.isBlank(mIssue.bodyHtml())) {
-            items.add(new CommentTranslator.TranslatableItem(mIssue.id(), mIssue.bodyHtml()));
+            // 154/115：TranslatableItem(long) 会拆箱 id()，缺字段按 0 计（与本文件
+            // orZero 用法一致；0 只作翻译缓存键，不影响原文）。
+            // 244：issue 正文的类型为 "issue"，与评论/review 的键区分开。
+            items.add(new CommentTranslator.TranslatableItem("issue",
+                    ApiHelpers.orZero(mIssue.id()), mIssue.bodyHtml()));
         }
         if (mAdapter != null) {
             for (int i = 0; i < mAdapter.getCount(); i++) {
@@ -590,14 +599,14 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
         if (item instanceof TimelineItem.TimelineComment) {
             GitHubCommentBase comment = ((TimelineItem.TimelineComment) item).comment();
             if (!StringUtils.isBlank(comment.bodyHtml())) {
-                items.add(new CommentTranslator.TranslatableItem(
-                        comment.id(), comment.bodyHtml()));
+                items.add(new CommentTranslator.TranslatableItem("comment",
+                        ApiHelpers.orZero(comment.id()), comment.bodyHtml()));
             }
         } else if (item instanceof TimelineItem.TimelineReview) {
             Review review = ((TimelineItem.TimelineReview) item).review();
             if (!StringUtils.isBlank(review.bodyHtml())) {
-                items.add(new CommentTranslator.TranslatableItem(
-                        review.id(), review.bodyHtml()));
+                items.add(new CommentTranslator.TranslatableItem("review",
+                        ApiHelpers.orZero(review.id()), review.bodyHtml()));
             }
         }
     }
@@ -762,8 +771,9 @@ public abstract class IssueFragmentBase extends ListDataBaseFragment<TimelineIte
 
     @Override
     public String getShareSubject(GitHubCommentBase comment) {
-        return getString(R.string.share_comment_subject, comment.id(), mIssue.number(),
-                mRepoOwner + "/" + mRepoName);
+        // 167：comment.id()/mIssue.number() 为可空，%1$d/%2$d 格式化会拆箱。
+        return getString(R.string.share_comment_subject, ApiHelpers.orZero(comment.id()),
+                ApiHelpers.orZero(mIssue.number()), mRepoOwner + "/" + mRepoName);
     }
 
     @Override

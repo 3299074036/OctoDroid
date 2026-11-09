@@ -119,7 +119,8 @@ public class SingleFactory {
 
             for (int i = 0; i < count; i++) {
                 NotificationHolder item = new NotificationHolder(notifsForRepo.get(i));
-                hasUnread |= item.notification.unread();
+                // 154/115：unread() 为可空 Boolean，缺字段按未读计（与 orFalse 同款默认）。
+                hasUnread |= Boolean.TRUE.equals(item.notification.unread());
                 item.setIsLastRepositoryNotification(i == count - 1);
                 result.add(item);
             }

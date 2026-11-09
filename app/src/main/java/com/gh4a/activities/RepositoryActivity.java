@@ -57,7 +57,12 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
     }
 
     public static Intent makeIntent(Context context, Repository repo, String ref) {
-        return makeIntent(context, repo.owner().login(), repo.name(), ref);
+        // 207：repo/owner/login/name 均可空；空值按 "" 计（Retrofit @Path ""
+        // 合法，走 404 加载失败页），null 则抛错。
+        String login = repo != null && repo.owner() != null && repo.owner().login() != null
+                ? repo.owner().login() : "";
+        String name = repo != null && repo.name() != null ? repo.name() : "";
+        return makeIntent(context, login, name, ref);
     }
 
     public static Intent makeIntent(Context context, String repoOwner, String repoName) {
@@ -308,6 +313,11 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
                 confirmForkRepository();
                 return true;
             case R.id.zip_download: {
+                // 155/188：空仓库无默认分支时 getCurrentRef() 为 null，appendPath(null)
+                // 即抛错；url() 可空时 Uri.parse(null) 即 NPE。缺失时不下载。
+                if (mRepository.url() == null || getCurrentRef() == null) {
+                    return true;
+                }
                 final String zipUrl = Uri.parse(mRepository.url())
                         .buildUpon()
                         .appendPath("zipball")
@@ -449,10 +459,16 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
 
             for (int i = 0; i < count; i++) {
                 Branch item = adapter.getItem(i);
-                if (item.name().equals(selectedRef) || item.commit().sha().equals(selectedRef)) {
+                // 207：item/name/commit/sha 均可空；TextUtils.equals 双向判空。
+                if (item == null) {
+                    continue;
+                }
+                if (TextUtils.equals(item.name(), selectedRef)
+                        || (item.commit() != null
+                                && TextUtils.equals(item.commit().sha(), selectedRef))) {
                     current = i;
                 }
-                if (item.name().equals(defaultBranch)) {
+                if (TextUtils.equals(item.name(), defaultBranch)) {
                     master = i;
                 }
             }

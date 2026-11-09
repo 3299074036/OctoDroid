@@ -370,14 +370,15 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
         if (item instanceof TimelineItem.TimelineComment) {
             GitHubCommentBase comment = ((TimelineItem.TimelineComment) item).comment();
             if (comment.bodyHtml() != null && !comment.bodyHtml().isEmpty()) {
-                items.add(new CommentTranslator.TranslatableItem(
-                        comment.id(), comment.bodyHtml()));
+                // 154/115：TranslatableItem(long) 会拆箱 id()，缺字段按 0 计。
+                items.add(new CommentTranslator.TranslatableItem("comment",
+                        ApiHelpers.orZero(comment.id()), comment.bodyHtml()));
             }
         } else if (item instanceof TimelineItem.TimelineReview) {
             Review review = ((TimelineItem.TimelineReview) item).review();
             if (review.bodyHtml() != null && !review.bodyHtml().isEmpty()) {
-                items.add(new CommentTranslator.TranslatableItem(
-                        review.id(), review.bodyHtml()));
+                items.add(new CommentTranslator.TranslatableItem("review",
+                        ApiHelpers.orZero(review.id()), review.bodyHtml()));
             }
         }
     }
@@ -438,7 +439,8 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
             // 只在尚未选中任何回复组时（首次加载）默认选中第一组；
             // 旋转后 onCreate 已从 savedInstanceState 恢复了用户之前的选择，不要覆盖
             if (mSelectedReplyCommentId <= 0) {
-                mSelectedReplyCommentId = firstReplyItem.timelineComment.comment().id();
+                // 166：comment.id() 为可空 Long，赋给 long 字段会拆箱。
+                mSelectedReplyCommentId = ApiHelpers.orZero(firstReplyItem.timelineComment.comment().id());
             }
             // When there is only one reply item we don't need to display it
             data.remove(firstReplyItem);
@@ -451,7 +453,9 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
 
             if (item instanceof TimelineItem.TimelineComment) {
                 TimelineItem.TimelineComment comment = (TimelineItem.TimelineComment) item;
-                if (mInitialComment.matches(comment.comment().id(), comment.getCreatedAt())) {
+                // 166：comment.id() 为可空 Long，matches(long, Date) 会拆箱。
+                if (comment.comment().id() != null
+                        && mInitialComment.matches(comment.comment().id(), comment.getCreatedAt())) {
                     scrollToAndHighlightPosition(i);
                     break;
                 }
@@ -495,11 +499,11 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
     }
 
     @Override
-    public void translateBody(long id, String bodyHtml) {
+    public void translateBody(String type, long id, String bodyHtml) {
         if (getActivity() == null || mCommentTranslator == null) {
             return;
         }
-        mCommentTranslator.toggleTranslation(getActivity(), id, bodyHtml, () -> {
+        mCommentTranslator.toggleTranslation(getActivity(), type, id, bodyHtml, () -> {
             if (mAdapter != null) {
                 mAdapter.notifyDataSetChanged();
             }
@@ -507,8 +511,8 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
     }
 
     @Override
-    public String getTranslatedBody(long id) {
-        return mCommentTranslator != null ? mCommentTranslator.getTranslatedHtml(id) : null;
+    public String getTranslatedBody(String type, long id) {
+        return mCommentTranslator != null ? mCommentTranslator.getTranslatedHtml(type, id) : null;
     }
 
     @Override

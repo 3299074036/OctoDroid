@@ -28,5 +28,6 @@
         android:layout_height="match_parent"
         android:layout_width="wrap_content"
         android:minHeight="?attr/listPreferredItemHeightSmall"
-        android:padding="8dp" />
+        android:padding="8dp"
+        android:contentDescription="@string/use_suggestion"/>
 </LinearLayout>

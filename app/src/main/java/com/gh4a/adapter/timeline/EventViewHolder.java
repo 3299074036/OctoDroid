@@ -85,6 +85,10 @@ class EventViewHolder
     }
 
     private Integer getEventIcon(IssueEvent event) {
+        // 224：event.event() 可空，switch(null) 即 NPE；无类型时不显示图标。
+        if (event.event() == null) {
+            return null;
+        }
         return switch (event.event()) {
             case Closed -> {
                 if (mIsPullRequest) {
@@ -117,6 +121,10 @@ class EventViewHolder
     }
 
     private CharSequence formatEvent(final IssueEvent event, final User user) {
+        // 224：同 getEventIcon，event.event() 为 null 时无文案可格式化。
+        if (event.event() == null) {
+            return null;
+        }
         String textBase = null;
         int textResId = 0;
         String commitId = event.commitId();
@@ -199,13 +207,22 @@ class EventViewHolder
                 textResId = event.event() == IssueEventType.Milestoned
                         ? R.string.issue_event_milestoned
                         : R.string.issue_event_demilestoned;
+                // 222：milestone() 可空，直接 title() 即 NPE；缺失时用“已删除”占位。
                 textBase = mContext.getString(textResId,
-                        getUserLoginWithBotSuffix(user), event.milestone().title());
+                        getUserLoginWithBotSuffix(user),
+                        event.milestone() != null && event.milestone().title() != null
+                                ? event.milestone().title()
+                                : mContext.getString(R.string.deleted));
             }
             case Renamed -> {
                 Rename rename = event.rename();
+                // 222：rename() 可空，直接 from()/to() 即 NPE；缺失时用“已删除”占位。
                 textBase = mContext.getString(R.string.issue_event_renamed,
-                        getUserLoginWithBotSuffix(user), rename.from(), rename.to());
+                        getUserLoginWithBotSuffix(user),
+                        rename != null && rename.from() != null ? rename.from()
+                                : mContext.getString(R.string.deleted),
+                        rename != null && rename.to() != null ? rename.to()
+                                : mContext.getString(R.string.deleted));
             }
             case Transferred -> textResId = R.string.issue_event_transferred;
             case ReviewRequested, ReviewRequestRemoved -> {
@@ -235,7 +252,10 @@ class EventViewHolder
                 }
             }
             case ReviewDismissed -> {
-                String dismissalCommitId = event.dismissedReview().dismissalCommitId();
+                // 222：dismissedReview() 可空，直接 dismissalCommitId() 即 NPE；
+                // 缺失时按无提交分支处理。
+                String dismissalCommitId = event.dismissedReview() != null
+                        ? event.dismissedReview().dismissalCommitId() : null;
                 if (dismissalCommitId != null) {
                     commitId = dismissalCommitId;
                     commitUrl = null;
@@ -296,7 +316,9 @@ class EventViewHolder
             }
         }
         boolean isCommitInDifferentRepo = !mRepoOwner.equals(commitRepoOwner) || !mRepoName.equals(commitRepoName);
-        String shortCommitSha = commitId.substring(0, 7);
+        // 221：commitId 可短于 7 位，直接 substring(0, 7) 即越界；
+        // 与 EventAdapter 117 号同款，改走 shortSha（可空/短串安全）。
+        String shortCommitSha = StringUtils.shortSha(commitId);
         String commitText = isCommitInDifferentRepo
                 ? commitRepoOwner + "/" + commitRepoName + "@" + shortCommitSha
                 : shortCommitSha;
@@ -322,20 +344,33 @@ class EventViewHolder
         if (pos < 0) {
             return;
         }
+        // 222：source() / source.issue() 可空，直接解引用即 NPE；
+        // 缺失时删掉占位符，不留字面 "[source]"。
+        if (referenceSource == null || referenceSource.issue() == null) {
+            text.delete(pos, pos + 8);
+            return;
+        }
         final Issue source = referenceSource.issue();
         var sourceRepoOwnerAndName = ApiHelpers.extractRepoOwnerAndNameFromIssue(source);
         String sourceRepoOwner = sourceRepoOwnerAndName.first;
         String sourceRepoName = sourceRepoOwnerAndName.second;
         boolean isSourceInDifferentRepo = !mRepoOwner.equals(sourceRepoOwner) || !mRepoName.equals(sourceRepoName);
+        // 222：source.number() 为 Integer 可空，缺失时用“已删除”占位（不拼 "null"）。
+        String sourceNumber = source.number() != null
+                ? String.valueOf(source.number()) : mContext.getString(R.string.deleted);
         String sourceLabel = isSourceInDifferentRepo
-                ? sourceRepoOwner + "/" + sourceRepoName + "#" + source.number()
-                : "#" + source.number();
+                ? sourceRepoOwner + "/" + sourceRepoName + "#" + sourceNumber
+                : "#" + sourceNumber;
         text.replace(pos, pos + 8, sourceLabel);
-        text.setSpan(new IntentSpan(mContext, context ->
-                source.pullRequest() != null
-                        ? PullRequestActivity.makeIntent(context, sourceRepoOwner, sourceRepoName, source.number())
-                        : IssueActivity.makeIntent(context, sourceRepoOwner, sourceRepoName, source.number())
-        ), pos, pos + sourceLabel.length(), 0);
+        // 222：number 缺失时只显示文案，不挂跳转（makeIntent 的 number 为 int，
+        // 传 null 即拆箱 NPE）。
+        if (source.number() != null) {
+            text.setSpan(new IntentSpan(mContext, context ->
+                    source.pullRequest() != null
+                            ? PullRequestActivity.makeIntent(context, sourceRepoOwner, sourceRepoName, source.number())
+                            : IssueActivity.makeIntent(context, sourceRepoOwner, sourceRepoName, source.number())
+            ), pos, pos + sourceLabel.length(), 0);
+        }
     }
 
     private void replaceTimePlaceholder(SpannableStringBuilder text, Date time) {

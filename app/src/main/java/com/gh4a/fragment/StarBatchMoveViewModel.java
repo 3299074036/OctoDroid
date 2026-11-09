@@ -238,6 +238,31 @@ public class StarBatchMoveViewModel extends ViewModel {
                 R.string.assign_official_success, R.string.assign_official_failed, null);
     }
 
+    /**
+     * 215：移组框里新建列表后批量移入：建列表走单发操作，成功后在
+     * ViewModel 内直接启动批量移动，整条链挂 ViewModel 的 disposable，
+     * 旋转不中断；建列表失败时按单发失败 Toast（与旧对话框内失败提示
+     * 同款文案），不启动移动。
+     */
+    public void createListAndStartMove(List<String> repos, String name, boolean isPrivate) {
+        if (repos == null || repos.isEmpty()) {
+            return;
+        }
+        mSingleOpRunId++;
+        final long runId = mSingleOpRunId;
+        final List<String> reposCopy = new ArrayList<>(repos);
+        mSingleOpDisposables.add(UserListsGraphQL.createList(name, isPrivate)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(list -> {
+                    List<String> ids = new ArrayList<>();
+                    ids.add(list.id);
+                    start(reposCopy, ids);
+                }, error -> mSingleOp.setValue(
+                        new SingleOp(runId, false,
+                                R.string.star_list_create_failed, null))));
+    }
+
     private void moveNext(List<String> repos, int index, List<String> targetIds,
             List<String> failed, long runId) {
         if (runId != mRunId) {

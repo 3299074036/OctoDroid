@@ -29,7 +29,7 @@ import android.widget.TextView;
 
 import com.gh4a.R;
 import com.gh4a.model.Trend;
-import com.vdurmont.emoji.EmojiParser;
+import com.gh4a.utils.StringUtils;
 
 public class TrendAdapter extends RootAdapter<Trend, TrendAdapter.ViewHolder> {
     private final @StringRes int mStarsTemplate;
@@ -64,8 +64,10 @@ public class TrendAdapter extends RootAdapter<Trend, TrendAdapter.ViewHolder> {
             holder.tvRank.setText("");
         }
 
-        String owner = trend.getRepoOwner();
-        String name = trend.getRepoName();
+        // 201：owner/name 可空；append(null) 写出 "null"，owner.length()
+        // 直接 NPE；空值按 "" 计。
+        String owner = trend.getRepoOwner() != null ? trend.getRepoOwner() : "";
+        String name = trend.getRepoName() != null ? trend.getRepoName() : "";
 
         SpannableStringBuilder title = new SpannableStringBuilder();
         title.append(owner).append("/").append(name);
@@ -73,7 +75,7 @@ public class TrendAdapter extends RootAdapter<Trend, TrendAdapter.ViewHolder> {
         holder.tvTitle.setText(title);
 
         String desc = trend.getDescription();
-        holder.tvDesc.setText(desc != null ? EmojiParser.parseToUnicode(desc) : null);
+        holder.tvDesc.setText(desc != null ? StringUtils.parseEmojiToUnicode(desc) : null);
 
         String lang = trend.getLanguage();
         if (TextUtils.isEmpty(lang)) {

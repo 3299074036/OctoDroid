@@ -285,7 +285,8 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
 
         content.append("<html><head><title>");
         if (title != null) {
-            content.append(title);
+            // 152：标题含仓库/文件名，进 HTML 前转义（与 WebViewerActivity 同款）。
+            content.append(TextUtils.htmlEncode(title));
         }
         content.append("</title>");
         HtmlUtils.writeCssInclude(content, "diff", cssTheme);
@@ -295,7 +296,8 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
         int highlightInsertPos = content.length();
         content.append(">");
         if (title != null) {
-            content.append("<h2>").append(title).append("</h2>");
+            // 152：标题含仓库/文件名，进 HTML 前转义（与 WebViewerActivity 同款）。
+            content.append("<h2>").append(TextUtils.htmlEncode(title)).append("</h2>");
         }
         content.append("<pre>");
 
@@ -369,16 +371,17 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
                     content.append("</div>").append(comment.bodyHtml());
 
                     Reactions reactions = comment.reactions();
-                    if (reactions.totalCount() > 0) {
+                    // 187：reactions 及各计数均可空；缺失按 0 计，不画反应行。
+                    if (reactions != null && ApiHelpers.orZero(reactions.totalCount()) > 0) {
                         content.append("<div>");
-                        appendReactionSpan(content, reactions.plusOne(), REACTION_PLUS_ONE_PATH);
-                        appendReactionSpan(content, reactions.minusOne(), REACTION_MINUS_ONE_PATH);
-                        appendReactionSpan(content, reactions.confused(), REACTION_CONFUSED_PATH);
-                        appendReactionSpan(content, reactions.heart(), REACTION_HEART_PATH);
-                        appendReactionSpan(content, reactions.laugh(), REACTION_LAUGH_PATH);
-                        appendReactionSpan(content, reactions.hooray(), REACTION_HOORAY_PATH);
-                        appendReactionSpan(content, reactions.rocket(), REACTION_ROCKET_PATH);
-                        appendReactionSpan(content, reactions.eyes(), REACTION_EYES_PATH);
+                        appendReactionSpan(content, ApiHelpers.orZero(reactions.plusOne()), REACTION_PLUS_ONE_PATH);
+                        appendReactionSpan(content, ApiHelpers.orZero(reactions.minusOne()), REACTION_MINUS_ONE_PATH);
+                        appendReactionSpan(content, ApiHelpers.orZero(reactions.confused()), REACTION_CONFUSED_PATH);
+                        appendReactionSpan(content, ApiHelpers.orZero(reactions.heart()), REACTION_HEART_PATH);
+                        appendReactionSpan(content, ApiHelpers.orZero(reactions.laugh()), REACTION_LAUGH_PATH);
+                        appendReactionSpan(content, ApiHelpers.orZero(reactions.hooray()), REACTION_HOORAY_PATH);
+                        appendReactionSpan(content, ApiHelpers.orZero(reactions.rocket()), REACTION_ROCKET_PATH);
+                        appendReactionSpan(content, ApiHelpers.orZero(reactions.eyes()), REACTION_EYES_PATH);
                         content.append("</div>");
                     }
                     content.append("</div>");
@@ -447,6 +450,11 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
         mCommentsByPosition.clear();
         for (PositionalCommentBase comment : comments) {
             if (!TextUtils.equals(comment.path(), mPath)) {
+                continue;
+            }
+            // 157：position() 为可空 Integer，未锚定到 diff 行的评论即 null；
+            // 与 getCommentsSingle 三处过滤一致，入口直接跳过。
+            if (comment.position() == null) {
                 continue;
             }
             int position = comment.position();

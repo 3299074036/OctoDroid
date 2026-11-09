@@ -78,8 +78,16 @@ public class ContentListFragment extends ListDataBaseFragment<Content> implement
             return 1;
         } else {
             // Alphabetic order otherwise
-            // return o1.compareTo(o2);
-            return lhs.name().compareTo(rhs.name());
+            // 158：name() 可空，空安全比较（null 排前面）。
+            String lhsName = lhs.name();
+            String rhsName = rhs.name();
+            if (lhsName == null) {
+                return rhsName == null ? 0 : -1;
+            }
+            if (rhsName == null) {
+                return 1;
+            }
+            return lhsName.compareTo(rhsName);
         }
     };
 
@@ -95,12 +103,25 @@ public class ContentListFragment extends ListDataBaseFragment<Content> implement
             new ActivityResultContracts.StartActivityForResult(),
             result -> {
                 if (result.getResultCode() == Activity.RESULT_OK) {
+                    // 158：getData()/commit 均可空；commit 为 null 时链路末端
+                    // RepositoryActivity.onCommitSelectedAsBase 的 commit.sha() 即 NPE。
+                    if (result.getData() == null) {
+                        return;
+                    }
                     final Commit commit = result.getData().getParcelableExtra("commit");
+                    if (commit == null) {
+                        return;
+                    }
                     // This function is invoked while the fragment is transitioned to the STARTED
                     // state, which means the fragment manager is busy at that point. Since the
                     // callback ultimately ends up doing fragment transactions as well, defer it
                     // to a later point.
-                    mHandler.post(() -> mCallback.onCommitSelected(commit));
+                    // 158：延迟回调可能打到已 detach 的旧 activity，执行时再判 mCallback。
+                    mHandler.post(() -> {
+                        if (mCallback != null) {
+                            mCallback.onCommitSelected(commit);
+                        }
+                    });
                 }
             });
 
@@ -162,11 +183,26 @@ public class ContentListFragment extends ListDataBaseFragment<Content> implement
     }
 
     @Override
+    public void onDetach() {
+        super.onDetach();
+        // 158：detach 后 mCallback 指向旧 activity，延迟回调不再打过去。
+        mCallback = null;
+    }
+
+    @Override
     public void onCreateContextMenu(ContextMenu menu, View v, ContextMenu.ContextMenuInfo menuInfo) {
         super.onCreateContextMenu(menu, v, menuInfo);
 
+        // 158：menuInfo 可空；header 行 position 对应 index -1，getItemFromAdapterPosition
+        // 返回 null；detach 后 mCallback 为 null。任一缺失直接不建菜单。
+        if (!(menuInfo instanceof ContextMenuAwareRecyclerView.RecyclerContextMenuInfo)) {
+            return;
+        }
         var info = (ContextMenuAwareRecyclerView.RecyclerContextMenuInfo) menuInfo;
         Content contents = mAdapter.getItemFromAdapterPosition(info.position);
+        if (contents == null || mCallback == null) {
+            return;
+        }
         Set<String> subModules = mCallback.getSubModuleNames(this);
         boolean isSubModule = subModules.contains(contents.name());
 
@@ -178,13 +214,21 @@ public class ContentListFragment extends ListDataBaseFragment<Content> implement
 
     @Override
     public boolean onContextItemSelected(MenuItem item) {
+        // 158：menuInfo 可空、position 可为负（header 行）或越界，getItemFromAdapterPosition
+        // 可返回 null；任一缺失直接返回。
+        if (!(item.getMenuInfo() instanceof ContextMenuAwareRecyclerView.RecyclerContextMenuInfo)) {
+            return false;
+        }
         ContextMenuAwareRecyclerView.RecyclerContextMenuInfo info =
                 (ContextMenuAwareRecyclerView.RecyclerContextMenuInfo) item.getMenuInfo();
-        if (info.position >= mAdapter.getItemCount()) {
+        if (info.position < 0 || info.position >= mAdapter.getItemCount()) {
             return false;
         }
 
         Content contents = mAdapter.getItemFromAdapterPosition(info.position);
+        if (contents == null) {
+            return false;
+        }
 
         switch (item.getItemId()) {
             case R.id.history:
@@ -218,7 +262,10 @@ public class ContentListFragment extends ListDataBaseFragment<Content> implement
     @Override
     protected void onAddData(RootAdapter<Content, ?> adapter, List<Content> data) {
         super.onAddData(adapter, data);
-        mCallback.onContentsLoaded(this, data);
+        // 158：onDetach 已清空 mCallback 时不再回调旧 activity。
+        if (mCallback != null) {
+            mCallback.onContentsLoaded(this, data);
+        }
     }
 
     @Override

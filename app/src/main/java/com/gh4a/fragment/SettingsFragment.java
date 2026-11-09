@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
 import androidx.annotation.NonNull;
@@ -148,6 +149,12 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
         getPreferenceManager().setSharedPreferencesName(PREF_NAME);
+        // 228：已中毒的 prefs（错型备份恢复后 language/accent 存成非 String）
+        // 会让 ListPreference 绑定时 getString 抛 ClassCastException、设置页
+        // 打不开；建偏好屏之前先清掉错型值（回默认），与冷启动三处的防御
+        // 读取配套。
+        repairMistypedStringPref(KEY_LANGUAGE);
+        repairMistypedStringPref(KEY_ACCENT_COLOR);
         android.os.Bundle args = getArguments();
         int xmlRes = args != null ? args.getInt(ARG_XML_RES, R.xml.settings) : R.xml.settings;
         addPreferencesFromResource(xmlRes);
@@ -247,6 +254,15 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         Preference downloadManagerPref = findPreference(KEY_DOWNLOAD_MANAGER);
         if (downloadManagerPref != null) {
             downloadManagerPref.setOnPreferenceClickListener(this);
+        }
+    }
+
+    /** 228：值不是 String 时删键（回默认值），防止 ListPreference 绑定崩溃。 */
+    private void repairMistypedStringPref(String key) {
+        SharedPreferences prefs = getPreferenceManager().getSharedPreferences();
+        Object raw = prefs.getAll().get(key);
+        if (raw != null && !(raw instanceof String)) {
+            prefs.edit().remove(key).apply();
         }
     }
 

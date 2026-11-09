@@ -208,7 +208,8 @@ public class ContentListContainerFragment extends Fragment implements
         mCacheFragment.addToCache(fragment.getPath(), contents);
         if (TextUtils.isEmpty(fragment.getPath())) {
             for (Content content : contents) {
-                if (content.type() == ContentType.File && content.name().equals(".gitmodules")) {
+                // 167：content.name() 可空，常量在左才安全。
+                if (content.type() == ContentType.File && ".gitmodules".equals(content.name())) {
                     loadModuleMap();
                     break;
                 }
@@ -219,7 +220,8 @@ public class ContentListContainerFragment extends Fragment implements
             boolean found = false;
             for (Content content : contents) {
                 // initial_path 指向文件时也直接打开（之前仅匹配目录）
-                if (content.path().equals(itemToLoad)
+                // 167：content.path() 可空，itemToLoad 非空、放左边才安全。
+                if (itemToLoad.equals(content.path())
                         && (content.type() == ContentType.Directory
                                 || content.type() == ContentType.File)) {
                     onTreeSelected(content);
@@ -250,7 +252,9 @@ public class ContentListContainerFragment extends Fragment implements
         } else if (mGitModuleMap != null && mGitModuleMap.get(path) != null) {
             String[] userRepo = mGitModuleMap.get(path).split("/");
             startActivity(RepositoryActivity.makeIntent(getActivity(), userRepo[0], userRepo[1]));
-        } else {
+        } else if (mRepository != null && mRepository.owner() != null
+                && mRepository.owner().login() != null && mRepository.name() != null) {
+            // 167：mRepository/owner()/login() 链可空，缺失时无法打开文件查看器、直接跳过。
             startActivity(FileViewerActivity.makeIntent(getActivity(),
                     mRepository.owner().login(), mRepository.name(),
                     getCurrentRef(), content.path()));
@@ -318,6 +322,16 @@ public class ContentListContainerFragment extends Fragment implements
 
     private void loadModuleMap() {
         RepositoryContentService service = ServiceFactory.get(RepositoryContentService.class, false);
+        // 167：mRepository/owner()/login()/name() 链可空，缺失时无法请求 .gitmodules；
+        // getActivity() 在订阅时可能已为 null（fragment 已 detach），先取到 activity 再绑定。
+        if (mRepository == null || mRepository.owner() == null
+                || mRepository.owner().login() == null || mRepository.name() == null) {
+            return;
+        }
+        BaseActivity activity = getActivity() instanceof BaseActivity ? (BaseActivity) getActivity() : null;
+        if (activity == null) {
+            return;
+        }
         String repoOwner = mRepository.owner().login();
         String repoName = mRepository.name();
 
@@ -334,7 +348,7 @@ public class ContentListContainerFragment extends Fragment implements
                     if (mContentListFragment != null) {
                         mContentListFragment.onSubModuleNamesChanged(getSubModuleNames(mContentListFragment));
                     }
-                }, ((BaseActivity) getActivity())::handleLoadFailure);
+                }, activity::handleLoadFailure);
     }
 
     private Optional<Map<String, String>> parseModuleMap(Optional<byte[]> inputOpt) {

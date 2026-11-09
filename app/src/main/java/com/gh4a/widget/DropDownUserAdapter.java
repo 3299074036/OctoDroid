@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public class DropDownUserAdapter extends BaseAdapter implements Filterable {
@@ -127,8 +128,9 @@ public class DropDownUserAdapter extends BaseAdapter implements Filterable {
                 results.values = new ArrayList<>();
                 results.count = 0;
             } else {
+                // 172：toLowerCase() 默认 locale，土耳其语下 I/ı 映射失配致 @ 提及过滤失效。
                 final String constraintString =
-                        constraint.toString().substring(1).toLowerCase();
+                        constraint.toString().substring(1).toLowerCase(Locale.ROOT);
 
                 final ArrayList<User> values;
                 synchronized (mLock) {
@@ -141,7 +143,8 @@ public class DropDownUserAdapter extends BaseAdapter implements Filterable {
                 for (int i = 0; i < count; i++) {
                     final User user = values.get(i);
                     final String value = ApiHelpers.getUserLogin(mContext, user);
-                    final String valueText = value.toLowerCase();
+                    // 172：同上，比较两侧须用同一 locale。
+                    final String valueText = value.toLowerCase(Locale.ROOT);
 
                     if (valueText.startsWith(constraintString)) {
                         newValues.add(user);

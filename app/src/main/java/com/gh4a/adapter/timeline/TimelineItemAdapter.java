@@ -13,6 +13,7 @@ import android.view.ViewGroup;
 import com.gh4a.R;
 import com.gh4a.adapter.RootAdapter;
 import com.gh4a.model.TimelineItem;
+import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.HttpImageGetter;
 import com.gh4a.utils.IntentUtils;
 import com.gh4a.widget.ReactionBar;
@@ -62,10 +63,10 @@ public class TimelineItemAdapter
         Single<List<Reaction>> loadReactionDetails(GitHubCommentBase comment, boolean bypassCache);
         Single<Reaction> addReaction(GitHubCommentBase comment, String content);
         Single<Boolean> deleteReaction(GitHubCommentBase comment, long reactionId);
-        /** Translate (or toggle back) the body HTML of a comment/review, keyed by its id. */
-        void translateBody(long id, String bodyHtml);
-        /** Translated body HTML for the id, or null when the original should be shown. */
-        @Nullable String getTranslatedBody(long id);
+        /** Translate (or toggle back) the body HTML of a comment/review, keyed by its type + id. */
+        void translateBody(String type, long id, String bodyHtml);
+        /** Translated body HTML for the type + id, or null when the original should be shown. */
+        @Nullable String getTranslatedBody(String type, long id);
     }
 
     private final ReviewViewHolder.Callback mReviewCallback = new ReviewViewHolder.Callback() {
@@ -81,12 +82,13 @@ public class TimelineItemAdapter
 
         @Override
         public void translateBody(long id, String bodyHtml) {
-            mActionCallback.translateBody(id, bodyHtml);
+            // 244：ReviewViewHolder 只绑 review，类型定死为 "review"。
+            mActionCallback.translateBody("review", id, bodyHtml);
         }
 
         @Override
         public String getTranslatedBody(long id) {
-            return mActionCallback.getTranslatedBody(id);
+            return mActionCallback.getTranslatedBody("review", id);
         }
     };
 
@@ -123,6 +125,10 @@ public class TimelineItemAdapter
                     return true;
 
                 case R.id.share:
+                    // 155：htmlUrl() 可空，Uri.parse(null) 即 NPE；无链接时不分享。
+                    if (comment.comment().htmlUrl() == null) {
+                        return true;
+                    }
                     IntentUtils.share(mContext, mActionCallback.getShareSubject(comment.comment()),
                             Uri.parse(comment.comment().htmlUrl()));
                     return true;
@@ -156,7 +162,8 @@ public class TimelineItemAdapter
 
         @Override
         public String getTranslatedBodyHtml(long commentId) {
-            return mActionCallback.getTranslatedBody(commentId);
+            // 244：CommentViewHolder 只绑评论，类型定死为 "comment"。
+            return mActionCallback.getTranslatedBody("comment", commentId);
         }
     };
 
@@ -313,14 +320,16 @@ public class TimelineItemAdapter
             return false;
         }
         if (item instanceof TimelineItem.Diff) {
-            return ((TimelineItem.Diff) item).getInitialComment().id() != replyCommentId;
+            // 166：getInitialComment().id() 为可空 Long，与 long 比较会拆箱。
+            // getInitialComment() 缺失时抛 AssertionError，永不返回 null。
+            return ApiHelpers.orZero(((TimelineItem.Diff) item).getInitialComment().id()) != replyCommentId;
         }
         if (item instanceof TimelineItem.TimelineComment) {
             TimelineItem.TimelineComment tc = (TimelineItem.TimelineComment) item;
             if (tc.getParentDiff() != null) {
-                return tc.getParentDiff().getInitialComment().id() != replyCommentId;
+                return ApiHelpers.orZero(tc.getParentDiff().getInitialComment().id()) != replyCommentId;
             }
-            return tc.comment().id() != replyCommentId;
+            return ApiHelpers.orZero(tc.comment().id()) != replyCommentId;
         }
         return false;
     }

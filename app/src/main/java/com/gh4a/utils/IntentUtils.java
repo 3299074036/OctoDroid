@@ -154,7 +154,14 @@ public class IntentUtils {
                     .setDefaultColorSchemeParams(colorParams)
                     .build();
             i.intent.setPackage(pkg);
-            i.launchUrl(activity, uri);
+            try {
+                i.launchUrl(activity, uri);
+            } catch (ActivityNotFoundException e) {
+                // 259：缓存的包在进程存活期间被卸载/禁用时 setPackage 指向
+                // 不存在的包即抛异常；清缓存后回落系统浏览器，下次重新解析。
+                CustomTabsHelper.clearPackageNameCache();
+                launchBrowser(activity, uri);
+            }
         } else {
             launchBrowser(activity, uri);
         }

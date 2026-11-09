@@ -29,6 +29,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -62,6 +63,22 @@ import java.util.Set;
  */
 public class SettingsBackupManager {
     private static final String TAG = "SettingsBackupManager";
+
+    /**
+     * 228：冷启动三键的期望类型（备份 "t" 字段不可信，手写/篡改备份可
+     * 把 theme 写成 string、language/accent 写成 int）。恢复时错型键
+     * 直接拒绝写入，否则下次冷启动 getInt/getString 即 ClassCastException
+     * 且每次启动都崩，只能清数据。读取方另有同款防御（Gh4Application
+     * :105/:222、BaseActivity:548），双保险。
+     */
+    private static final Map<String, String> EXPECTED_TYPES;
+    static {
+        Map<String, String> types = new HashMap<>();
+        types.put(SettingsFragment.KEY_THEME, "i");
+        types.put(SettingsFragment.KEY_LANGUAGE, "s");
+        types.put(SettingsFragment.KEY_ACCENT_COLOR, "s");
+        EXPECTED_TYPES = Collections.unmodifiableMap(types);
+    }
     private static final int BACKUP_VERSION = 1;
     /** 备份文件读取上限 16MB：防止恶意超大文件撑爆内存 (L-9) */
     private static final long MAX_BACKUP_SIZE = 16L * 1024 * 1024;
@@ -245,6 +262,13 @@ public class SettingsBackupManager {
             }
             JSONObject holder = json.getJSONObject(key);
             String type = holder.getString("t");
+            // 228：见 EXPECTED_TYPES——错型键拒绝写入。
+            String expectedType = EXPECTED_TYPES.get(key);
+            if (expectedType != null && !expectedType.equals(type)) {
+                Log.w(TAG, "Backup restore: dropping key " + key
+                        + " with wrong type " + type + ", expected " + expectedType);
+                continue;
+            }
             switch (type) {
                 case "s": editor.putString(key, holder.getString("v")); break;
                 case "i": editor.putInt(key, holder.getInt("v")); break;
@@ -260,6 +284,14 @@ public class SettingsBackupManager {
                     editor.putStringSet(key, set);
                     break;
                 }
+                // 236：未知类型值此前静默丢弃（switch 无 default），而
+                // applyBackup 仍返回 true、UI 报恢复成功——是唯一一条既不
+                // 报错、也不留日志的丢数据路径；打 Log.w（与 :243 白名单
+                // 丢弃同款），恢复后可从日志发现丢了哪项。
+                default:
+                    Log.w(TAG, "Backup restore: dropping key " + key
+                            + " with unknown type " + type);
+                    break;
             }
         }
         editor.apply();

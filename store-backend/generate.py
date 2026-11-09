@@ -583,9 +583,13 @@ def write_json(path, payload):
 
 
 def select_installable_release(releases):
-    """Release 选择（补丁规则，方案 §2.1；2026-11-08 修正）：按 releases[]
-    最新在前扫描，取首个带 ≥1 可安装附件的 release，不论 prerelease
+    """Release 选择（补丁规则，方案 §2.1；2026-11-08 修正）：按 publishAt
+    降序扫描，取首个带 ≥1 可安装附件的 release，不论 prerelease
     标记；没有则返回 None（调用方丢弃该仓并记日志）。
+    271：hiwiki 不保证 releases[] 按最新在前排列，顺序一变就会取到旧版
+    当最新版——先按 publishAt 降序排过再选（normalize_date 归一化后
+    按串比较即按时间比较；缺失/非法日期按最旧处理，排最后；稳定排序，
+    同日期保持原顺序）。
     不跳 prerelease 的原因：hiwiki 载荷里没有草稿（草稿在 GitHub 上不
     公开），载荷里的每个 release 都是公开版；旧生成器 latest_release
     也只跳草稿、不跳 prerelease。2026-11-08 run #30 的教训：58 个仓
@@ -595,9 +599,10 @@ def select_installable_release(releases):
     新版有——只取最新版会漏掉最新版无安装包、旧版有的仓。
     返回 (release, platforms, downloads, installable) 或 None。
     """
-    for rel in releases or []:
-        if not isinstance(rel, dict):
-            continue
+    ordered = sorted((rel for rel in releases or [] if isinstance(rel, dict)),
+                     key=lambda rel: normalize_date(rel.get("publishAt") or ""),
+                     reverse=True)
+    for rel in ordered:
         platforms = set()
         downloads = 0
         installable = 0
