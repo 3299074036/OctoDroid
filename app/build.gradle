@@ -5,6 +5,7 @@ repositories {
 }
 
 apply plugin: 'com.android.application'
+apply plugin: 'jacoco'
 
 def clientProps = new Properties()
 def clientPropFile = new File('client.properties')
@@ -85,9 +86,250 @@ android {
         buildConfig true
     }
 
+    jacoco {
+        version = "0.8.11"
+    }
+
+    // 2026-11-10 A 组：Robolectric 读 app 资源（字符串、布局、manifest）
+    // 全靠它——AGP 默认不生成 test_config，关着时测试拿到的 Application
+    // 是 org.robolectric.default，getString、Dialog、ContextCompat
+    // registerReceiver（DYNAMIC_RECEIVER 权限）全部失败。这是测试配置，
+    // 不影响打包产物。
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
+
     dependenciesInfo {
         includeInApk false
         includeInBundle false
+    }
+}
+
+// 2026-11-10 F2：单测 worker 默认堆 512m，450+ 个 Robolectric 测试在
+// 同一 worker JVM 里跑会 OOM（Test worker / Finalizer 线程），
+// 全量跑在 TranslationSettingsFragmentTest 末段抛 OutOfMemoryError。
+// 只改测试配置，不动生产代码。
+tasks.withType(Test).configureEach {
+    maxHeapSize = "2g"
+}
+
+// 2026-11-10：testDebugUnitTest 已改走离线插桩（见下），on-the-fly agent
+// 已关，testDebugUnitTest.exec 不再产生；本任务改读 testOffline.exec。
+// 另去掉 dependsOn：单测有 2 个故意失败，test 任务失败会导致报告被跳过，
+// 用法与 jacocoOfflineTestReport 相同——先跑测试，再单独跑本任务。
+task jacocoTestReport(type: JacocoReport) {
+    reports {
+        html.required = true
+        xml.required = true
+    }
+
+    def fileFilter = [
+        '**/R.class',
+        '**/R$*.class',
+        '**/BuildConfig.*',
+        '**/Manifest*.*',
+        '**/*Test*.*',
+        'android/**/*.*'
+    ]
+    def debugTree = fileTree(dir: "${buildDir}/intermediates/javac/debug", excludes: fileFilter)
+    def kotlinDebugTree = fileTree(dir: "${buildDir}/tmp/kotlin-classes/debug", excludes: fileFilter)
+    def mainSrc = "${projectDir}/src/main/java"
+
+    sourceDirectories.setFrom(files([mainSrc]))
+    classDirectories.setFrom(files([debugTree], [kotlinDebugTree]))
+    executionData.setFrom(fileTree(dir: "${buildDir}", includes: [
+        "jacoco/testOffline.exec"
+    ]))
+}
+
+// =====================================================================
+// 2026-11-10 JaCoCo 离线插桩（offline instrumentation）
+// 背景：Robolectric 沙箱类加载器绕过 on-the-fly javaagent，探针采不到，
+// 试点 utils/ 行覆盖率只有 4.1%（量测失效）。离线插桩把探针直接写进
+// class 文件，沙箱加载的类照样带探针。
+// 只改测试配置，不动生产代码；插桩产物只进 build/，不提交、不影响打包。
+// 关键：单测 classpath 上的生产类不是 classes 目录，而是 AGP 打包的
+// runtime jar（intermediates/runtime_app_classes_jar/.../classes.jar），
+// 所以插桩对象是这个 jar（InstrumentTask 原生支持 jar，见
+// Instrumenter.instrumentAll → instrumentZip），不是 classes 目录。
+// 流程：打 jar → 备份原始 jar（并解压一份供报告用）→ 插桩到独立
+// destdir → 拷回 jar 位置 → 跑测试（RT 在 JVM 退出时写 exec）→
+// 恢复原始 jar → 出报告。
+// 关键坑（试点踩过）：InstrumentTask 的 destdir 绝不能等于源目录，
+// 否则 class 文件会被截成 0 字节（640 个文件遭殃）。
+// 并发说明：Robolectric 每沙箱一份 RT 实例，退出时并发 dump；JaCoCo
+// FileOutput 用文件锁串行化写盘，配 append=true 各份数据累加不丢。
+// 自愈：classes 目录从未被碰过，jar 是 build/ 再生产物；拷回/恢复后
+// jar 任务的输入快照变化，下次构建会自动重打原始 jar，不会污染 APK。
+// =====================================================================
+
+configurations {
+    jacocoOfflineRuntime
+}
+
+dependencies {
+    // 插桩后的类在运行时要找 org.jacoco.agent.rt.RT，必须在测试 classpath 上
+    jacocoOfflineRuntime 'org.jacoco:org.jacoco.agent:0.8.11:runtime'
+}
+
+// 单测实际加载的 production classes jar
+def offlineJacocoRuntimeJar = file("${buildDir}/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntimeJar/classes.jar")
+def offlineJacocoInstrumentedDir = file("${buildDir}/jacoco-offline/instrumented")
+def offlineJacocoBackupJar = file("${buildDir}/jacoco-offline/original-jar/classes.jar")
+def offlineJacocoBackupDir = file("${buildDir}/jacoco-offline/original-classes")
+def offlineJacocoExecFile = file("${buildDir}/jacoco/testOffline.exec")
+def offlineJacocoMarker = file("${buildDir}/jacoco-offline/.instrumented")
+
+// 检查 jar 里第一个 class 条目是否含 JaCoCo 探针（防重插桩；jar 是 zip，
+// 不能直接对原始字节搜字符串，必须解一个条目看）
+boolean offlineJacocoJarHasProbe(File jarFile) {
+    if (!jarFile.exists()) return false
+    def zf = new java.util.zip.ZipFile(jarFile)
+    try {
+        def entries = zf.entries()
+        while (entries.hasMoreElements()) {
+            def e = entries.nextElement()
+            if (e.name.endsWith('.class')) {
+                def bytes = zf.getInputStream(e).bytes
+                return new String(bytes, 'ISO-8859-1').contains('$jacocoData')
+            }
+        }
+        return false
+    } finally {
+        zf.close()
+    }
+}
+
+task instrumentDebugClassesForOfflineJacoco {
+    description = '离线插桩 debug runtime jar（独立 destdir + 拷回），供 testDebugUnitTest 采 Robolectric 覆盖率'
+    dependsOn 'bundleDebugClassesToRuntimeJar', 'compileDebugUnitTestJavaWithJavac'
+    // 每次都跑：保证插桩源永远是本次构建的原始 jar
+    outputs.upToDateWhen { false }
+    doLast {
+        // 1. 防重插桩：jar 里若已有探针（上次拷回后未恢复），先从备份恢复原始 jar
+        if (offlineJacocoJarHasProbe(offlineJacocoRuntimeJar)) {
+            if (!offlineJacocoBackupJar.exists()) {
+                throw new GradleException('runtime jar 已含 JaCoCo 探针，但备份不存在，拒绝重插桩（防 class 损坏）: ' + offlineJacocoBackupJar)
+            }
+            logger.lifecycle('runtime jar 含旧探针，先从备份恢复原始 jar')
+            copy {
+                from offlineJacocoBackupJar
+                into offlineJacocoRuntimeJar.parentFile
+            }
+        }
+        // 2. 备份原始 jar（每次刷新），并解压一份供报告用（报告要读原始 class）
+        delete offlineJacocoBackupJar.parentFile
+        copy {
+            from offlineJacocoRuntimeJar
+            into offlineJacocoBackupJar.parentFile
+        }
+        delete offlineJacocoBackupDir
+        copy {
+            from zipTree(offlineJacocoBackupJar)
+            into offlineJacocoBackupDir
+        }
+        // 3. 插桩到独立 destdir（destdir 绝不能等于源目录！）
+        delete offlineJacocoInstrumentedDir
+        offlineJacocoInstrumentedDir.mkdirs()
+        ant.taskdef(name: 'jacocoInstrument',
+                classname: 'org.jacoco.ant.InstrumentTask',
+                classpath: configurations.jacocoAnt.asPath)
+        ant.jacocoInstrument(destdir: offlineJacocoInstrumentedDir) {
+            // 注意：includes 必须是 String；传 List 会被 toString 成 "[classes.jar]",
+            // 一个文件都匹配不到，插桩静默产出 0 个文件（已踩过）
+            fileset(dir: offlineJacocoRuntimeJar.parentFile, includes: 'classes.jar')
+        }
+        // 4. 拷回：插桩版 jar 覆盖 runtime jar，测试跑插桩版
+        def instrumentedJar = file("${offlineJacocoInstrumentedDir}/classes.jar")
+        if (!instrumentedJar.exists()) {
+            throw new GradleException('插桩未产出 ' + instrumentedJar + '：请检查 fileset 是否匹配到 classes.jar')
+        }
+        copy {
+            from instrumentedJar
+            into offlineJacocoRuntimeJar.parentFile
+        }
+        offlineJacocoMarker.text = "instrumented ${new Date()}\n"
+        logger.lifecycle("离线插桩完成：${offlineJacocoRuntimeJar} 已换成插桩版，原始版在 ${offlineJacocoBackupJar}")
+    }
+}
+
+task restoreDebugClassesAfterOfflineJacoco {
+    description = '把备份的原始 jar 拷回 runtime jar 位置（插桩后恢复，构建产物不受影响）'
+    doLast {
+        if (offlineJacocoMarker.exists() && offlineJacocoBackupJar.exists()) {
+            copy {
+                from offlineJacocoBackupJar
+                into offlineJacocoRuntimeJar.parentFile
+            }
+            delete offlineJacocoMarker
+            logger.lifecycle('已恢复原始 runtime jar')
+        }
+    }
+}
+
+// AGP 8.13.1 在项目 afterEvaluate 之后才创建 testDebugUnitTest（实测：
+// 新 worktree 里 afterEvaluate 回调执行时任务尚不存在，直接 tasks.named
+// 报 "Task not found"，整个配置失败；且 matching+configureEach 在任务
+// 创建时就跑，会被 AGP 随后对 classpath 的赋值覆盖，RT 进不了测试
+// classpath（NoClassDefFoundError Offline）。改在 projectsEvaluated
+// 里配：此时 AGP 已建好任务并配完 classpath，再 += 才留得住。
+gradle.projectsEvaluated {
+    tasks.named('testDebugUnitTest', Test).configure {
+    dependsOn instrumentDebugClassesForOfflineJacoco
+    finalizedBy restoreDebugClassesAfterOfflineJacoco
+    // 插桩会改写 runtime jar，但 Gradle 认为 jar 是上游任务的输出，其内容
+    // 变化不会使 test 任务过期（已实测：拷回后 test 仍 UP-TO-DATE）；
+    // 把每次插桩都刷新的 marker 声明为输入，强制 test 跟随插桩重跑
+    inputs.file(offlineJacocoMarker)
+    // 插桩版已带探针：关掉 on-the-fly javaagent，避免双重插桩
+    jacoco {
+        enabled = false
+    }
+    // RT 必须在测试运行时 classpath 上，否则插桩类初始化报 NoClassDefFoundError
+    classpath += configurations.jacocoOfflineRuntime
+    // 离线 RT 在 JVM 退出时 dump；destfile 用绝对路径，append 让各沙箱数据累加
+    systemProperty 'jacoco-agent.destfile', offlineJacocoExecFile.absolutePath
+    systemProperty 'jacoco-agent.append', 'true'
+    }
+}
+
+task jacocoOfflineTestReport(type: JacocoReport) {
+    description = '离线插桩的覆盖率报告（exec 来自 RT 退出时 dump，class 用备份的原始版）'
+    // 不 dependsOn testDebugUnitTest：单测有 2 个故意失败，test 任务会失败，
+    // 挂 dependsOn 会导致报告永远被跳过。用法：先跑 testDebugUnitTest，
+    // 再单独跑本任务。
+    reports {
+        html.required = true
+        xml.required = true
+        csv.required = true
+    }
+
+    def fileFilter = [
+        '**/R.class',
+        '**/R$*.class',
+        '**/BuildConfig.*',
+        '**/Manifest*.*',
+        '**/*Test*.*',
+        'android/**/*.*'
+    ]
+    // 用备份的原始 class 出报告：报告按 class id 匹配 exec 数据，
+    // id 是插桩时按原始字节算的，读插桩版 class 会对不上
+    def backupTree = fileTree(dir: offlineJacocoBackupDir, excludes: fileFilter)
+    def mainSrc = "${projectDir}/src/main/java"
+
+    sourceDirectories.setFrom(files([mainSrc]))
+    classDirectories.setFrom(files([backupTree]))
+    executionData.setFrom(files([offlineJacocoExecFile]))
+
+    doFirst {
+        if (!offlineJacocoExecFile.exists()) {
+            throw new GradleException('未找到 ' + offlineJacocoExecFile + '：请先跑 :app:testDebugUnitTest（离线插桩版）再出报告')
+        }
+        if (!offlineJacocoBackupDir.exists()) {
+            throw new GradleException('未找到原始 class 备份 ' + offlineJacocoBackupDir + '：请先跑 :app:testDebugUnitTest（离线插桩版）再出报告')
+        }
     }
 }
 
@@ -141,6 +383,11 @@ dependencies {
     implementation 'com.github.ilyagulya:traceur:update-rx-2.2.1'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.robolectric:robolectric:4.16'
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+    // 2026-11-10 A 组：Robolectric 4.16 已移除
+    // RuntimeEnvironment.getApplicationContext()，测试取 Context 统一走
+    // ApplicationProvider（B/C 组也在用，缺它全树测试无法编译）。
+    testImplementation 'androidx.test:core:1.5.0'
 }
 
 def props = new Properties()
@@ -163,3 +410,4 @@ if (props.containsKey('STORE_FILE')
     throw new GradleException('signing.properties not found or incomplete, '
             + 'refusing to build release without a signing config')
 }
+

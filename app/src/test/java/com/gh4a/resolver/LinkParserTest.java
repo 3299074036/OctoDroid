@@ -854,6 +854,140 @@ public class LinkParserTest {
         assertRedirectsToBrowser(parseLink("https://user-images.githubusercontent.com/30041551/an_image.png"));
     }
 
+    // ---------- Additional coverage (2026-11-14, resolver/worker/db batch) ----------
+
+    @Test
+    public void searchLink_repoType_opensSearchActivity() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/search?q=octodroid&type=Repositories");
+        assertRedirectsTo(result, com.gh4a.activities.SearchActivity.class);
+    }
+
+    @Test
+    public void searchLink_userType_opensSearchActivity() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/search?q=octo&type=Users");
+        assertRedirectsTo(result, com.gh4a.activities.SearchActivity.class);
+    }
+
+    @Test
+    public void searchLink_codeType_opensSearchActivity() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/search?q=foo&type=Code");
+        assertRedirectsTo(result, com.gh4a.activities.SearchActivity.class);
+    }
+
+    @Test
+    public void searchLink_noType_defaultsToRepoSearch() {
+        LinkParser.ParseResult result = parseLink("https://github.com/search?q=foo");
+        assertRedirectsTo(result, com.gh4a.activities.SearchActivity.class);
+    }
+
+    @Test
+    public void searchLink_unknownType_opensBrowser() {
+        assertRedirectsToBrowser(parseLink("https://github.com/search?q=foo&type=Issues"));
+    }
+
+    @Test
+    public void searchLink_noQuery_stillOpensSearchActivity() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/search?type=Repositories");
+        assertRedirectsTo(result, com.gh4a.activities.SearchActivity.class);
+    }
+
+    @Test
+    public void releaseLink_withNumericId_opensReleaseActivity() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/slapperwan/gh4a/releases/12345");
+        assertRedirectsTo(result, com.gh4a.activities.ReleaseInfoActivity.class);
+    }
+
+    @Test
+    public void releaseLink_withTagButNoTagName_opensReleaseListActivity() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/slapperwan/gh4a/releases/tag");
+        assertRedirectsTo(result, com.gh4a.activities.ReleaseListActivity.class);
+    }
+
+    @Test
+    public void releaseLink_withNonNumericId_opensReleaseListActivity() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/slapperwan/gh4a/releases/abc");
+        assertRedirectsTo(result, com.gh4a.activities.ReleaseListActivity.class);
+    }
+
+    @Test
+    public void pullRequestLink_withZeroNumber_opensBrowser() {
+        assertRedirectsToBrowser(parseLink("https://github.com/slapperwan/gh4a/pull/0"));
+    }
+
+    @Test
+    public void pullRequestLink_withNegativeNumber_opensBrowser() {
+        assertRedirectsToBrowser(parseLink("https://github.com/slapperwan/gh4a/pull/-3"));
+    }
+
+    @Test
+    public void pullRequestLink_withDiffMarkerNoLines_loadsDiff() {
+        LinkParser.ParseResult result = parseLink(
+                "https://github.com/slapperwan/gh4a/pull/665#diff-abcdef");
+        assertThat("Parse result must not be null", result, is(notNullValue()));
+        PullRequestDiffLoadTask task = assertThatLoadTaskIs(result.loadTask,
+                PullRequestDiffLoadTask.class);
+        assertThat(task.mDiffId.fileHash, is("abcdef"));
+        assertThat(task.mDiffId.startLine, is(-1));
+    }
+
+    @Test
+    public void pullRequestLink_withDiffMarkerBadRange_opensPullRequest() {
+        assertRedirectsTo(parseLink(
+                "https://github.com/slapperwan/gh4a/pull/665#diff-abcdefLx-Ly"),
+                com.gh4a.activities.PullRequestActivity.class);
+    }
+
+    @Test
+    public void commitLink_withDiffMarkerBadNumber_opensCommitActivity() {
+        LinkParser.ParseResult result = parseLink(
+                "https://github.com/slapperwan/gh4a/commit/commitSha#diff-abcdefLx");
+        assertRedirectsTo(result, com.gh4a.activities.CommitActivity.class);
+    }
+
+    @Test
+    public void compareLink_withBlankBase_opensBrowser() {
+        assertRedirectsToBrowser(
+                parseLink("https://github.com/slapperwan/gh4a/compare/...v4.2.1"));
+    }
+
+    @Test
+    public void compareLink_withTooManyParts_opensBrowser() {
+        assertRedirectsToBrowser(parseLink(
+                "https://github.com/slapperwan/gh4a/compare/a...b...c"));
+    }
+
+    @Test
+    public void issueLink_blankId_opensIssueList() {
+        // https://github.com/o/r/issues/ has no 4th segment, so id is null.
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/slapperwan/gh4a/issues");
+        assertRedirectsTo(result, com.gh4a.activities.IssueListActivity.class);
+    }
+
+    @Test
+    public void organizationLink_repositoriesSubPage_loadsRepos() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/orgs/someorg/repositories");
+        assertThat("Parse result must not be null", result, is(notNullValue()));
+        UserReposLoadTask task = assertThatLoadTaskIs(result.loadTask, UserReposLoadTask.class);
+        assertThat(task.mUserLogin, is("someorg"));
+    }
+
+    @Test
+    public void blobLink_withRFragment_loadsFileViewer() {
+        LinkParser.ParseResult result = parseLink(
+                "https://github.com/slapperwan/gh4a/blob/master/README.md#L10");
+        assertThat("Parse result must not be null", result, is(notNullValue()));
+        assertThatLoadTaskIs(result.loadTask, RefPathDisambiguationTask.class);
+    }
+
     private LinkParser.ParseResult parseLink(String uriString) {
         return LinkParser.parseUri(mActivity, Uri.parse(uriString), null);
     }
@@ -879,4 +1013,35 @@ public class LinkParserTest {
         //noinspection unchecked
         return (T) loadTask;
     }
+
+    @Test
+    public void compareLink_noId_opensBrowser() {
+        assertRedirectsToBrowser(parseLink("https://github.com/slapperwan/gh4a/compare"));
+    }
+
+    @Test
+    public void compareLink_withBlankHead_opensBrowser() {
+        // trailing "%20" decodes to a blank second ref part.
+        assertRedirectsToBrowser(
+                parseLink("https://github.com/slapperwan/gh4a/compare/v4.2.0...%20"));
+    }
+
+    @Test
+    public void releaseLink_treeRefsTags_parsesRefFromThirdPart() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/slapperwan/gh4a/tree/refs/tags/v1.0");
+        RefPathDisambiguationTask loadTask =
+                assertThatLoadTaskIs(result.loadTask, RefPathDisambiguationTask.class);
+        assertThat("Ref and path is incorrect", loadTask.mRefAndPath, is("refs/tags/v1.0"));
+    }
+
+    @Test
+    public void releaseLink_treeSixPartsNotRefs_parsesRefFromThirdPart() {
+        LinkParser.ParseResult result =
+                parseLink("https://github.com/slapperwan/gh4a/tree/foo/bar/baz/qux");
+        RefPathDisambiguationTask loadTask =
+                assertThatLoadTaskIs(result.loadTask, RefPathDisambiguationTask.class);
+        assertThat("Ref and path is incorrect", loadTask.mRefAndPath, is("foo/bar/baz/qux"));
+    }
+
 }
