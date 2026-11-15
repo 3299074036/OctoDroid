@@ -60,7 +60,6 @@ import com.gh4a.utils.IntentUtils;
 import com.gh4a.utils.RxUtils;
 import com.gh4a.utils.StringUtils;
 import com.gh4a.utils.UiUtils;
-import com.gh4a.utils.UserListDialogHelper;
 import com.gh4a.widget.IntentSpan;
 import com.meisolsson.githubsdk.model.Permissions;
 import com.meisolsson.githubsdk.model.Repository;
@@ -85,7 +84,8 @@ import io.reactivex.Single;
 import retrofit2.Response;
 
 public class RepositoryFragment extends LoadingFragmentBase implements
-        OverviewRow.OnIconClickListener {
+        OverviewRow.OnIconClickListener, CreateListNameDialogFragment.Callback,
+        AssignListsDialogFragment.Callback {
     public static RepositoryFragment newInstance(Repository repository, String ref) {
         RepositoryFragment f = new RepositoryFragment();
 
@@ -351,8 +351,8 @@ public class RepositoryFragment extends LoadingFragmentBase implements
 
         Permissions permissions = mRepository.permissions();
         updateClickableLabel(R.id.tv_collaborators_label, permissions != null && permissions.push());
-        updateClickableLabel(R.id.tv_wiki_label, mRepository.hasWiki());
-        updateClickableLabel(R.id.tv_discussions_label, mRepository.hasDiscussions());
+        updateClickableLabel(R.id.tv_wiki_label, Boolean.TRUE.equals(mRepository.hasWiki()));
+        updateClickableLabel(R.id.tv_discussions_label, Boolean.TRUE.equals(mRepository.hasDiscussions()));
     }
 
     @NonNull
@@ -802,6 +802,87 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         mMoveViewModel.fetchStarLists(login);
     }
 
+    // ---- 239：Star 分组对话框（DialogFragment 版）----
+    // 对话框回调经父 Fragment 接口回落，按 tag 区分调用点；取消时把待处理
+    // 的 StarListsResult 标已消费（126 语义）；框开着旋转由 FragmentManager
+    // 恢复，onStarListsLoaded 里见已恢复的框直接返回，不重弹。
+    private static final String TAG_ASSIGN_REPO = "assign_repo";
+    private static final String TAG_CREATE_REPO = "repo_create";
+    private static final String TAG_CREATE_REPO_AFTER_ASSIGN = "repo_create_after_assign";
+
+    private StarBatchMoveViewModel.StarListsResult mPendingStarListsResult;
+
+    private ArrayList<String> listNames(List<UserListsGraphQL.UserList> lists) {
+        ArrayList<String> names = new ArrayList<>();
+        if (lists != null) {
+            for (UserListsGraphQL.UserList list : lists) {
+                names.add(list.name);
+            }
+        }
+        return names;
+    }
+
+    private ArrayList<String> listIds(List<UserListsGraphQL.UserList> lists) {
+        ArrayList<String> ids = new ArrayList<>();
+        if (lists != null) {
+            for (UserListsGraphQL.UserList list : lists) {
+                ids.add(list.id);
+            }
+        }
+        return ids;
+    }
+
+    @Override
+    public void onCreateListNameConfirmed(String tag, String passthrough,
+            String name, boolean isPrivate) {
+        if (mMoveViewModel == null) {
+            return;
+        }
+        if (TAG_CREATE_REPO.equals(tag)) {
+            mMoveViewModel.markStarListsConsumed(mPendingStarListsResult);
+            mMoveViewModel.createListAndAssign(passthrough, name, isPrivate);
+        } else if (TAG_CREATE_REPO_AFTER_ASSIGN.equals(tag)) {
+            mMoveViewModel.createListAndAssign(passthrough, name, isPrivate);
+        }
+    }
+
+    @Override
+    public void onCreateListNameCancelled(String tag, String passthrough) {
+        if (mMoveViewModel != null) {
+            mMoveViewModel.markStarListsConsumed(mPendingStarListsResult);
+        }
+    }
+
+    @Override
+    public void onAssignListsConfirmed(String tag, String repoFullName,
+            List<String> selectedIds) {
+        if (mMoveViewModel == null) {
+            return;
+        }
+        mMoveViewModel.markStarListsConsumed(mPendingStarListsResult);
+        assignStarredRepoToLists(repoFullName, selectedIds);
+    }
+
+    @Override
+    public void onAssignListsCreateNew(String tag, String repoFullName) {
+        if (mMoveViewModel == null) {
+            return;
+        }
+        mMoveViewModel.markStarListsConsumed(mPendingStarListsResult);
+        CreateListNameDialogFragment.show(getParentFragmentManager(),
+                TAG_CREATE_REPO_AFTER_ASSIGN,
+                listNames(mPendingStarListsResult != null
+                        ? mPendingStarListsResult.lists : null),
+                repoFullName);
+    }
+
+    @Override
+    public void onAssignListsCancelled(String tag, String repoFullName) {
+        if (mMoveViewModel != null) {
+            mMoveViewModel.markStarListsConsumed(mPendingStarListsResult);
+        }
+    }
+
     /**
      * 0.2.4（126）：拉官方列表的结果——ViewModel 里的 Rx 链旋转不中断，
      * 重建后按结果弹框。结果在用户真正操作（确定／新建）时才标记已消费，
@@ -827,31 +908,22 @@ public class RepositoryFragment extends LoadingFragmentBase implements
         final List<UserListsGraphQL.UserList> lists =
                 result.lists != null ? result.lists : new ArrayList<>();
         final String fullName = mRepository.fullName();
-        if (lists.isEmpty()) {
-            // 无任何列表：直接新建（新建后归属到新列表）。
-            UserListDialogHelper.showCreateListNameDialog(getActivity(),
-                    lists, (name, isPrivate) -> {
-                        mMoveViewModel.markStarListsConsumed(result);
-                        mMoveViewModel.createListAndAssign(fullName, name, isPrivate);
-                    }, () -> mMoveViewModel.markStarListsConsumed(result));
+        mPendingStarListsResult = result;
+        if (getParentFragmentManager().findFragmentByTag(TAG_ASSIGN_REPO) != null
+                || getParentFragmentManager().findFragmentByTag(TAG_CREATE_REPO) != null
+                || getParentFragmentManager().findFragmentByTag(TAG_CREATE_REPO_AFTER_ASSIGN) != null) {
+            // 239：框开着旋转已由 FragmentManager 恢复重弹，不再重弹一个。
             return;
         }
-        UserListDialogHelper.showAssignDialog(getActivity(), lists,
-                new HashSet<>(),
-                getString(R.string.star_list_star_subtitle, fullName),
-                () -> {
-                    mMoveViewModel.markStarListsConsumed(result);
-                    UserListDialogHelper.showCreateListNameDialog(getActivity(),
-                            lists, (name, isPrivate) ->
-                                    mMoveViewModel.createListAndAssign(
-                                            fullName, name, isPrivate),
-                            () -> mMoveViewModel.markStarListsConsumed(result));
-                },
-                selectedIds -> {
-                    mMoveViewModel.markStarListsConsumed(result);
-                    assignStarredRepoToLists(fullName, selectedIds);
-                },
-                () -> mMoveViewModel.markStarListsConsumed(result));
+        if (lists.isEmpty()) {
+            // 无任何列表：直接新建（新建后归属到新列表）。
+            CreateListNameDialogFragment.show(getParentFragmentManager(), TAG_CREATE_REPO,
+                    listNames(lists), fullName);
+            return;
+        }
+        AssignListsDialogFragment.show(getParentFragmentManager(), TAG_ASSIGN_REPO,
+                listNames(lists), listIds(lists), new HashSet<>(),
+                getString(R.string.star_list_star_subtitle, fullName), fullName);
     }
 
     /**

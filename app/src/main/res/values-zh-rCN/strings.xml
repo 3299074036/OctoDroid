@@ -938,11 +938,6 @@
         <item quantity="other">作者更新于 %1$d 天前</item>
     </plurals>
     <string name="store_newest_updated_today">作者更新于今天</string>
-    <string name="store_submit">提交仓库</string>
-    <string name="store_submit_url_label">GitHub 仓库地址</string>
-    <string name="store_submit_url_hint">https://github.com/owner/repo</string>
-    <string name="store_submit_preview">Release 预览</string>
-    <string name="store_submit_note">单机版无站方人工审核：预览通过后直接加入本地关注，定期同步该仓库的 Release 信息。</string>
     <string name="store_fetch_preview">拉取最新 Release 预览</string>
     <string name="store_follow">加入本地关注</string>
     <string name="store_followed">已关注</string>

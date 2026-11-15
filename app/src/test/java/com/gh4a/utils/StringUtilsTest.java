@@ -262,9 +262,9 @@ public class StringUtilsTest {
                 StringUtils.toBase64(StringUtils.fromBase64("aGVsbG8gd29ybGQ=")));
     }
 
-    @Test(expected = NullPointerException.class)
-    public void toBase64_nullThrows() {
-        StringUtils.toBase64(null);
+    @Test
+    public void toBase64_nullReturnsEmpty() {
+        assertEquals("", StringUtils.toBase64(null));
     }
 
     @Test
@@ -330,8 +330,8 @@ public class StringUtilsTest {
         assertEquals("plain", StringUtils.unescapeCommonHtmlEntities("plain"));
     }
 
-    @Test(expected = NullPointerException.class)
-    public void unescapeCommonHtmlEntities_nullThrows() {
-        StringUtils.unescapeCommonHtmlEntities(null);
+    @Test
+    public void unescapeCommonHtmlEntities_nullReturnsNull() {
+        assertNull(StringUtils.unescapeCommonHtmlEntities(null));
     }
 }

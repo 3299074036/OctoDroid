@@ -49,16 +49,11 @@ public class GitHubFeedTest {
     }
 
     @Test
-    public void parse_emptyFeed_failsWholeParse() throws Exception {
-        // The @ElementList is required: a feed with zero entries fails the
-        // whole parse instead of yielding an empty list (observation, see
-        // report — GitHub feeds are rarely empty in practice).
-        try {
-            persister().read(GitHubFeed.class, "<feed></feed>");
-            org.junit.Assert.fail("expected ValueRequiredException for empty feed");
-        } catch (org.simpleframework.xml.core.ValueRequiredException expected) {
-            assertTrue(expected.getMessage().contains("entry"));
-        }
+    public void parse_emptyFeed_yieldsNoEntries() throws Exception {
+        // T-121：@ElementList required=false，零条目 feed 解析成功、不再 abort 整篇；
+        // 无 entry 时字段保持 null（由 SingleFactory.loadFeed 兜底为空列表）。
+        GitHubFeed feed = persister().read(GitHubFeed.class, "<feed></feed>");
+        assertTrue(feed.feed == null || feed.feed.isEmpty());
     }
 
     @Test

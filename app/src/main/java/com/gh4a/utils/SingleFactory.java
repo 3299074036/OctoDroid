@@ -119,7 +119,7 @@ public class SingleFactory {
 
             for (int i = 0; i < count; i++) {
                 NotificationHolder item = new NotificationHolder(notifsForRepo.get(i));
-                // 154/115：unread() 为可空 Boolean，缺字段按未读计（与 orFalse 同款默认）。
+                // 154/115：unread() 为可空 Boolean，缺字段按已读计（与 orFalse 同款默认）。
                 hasUnread |= Boolean.TRUE.equals(item.notification.unread());
                 item.setIsLastRepositoryNotification(i == count - 1);
                 result.add(item);
@@ -148,7 +148,7 @@ public class SingleFactory {
         return RetrofitHelper.feedService()
                 .getFeed(relativeUrl)
                 .map(ApiHelpers::throwOnFailure)
-                .map(feed -> feed.feed);
+                .map(feed -> feed.feed != null ? feed.feed : Collections.emptyList());
     }
 
     public static Single<List<Trend>> loadTrends(String type) {

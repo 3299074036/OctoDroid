@@ -34,12 +34,12 @@ import com.gh4a.R;
 import com.gh4a.utils.translate.Translator;
 import org.mockito.MockedStatic;
 import org.robolectric.Shadows;
-import org.robolectric.shadows.ShadowAlertDialog;
 import org.robolectric.shadows.ShadowToast;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Answers.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.withSettings;
@@ -190,14 +190,7 @@ public class TranslationSettingsFragmentTest {
         m.invoke(f);
     }
 
-    private static boolean warnedFlag(TranslationSettingsFragment f) throws Exception {
-        java.lang.reflect.Field field =
-                TranslationSettingsFragment.class.getDeclaredField("mPlainFallbackWarned");
-        field.setAccessible(true);
-        return (Boolean) field.get(f);
-    }
-
-    private static MockedStatic<TranslationManager> mockTranslationManager() {
+        private static MockedStatic<TranslationManager> mockTranslationManager() {
         MockedStatic<TranslationManager> mocked =
                 mockStatic(TranslationManager.class, withSettings().defaultAnswer(CALLS_REAL_METHODS));
         mocked.when(() -> TranslationManager.apiKeyPrefKey(anyString()))
@@ -303,6 +296,9 @@ public class TranslationSettingsFragmentTest {
             mocked.when(() -> TranslationManager.setApiKey(any(), anyString(), anyString()))
                     .thenReturn(true);
             TranslationSettingsFragment f = attach();
+            // verify() counts the stubbing call above as an invocation, so
+            // clear the record before exercising the listener.
+            mocked.clearInvocations();
             EditTextPreference key = keyPref(f);
             assertTrue(key.getOnPreferenceChangeListener()
                     .onPreferenceChange(key, "new-key"));
@@ -330,6 +326,9 @@ public class TranslationSettingsFragmentTest {
             mocked.when(() -> TranslationManager.setApiSecret(any(), anyString(), anyString()))
                     .thenReturn(true);
             TranslationSettingsFragment f = attach();
+            // verify() counts the stubbing call above as an invocation, so
+            // clear the record before exercising the listener.
+            mocked.clearInvocations();
             EditTextPreference secret = secretPref(f);
             assertTrue(secret.getOnPreferenceChangeListener()
                     .onPreferenceChange(secret, "new-secret"));
@@ -468,38 +467,190 @@ public class TranslationSettingsFragmentTest {
     }
 
     @Test
-    public void warnIfPlainFallback_showsDialogOnceWhenFallbackActive() throws Exception {
-        // 回落 flag 在 getSecurePrefs 初始化时才确定；attach 过程中的
-        // updateVisibility 会触发它，故 attach 后再读 flag 判定。
-        TranslationSettingsFragment f = attach();
-        boolean fallbackActive = Gh4Application.get().isSecurePrefsPlainFallback();
-        if (fallbackActive) {
-            assertTrue(warnedFlag(f));
-            assertEquals(1, ShadowAlertDialog.getShownDialogs().size());
-            invokePrivate(f, "warnIfPlainFallback");
-            assertEquals(1, ShadowAlertDialog.getShownDialogs().size());
-        } else {
-            assertFalse(warnedFlag(f));
-        }
-    }
-
-    @Test
-    public void warnIfPlainFallback_alreadyWarnedIsNoop() throws Exception {
-        TranslationSettingsFragment f = attach();
-        java.lang.reflect.Field field =
-                TranslationSettingsFragment.class.getDeclaredField("mPlainFallbackWarned");
-        field.setAccessible(true);
-        field.set(f, true);
-        invokePrivate(f, "warnIfPlainFallback");
-        assertTrue(warnedFlag(f));
-    }
-
-    @Test
     public void privateMethods_nullContextReturnEarly() throws Exception {
         TranslationSettingsFragment f = attach();
         detach(f);
         invokePrivate(f, "migrateCredentials");
-        invokePrivate(f, "warnIfPlainFallback");
         invokePrivate(f, "testTranslation");
+    }
+
+    // ---------- §6 close-out: residuals ----------
+
+    /** findPreference returns null for the settings keys: covers the
+     *  null arms of onCreatePreferences / updateVisibility. */
+    public static class NullPrefFragment extends TranslationSettingsFragment {
+        @Override
+        public <T extends Preference> T findPreference(CharSequence key) {
+            String k = String.valueOf(key);
+            if (TranslationManager.KEY_PROVIDER.equals(k)
+                    || TranslationManager.KEY_API_KEY.equals(k)
+                    || TranslationManager.KEY_API_SECRET.equals(k)
+                    || "translation_test".equals(k)) {
+                return null;
+            }
+            return super.findPreference(key);
+        }
+    }
+
+    private NullPrefFragment attachNullPref() {
+        NullPrefFragment f = new NullPrefFragment();
+        mActivity.getSupportFragmentManager().beginTransaction().add(f, "test")
+                .setMaxLifecycle(f, Lifecycle.State.CREATED).commitNow();
+        return f;
+    }
+
+    @Test
+    public void onCreatePreferences_missingPrefs_skipsAllNullChecks() throws Exception {
+        NullPrefFragment f = attachNullPref();
+        assertNotNull(f.getPreferenceScreen());
+        assertNull(f.findPreference(TranslationManager.KEY_PROVIDER));
+        assertNull(f.findPreference(TranslationManager.KEY_API_KEY));
+        assertNull(f.findPreference(TranslationManager.KEY_API_SECRET));
+        assertNull(f.findPreference("translation_test"));
+        assertNull(keyPref(f));
+        assertNull(secretPref(f));
+    }
+
+    @Test
+    public void keyChangeListener_nullValue_usesEmptyString() throws Exception {
+        try (MockedStatic<TranslationManager> mocked = mockTranslationManager()) {
+            mocked.when(() -> TranslationManager.setApiKey(any(), anyString(), anyString()))
+                    .thenReturn(true);
+            TranslationSettingsFragment f = attach();
+            // verify() counts the stubbing call above as an invocation, so
+            // clear the record before exercising the listener.
+            mocked.clearInvocations();
+            EditTextPreference key = keyPref(f);
+            assertTrue(key.getOnPreferenceChangeListener()
+                    .onPreferenceChange(key, null));
+            mocked.verify(() -> TranslationManager.setApiKey(any(), anyString(), eq("")));
+        }
+    }
+
+    @Test
+    public void secretChangeListener_nullValue_usesEmptyString() throws Exception {
+        try (MockedStatic<TranslationManager> mocked = mockTranslationManager()) {
+            mocked.when(() -> TranslationManager.setApiSecret(any(), anyString(), anyString()))
+                    .thenReturn(true);
+            TranslationSettingsFragment f = attach();
+            // verify() counts the stubbing call above as an invocation, so
+            // clear the record before exercising the listener.
+            mocked.clearInvocations();
+            EditTextPreference secret = secretPref(f);
+            assertTrue(secret.getOnPreferenceChangeListener()
+                    .onPreferenceChange(secret, null));
+            mocked.verify(() -> TranslationManager.setApiSecret(any(), anyString(), eq("")));
+        }
+    }
+
+    /** The Background task inside testTranslation: (appContext, okFormat, failFormat). */
+    private static java.lang.reflect.Method testTranslationLambda() throws Exception {
+        for (java.lang.reflect.Method m :
+                TranslationSettingsFragment.class.getDeclaredMethods()) {
+            if (!m.getName().startsWith("lambda$testTranslation$")) {
+                continue;
+            }
+            Class<?>[] params = m.getParameterTypes();
+            if (params.length == 3 && params[0] == android.content.Context.class
+                    && params[1] == String.class && params[2] == String.class) {
+                m.setAccessible(true);
+                return m;
+            }
+        }
+        throw new NoSuchMethodException("testTranslation background lambda");
+    }
+
+    @Test
+    public void testTranslation_backgroundTask_successShowsOkToast() throws Exception {
+        try (MockedStatic<TranslationManager> mocked = mockTranslationManager()) {
+            Translator translator = mock(Translator.class);
+            when(translator.translate(anyString(), anyString(), anyString()))
+                    .thenReturn("你好，世界！");
+            mocked.when(() -> TranslationManager.createTranslator(any()))
+                    .thenReturn(translator);
+            mocked.when(() -> TranslationManager.getTargetLanguage(any()))
+                    .thenReturn("zh");
+            TranslationSettingsFragment f = attach();
+            Context ctx = ApplicationProvider.getApplicationContext();
+            String okFormat = ctx.getString(R.string.translation_test_ok);
+            java.lang.reflect.Method lambda = testTranslationLambda();
+            // Run the Background task synchronously on the test thread, where
+            // the static mock applies (it is thread-scoped, so the real
+            // background thread would bypass it).
+            lambda.invoke(f, ctx.getApplicationContext(), okFormat,
+                    ctx.getString(R.string.translation_test_fail));
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            assertEquals(String.format(okFormat, "你好，世界！"),
+                    ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void testTranslation_backgroundTask_translatorThrows_showsFailToast() throws Exception {
+        try (MockedStatic<TranslationManager> mocked = mockTranslationManager()) {
+            mocked.when(() -> TranslationManager.createTranslator(any()))
+                    .thenThrow(new RuntimeException("no key configured"));
+            TranslationSettingsFragment f = attach();
+            Context ctx = ApplicationProvider.getApplicationContext();
+            String failFormat = ctx.getString(R.string.translation_test_fail);
+            java.lang.reflect.Method lambda = testTranslationLambda();
+            lambda.invoke(f, ctx.getApplicationContext(),
+                    ctx.getString(R.string.translation_test_ok), failFormat);
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            assertEquals(String.format(failFormat, "no key configured"),
+                    ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void testTranslation_backgroundTask_translatorThrowsNullMessage_showsExceptionToast()
+            throws Exception {
+        try (MockedStatic<TranslationManager> mocked = mockTranslationManager()) {
+            mocked.when(() -> TranslationManager.createTranslator(any()))
+                    .thenThrow(new RuntimeException((String) null));
+            TranslationSettingsFragment f = attach();
+            Context ctx = ApplicationProvider.getApplicationContext();
+            String failFormat = ctx.getString(R.string.translation_test_fail);
+            java.lang.reflect.Method lambda = testTranslationLambda();
+            lambda.invoke(f, ctx.getApplicationContext(),
+                    ctx.getString(R.string.translation_test_ok), failFormat);
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            assertEquals(String.format(failFormat, "java.lang.RuntimeException"),
+                    ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void testTranslation_backgroundTask_detachedFragment_skipsToast() throws Exception {
+        try (MockedStatic<TranslationManager> mocked = mockTranslationManager()) {
+            Translator translator = mock(Translator.class);
+            when(translator.translate(anyString(), anyString(), anyString()))
+                    .thenReturn("你好，世界！");
+            mocked.when(() -> TranslationManager.createTranslator(any()))
+                    .thenReturn(translator);
+            mocked.when(() -> TranslationManager.getTargetLanguage(any()))
+                    .thenReturn("zh");
+            TranslationSettingsFragment f = attach();
+            Context ctx = ApplicationProvider.getApplicationContext();
+            java.lang.reflect.Method lambda = testTranslationLambda();
+            lambda.invoke(f, ctx.getApplicationContext(),
+                    ctx.getString(R.string.translation_test_ok),
+                    ctx.getString(R.string.translation_test_fail));
+            String before = ShadowToast.getTextOfLatestToast();
+            detach(f);
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            assertEquals(before, ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void updateVisibility_nullContext_usesEmptyText() throws Exception {
+        TranslationSettingsFragment f = attach();
+        assertNotNull(keyPref(f));
+        assertNotNull(secretPref(f));
+        detach(f);
+        invokePrivate(f, "updateVisibility");
+        assertEquals("", keyPref(f).getText());
+        assertEquals("", secretPref(f).getText());
     }
 }

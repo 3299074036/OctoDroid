@@ -35,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -144,40 +145,31 @@ public class PullRequestReviewDiffLoadTaskTest {
     }
 
     @Test
-    public void getSingle_commentWithNullId_throwsNpe_TRES() {
-        // T-RES-01 (suspected production defect): the first() predicate
-        // does `c.id() == diffCommentId`, unboxing a nullable Long.
-        // A comment without an id crashes the whole resolution instead of
-        // being skipped.
+    public void getSingle_commentWithNullId_returnsEmpty() {
+        // T-013 修复后：无 id 的评论直接跳过，不再拆箱 NPE，返回空结果。
         FragmentActivity activity = activity();
         Fixture f = new Fixture();
         f.stubComments(reviewComment(null, 99L));
         try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
             f.install(mocked);
-            try {
-                task(activity, "12345").getSingle().blockingGet();
-                fail("expected NullPointerException for null comment id");
-            } catch (NullPointerException e) {
-                // current behaviour, see T-RES-01
-            }
+            assertFalse(task(activity, "12345").getSingle().blockingGet().isPresent());
+            verify(f.reviewService, never())
+                    .getReview(anyString(), anyString(), anyLong(), anyLong());
         }
     }
 
     @Test
-    public void getSingle_commentWithNullReviewId_throwsNpe_TRES() {
-        // T-RES-02 (suspected production defect): `long reviewId =
-        // comment.pullRequestReviewId()` unboxes a nullable Long.
+    public void getSingle_commentWithNullReviewId_returnsEmpty() {
+        // T-014 修复后：pullRequestReviewId 为 null 的评论直接返回空结果
+        //（无 review 可跳，不是错误页），且不调用 getReview。
         FragmentActivity activity = activity();
         Fixture f = new Fixture();
         f.stubComments(reviewComment(12345L, null));
         try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
             f.install(mocked);
-            try {
-                task(activity, "12345").getSingle().blockingGet();
-                fail("expected NullPointerException for null review id");
-            } catch (NullPointerException e) {
-                // current behaviour, see T-RES-02
-            }
+            assertFalse(task(activity, "12345").getSingle().blockingGet().isPresent());
+            verify(f.reviewService, never())
+                    .getReview(anyString(), anyString(), anyLong(), anyLong());
         }
     }
 

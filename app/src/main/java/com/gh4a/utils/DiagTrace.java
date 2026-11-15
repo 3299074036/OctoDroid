@@ -162,34 +162,42 @@ public class DiagTrace {
     /** 合成导出文件：诊断追踪 + 主题追踪 + 崩溃历史（最新 3 条）。 */
     public static synchronized File exportFile(Context context) {
         // 70：同 log()，try-with-resources（旧写法中途抛异常时不 close）。
-        File out = new File(context.getCacheDir(), EXPORT_NAME);
-        try (BufferedWriter w = new BufferedWriter(new FileWriter(out))) {
-            w.write("=== 诊断追踪 diag-trace.txt ===");
-            w.newLine();
-            File trace = traceFile(context);
-            w.write(trace.exists() ? readCapped(trace, (int) MAX_BYTES) : "(无)");
-            w.newLine();
-            w.write("=== 主题追踪 theme-trace.txt ===");
-            w.newLine();
-            File theme = ThemeTrace.file(context);
-            w.write(theme.exists() ? readCapped(theme, 256 * 1024) : "(无)");
-            w.newLine();
-            File d = dir(context);
-            File[] crashes = d.listFiles((dir1, name) ->
-                    name.startsWith("crash-") && name.endsWith(".txt"));
-            List<File> list = crashes != null
-                    ? new ArrayList<>(Arrays.asList(crashes)) : new ArrayList<>();
-            Collections.sort(list, (a, b) ->
-                    Long.compare(b.lastModified(), a.lastModified()));
-            w.write("=== 崩溃历史（最新 " + list.size() + " 条） ===");
-            w.newLine();
-            for (File c : list) {
-                w.write("--- " + c.getName() + " ---");
+        // T-008：导出文件放进 diag-export 子目录——file_paths.xml 把导出文件
+        // 本身配成 FileProvider 根时，文件路径 == 根路径，getUriForFile 会
+        // substring 越界；子目录做根则文件恒在根之下。
+        // T-022：getCacheDir() 也在 try 内，任何失败都返回 null 而不是逃逸。
+        try {
+            File dir = new File(context.getCacheDir(), "diag-export");
+            dir.mkdirs();
+            File out = new File(dir, EXPORT_NAME);
+            try (BufferedWriter w = new BufferedWriter(new FileWriter(out))) {
+                w.write("=== 诊断追踪 diag-trace.txt ===");
                 w.newLine();
-                w.write(readCapped(c, CRASH_COPY_CAP));
+                File trace = traceFile(context);
+                w.write(trace.exists() ? readCapped(trace, (int) MAX_BYTES) : "(无)");
                 w.newLine();
+                w.write("=== 主题追踪 theme-trace.txt ===");
+                w.newLine();
+                File theme = ThemeTrace.file(context);
+                w.write(theme.exists() ? readCapped(theme, 256 * 1024) : "(无)");
+                w.newLine();
+                File d = dir(context);
+                File[] crashes = d.listFiles((dir1, name) ->
+                        name.startsWith("crash-") && name.endsWith(".txt"));
+                List<File> list = crashes != null
+                        ? new ArrayList<>(Arrays.asList(crashes)) : new ArrayList<>();
+                Collections.sort(list, (a, b) ->
+                        Long.compare(b.lastModified(), a.lastModified()));
+                w.write("=== 崩溃历史（最新 " + list.size() + " 条） ===");
+                w.newLine();
+                for (File c : list) {
+                    w.write("--- " + c.getName() + " ---");
+                    w.newLine();
+                    w.write(readCapped(c, CRASH_COPY_CAP));
+                    w.newLine();
+                }
+                return out;
             }
-            return out;
         } catch (Exception ignored) {
             return null;
         }

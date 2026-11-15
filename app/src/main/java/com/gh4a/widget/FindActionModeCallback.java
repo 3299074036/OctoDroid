@@ -173,7 +173,11 @@ public class FindActionModeCallback implements ActionMode.Callback, TextWatcher,
     @Override
     public void onDestroyActionMode(ActionMode mode) {
         UiUtils.hideImeForView(mEditText);
-        mWebView.clearMatches();
+        // T-015：未设 WebView 时不调用 clearMatches（与 setWebView/findNext/
+        // findAll 的判空同款）。
+        if (mWebView != null) {
+            mWebView.clearMatches();
+        }
     }
 
     @Override

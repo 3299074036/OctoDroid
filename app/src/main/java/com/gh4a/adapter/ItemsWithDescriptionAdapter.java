@@ -39,7 +39,8 @@ public class ItemsWithDescriptionAdapter extends ArrayAdapter<ItemsWithDescripti
         TextView descriptionView = view.findViewById(R.id.description);
         var item = getItem(position);
 
-        // 166：getItem() 越界时返回 null，直接解引用即 NPE；缺失时清空本行。
+        // T-118：getItem() 越界抛 IndexOutOfBoundsException（ArrayAdapter 行为），
+        // 不返回 null；null 分支仅显式 null 元素可达，缺失时清空本行。
         if (item == null) {
             titleView.setText(null);
             descriptionView.setText(null);

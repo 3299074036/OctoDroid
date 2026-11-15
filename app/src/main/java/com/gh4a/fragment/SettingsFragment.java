@@ -42,8 +42,7 @@ import com.gh4a.widget.IntegerListPreference;
 import java.util.List;
 
 public class SettingsFragment extends PreferenceFragmentCompat implements
-        Preference.OnPreferenceClickListener, Preference.OnPreferenceChangeListener,
-        DarkModeScheduleDialogFragment.SettingsRefreshListener {
+        Preference.OnPreferenceClickListener, Preference.OnPreferenceChangeListener {
     public interface OnStateChangeListener {
         void onThemeChanged();
         void onFontScaleChanged();
@@ -86,7 +85,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private static final String KEY_CHECK_UPDATE = "check_update";
     public static final String KEY_AUTO_CHECK_UPDATE = "auto_check_update";
     private static final String KEY_DARK_MODE = "dark_mode";
-    private static final String KEY_DARK_MODE_SCHEDULE_TIME = "dark_mode_schedule_time";
     private static final String KEY_BACKUP_RESTORE = "backup_restore";
     private static final String KEY_DOWNLOAD_MANAGER = "download_manager";
 
@@ -104,7 +102,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     private IntegerListPreference mNotificationIntervalPref;
     private TwoStatePreference mReleaseRadarPref;
     private IntegerListPreference mReleaseRadarIntervalPref;
-    private Preference mDarkModeScheduleTimePref;
     private ListPreference mDarkModePref;
 
     private final androidx.activity.result.ActivityResultLauncher<String[]> mRestoreLauncher =
@@ -240,11 +237,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         if (mDarkModePref != null) {
             mDarkModePref.setOnPreferenceChangeListener(this);
         }
-        mDarkModeScheduleTimePref = findPreference(KEY_DARK_MODE_SCHEDULE_TIME);
-        if (mDarkModeScheduleTimePref != null) {
-            mDarkModeScheduleTimePref.setOnPreferenceClickListener(this);
-            refreshDarkModeScheduleSummary();
-        }
 
         Preference backupRestorePref = findPreference(KEY_BACKUP_RESTORE);
         if (backupRestorePref != null) {
@@ -337,32 +329,11 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             // onPreferenceChange 触发时新值尚未持久化，必须用 newValue 而不是读 prefs，
             // 否则 apply() 会读到旧值导致切换不生效/闹钟状态反向
             com.gh4a.utils.DarkModeScheduler.apply(getContext(), (String) newValue);
-            refreshDarkModeScheduleSummary();
             // recreate to apply the new night mode immediately
             mListener.onThemeChanged();
             return true;
         }
         return false;
-    }
-
-    /** Updates the "深色时段" summary and enables it only in scheduled mode. */
-    public void refreshDarkModeScheduleSummary() {
-        if (mDarkModeScheduleTimePref == null) {
-            return;
-        }
-        android.content.Context context = getContext();
-        boolean scheduled = com.gh4a.utils.DarkModeScheduler.isScheduled(context);
-        mDarkModeScheduleTimePref.setEnabled(scheduled);
-        if (scheduled) {
-            mDarkModeScheduleTimePref.setSummary(getString(
-                    R.string.dark_mode_schedule_summary,
-                    com.gh4a.utils.DarkModeScheduler.formatMinutes(
-                            com.gh4a.utils.DarkModeScheduler.getStartMinutes(context)),
-                    com.gh4a.utils.DarkModeScheduler.formatMinutes(
-                            com.gh4a.utils.DarkModeScheduler.getEndMinutes(context))));
-        } else {
-            mDarkModeScheduleTimePref.setSummary("");
-        }
     }
 
     /**
@@ -517,10 +488,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         } else if (KEY_DOWNLOAD_MANAGER.equals(pref.getKey())) {
             startActivity(new android.content.Intent(getActivity(),
                     com.gh4a.activities.DownloadListActivity.class));
-            return true;
-        } else if (KEY_DARK_MODE_SCHEDULE_TIME.equals(pref.getKey())) {
-            DarkModeScheduleDialogFragment.newInstance()
-                    .show(getChildFragmentManager(), "dark_schedule");
             return true;
         }
         return false;

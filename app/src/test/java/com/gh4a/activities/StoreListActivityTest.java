@@ -16,7 +16,18 @@ import org.robolectric.android.controller.ActivityController;
 import org.robolectric.shadows.ShadowLooper;
 
 import com.gh4a.R;
+import com.gh4a.fragment.StoreApi;
+import com.gh4a.fragment.StoreClassifier;
+import com.gh4a.fragment.StoreRepo;
 import java.lang.reflect.Field;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.List;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
+import org.robolectric.Shadows;
+import io.reactivex.Single;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(RobolectricTestRunner.class)
@@ -52,16 +63,13 @@ public class StoreListActivityTest {
     }
 
     @Test
-    public void launches_newestMode_actionBarTitleShowsRecentInsteadOfNewest() {
-        // A2-2：标题在 BaseActivity.onCreate 里按 getActionBarTitle() 定死一次，
-        // 此时 mMode 尚未赋值（StoreListActivity.onCreate 晚于 super.onCreate
-        // 才读 intent），且之后从不刷新标题；newest 模式标题恒错显示
-        // "Recently updated"。方法本身是对的（见下一条）。
+    public void launches_newestMode_actionBarTitleShowsNewest() {
+        // T-011 修复后：mMode 赋值后刷新标题，newest 模式显示“最新入库”。
         Intent intent = StoreListActivity.makeIntent(context(), StoreListActivity.MODE_NEWEST);
         try (ActivityController<StoreListActivity> c =
                 Robolectric.buildActivity(StoreListActivity.class, intent)) {
             StoreListActivity activity = c.setup().get();
-            assertEquals(activity.getString(R.string.store_recent_updated),
+            assertEquals(activity.getString(R.string.store_newest),
                     activity.getSupportActionBar().getTitle().toString());
         }
     }
@@ -160,6 +168,99 @@ public class StoreListActivityTest {
             StoreListActivity activity = c.create().get();
             assertTrue(contentText(activity)
                     .contains(activity.getString(R.string.loading_msg)));
+        }
+    }
+
+    // ---------- missed-line close-out (2026-11-15 §6): load() 的两个
+    // subscribe 回调（成功 84-96 / 失败 97-105）在重建里从未跑过，原因是
+    // 成功/失败都走真实网络且结果不可确定；此处用 mockStatic(StoreApi)
+    // 把两路都挡成确定值。 ----------
+
+    private static StoreRepo repo(String fullName, String owner, String name) {
+        return new StoreRepo(fullName, owner, name, "desc", "Java", null,
+                100, 5, 10L, null, null, "v1.0", 0L,
+                EnumSet.of(StoreClassifier.Platform.ANDROID), 1,
+                null, null, null, null, null);
+    }
+
+    @Test
+    public void load_newest_nonEmpty_showsRowsAndRowClickStartsRepository() throws Exception {
+        List<StoreRepo> items = Arrays.asList(
+                repo("octo/cat", "octo", "cat"), repo("foo/bar", "foo", "bar"));
+        Intent intent = StoreListActivity.makeIntent(context(), StoreListActivity.MODE_NEWEST);
+        try (MockedStatic<StoreApi> mocked =
+                Mockito.mockStatic(StoreApi.class, Mockito.CALLS_REAL_METHODS)) {
+            mocked.when(() -> StoreApi.loadListNewest()).thenReturn(Single.just(items));
+            try (ActivityController<StoreListActivity> c =
+                    Robolectric.buildActivity(StoreListActivity.class, intent)) {
+                StoreListActivity activity = c.setup().get();
+                android.widget.LinearLayout root = content(activity);
+                assertEquals(4, root.getChildCount());
+                assertTrue(contentText(activity).contains("octo/cat"));
+                assertTrue(contentText(activity).contains("foo/bar"));
+                // 点第一行：行点击 lambda 进仓库详情。
+                root.getChildAt(0).performClick();
+                Intent started = Shadows.shadowOf(activity).getNextStartedActivity();
+                assertNotNull(started);
+                assertEquals(RepositoryActivity.class.getName(),
+                        started.getComponent().getClassName());
+                assertEquals("octo", started.getStringExtra("owner"));
+                assertEquals("cat", started.getStringExtra("repo"));
+            }
+        }
+    }
+
+    @Test
+    public void load_newest_empty_showsEmptyText() throws Exception {
+        Intent intent = StoreListActivity.makeIntent(context(), StoreListActivity.MODE_NEWEST);
+        try (MockedStatic<StoreApi> mocked =
+                Mockito.mockStatic(StoreApi.class, Mockito.CALLS_REAL_METHODS)) {
+            mocked.when(() -> StoreApi.loadListNewest())
+                    .thenReturn(Single.just(Collections.emptyList()));
+            try (ActivityController<StoreListActivity> c =
+                    Robolectric.buildActivity(StoreListActivity.class, intent)) {
+                StoreListActivity activity = c.setup().get();
+                assertTrue(contentText(activity)
+                        .contains(activity.getString(R.string.store_empty_result)));
+            }
+        }
+    }
+
+    @Test
+    public void load_recent_nonEmpty_showsRows() throws Exception {
+        List<StoreRepo> items = Arrays.asList(repo("octo/cat", "octo", "cat"));
+        Intent intent = StoreListActivity.makeIntent(context(), StoreListActivity.MODE_RECENT);
+        try (MockedStatic<StoreApi> mocked =
+                Mockito.mockStatic(StoreApi.class, Mockito.CALLS_REAL_METHODS)) {
+            mocked.when(() -> StoreApi.loadListRecent()).thenReturn(Single.just(items));
+            try (ActivityController<StoreListActivity> c =
+                    Robolectric.buildActivity(StoreListActivity.class, intent)) {
+                StoreListActivity activity = c.setup().get();
+                assertEquals(2, content(activity).getChildCount());
+                assertTrue(contentText(activity).contains("octo/cat"));
+            }
+        }
+    }
+
+    @Test
+    public void load_error_showsErrorViewAndRetryReloads() throws Exception {
+        Intent intent = StoreListActivity.makeIntent(context(), StoreListActivity.MODE_RECENT);
+        try (MockedStatic<StoreApi> mocked =
+                Mockito.mockStatic(StoreApi.class, Mockito.CALLS_REAL_METHODS)) {
+            mocked.when(() -> StoreApi.loadListRecent())
+                    .thenReturn(Single.error(new RuntimeException("boom")));
+            try (ActivityController<StoreListActivity> c =
+                    Robolectric.buildActivity(StoreListActivity.class, intent)) {
+                StoreListActivity activity = c.setup().get();
+                assertTrue(contentText(activity)
+                        .contains(activity.getString(R.string.store_fetch_failed)));
+                // 失败视图点按重试：mock 仍报错，失败文案仍在。
+                android.widget.LinearLayout root = content(activity);
+                assertEquals(1, root.getChildCount());
+                root.getChildAt(0).performClick();
+                assertTrue(contentText(activity)
+                        .contains(activity.getString(R.string.store_fetch_failed)));
+            }
         }
     }
 }

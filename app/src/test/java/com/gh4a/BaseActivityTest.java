@@ -719,19 +719,13 @@ public class BaseActivityTest {
     }
 
     @Test
-    public void configureLeftDrawerHeader_nullHeader_throwsNullPointer() {
-        // T-MOD-02 (observation): configureLeftDrawerHeader has no null
-        // guard — applyDrawerHeaderTopMargin (line 378) does, but the
-        // ViewCompat.setOnApplyWindowInsetsListener call (line 364) throws
-        // NPE on a null header. The only production caller passes the
-        // non-null inflated header, so this is not user-visible.
+    public void configureLeftDrawerHeader_nullHeader_noThrow() {
+        // T-020 (fixed): configureLeftDrawerHeader now returns early on a
+        // null header instead of throwing NPE in
+        // ViewCompat.setOnApplyWindowInsetsListener.
         TestActivity activity = launch();
-        try {
-            activity.configureLeftDrawerHeader(null);
-            org.junit.Assert.fail("expected NullPointerException");
-        } catch (NullPointerException expected) {
-            // expected
-        }
+        activity.configureLeftDrawerHeader(null);
+        // no exception = pass
     }
 
     @Test

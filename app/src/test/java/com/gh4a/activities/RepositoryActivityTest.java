@@ -4,7 +4,15 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
@@ -23,22 +31,40 @@ import org.robolectric.android.controller.ActivityController;
 import org.robolectric.shadows.ShadowActivity;
 import org.robolectric.shadows.ShadowToast;
 
+import com.gh4a.BasePagerActivity;
 import com.gh4a.R;
+import com.gh4a.ServiceFactory;
+import com.gh4a.utils.DownloadRecordManager;
 import com.meisolsson.githubsdk.model.Branch;
 import com.meisolsson.githubsdk.model.Commit;
+import com.meisolsson.githubsdk.model.Page;
 import com.meisolsson.githubsdk.model.Repository;
 import com.meisolsson.githubsdk.model.User;
+import com.meisolsson.githubsdk.service.repositories.RepositoryBranchService;
+import com.meisolsson.githubsdk.service.repositories.RepositoryForkService;
+import com.meisolsson.githubsdk.service.repositories.RepositoryService;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.io.IOException;
+
+import android.content.DialogInterface;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.view.menu.MenuBuilder;
+import androidx.viewpager.widget.ViewPager;
+import io.reactivex.Single;
+import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.schedulers.Schedulers;
+import org.mockito.MockedStatic;
+import retrofit2.Response;
 import com.gh4a.fragment.CommitListFragment;
 import com.gh4a.fragment.ContentListContainerFragment;
 import com.gh4a.fragment.RepositoryEventListFragment;
 import com.gh4a.fragment.RepositoryFragment;
-import java.lang.reflect.Method;
 import org.robolectric.shadows.ShadowAlertDialog;
 import org.robolectric.shadows.ShadowDialog;
 import static org.junit.Assert.assertFalse;
@@ -680,10 +706,9 @@ public class RepositoryActivityTest {
 
     // A2-4（确认，生产 bug，Low）：branches 含 null 项时 onCreateDialog 的
     // 选 branches 循环有判空（464 行 if (item == null) continue），但
-    // BranchAndTagAdapter.getView（529 行）直接取 item.name()，对话框
-    // 布局量测即 NPE。复现：show 含 null 项的分支选择对话框。
-    @Test(expected = NullPointerException.class)
-    public void branchDialog_nullItemInList_crashesInAdapter() throws Exception {
+    // T-012 修复后：null 项渲染为空行，对话框正常弹出，不再 NPE。
+    @Test
+    public void branchDialog_nullItemInList_showsEmptyRow() throws Exception {
         try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
             RepositoryActivity activity = c.setup().get();
             List<Branch> branches = new java.util.ArrayList<>(
@@ -695,6 +720,8 @@ public class RepositoryActivityTest {
             f.show(activity.getSupportFragmentManager(), "ref");
             ShadowLooper.idleMainLooper();
             activity.getSupportFragmentManager().executePendingTransactions();
+            assertNotNull(f.getDialog());
+            assertTrue(f.getDialog().isShowing());
         }
     }
 
@@ -717,6 +744,336 @@ public class RepositoryActivityTest {
             listView.performItemClick(listView.getAdapter().getView(0, null, listView), 0, 0);
             assertEquals("main", getRepoField(activity, "mSelectedRef"));
             assertFalse(dialog.isShowing());
+        }
+    }
+
+    // ---- §6 补缺口：RepositoryActivity（15:40 报告残 38 行） ----
+
+    private static void idleMain() {
+        ShadowLooper.idleMainLooper();
+    }
+
+    private static void waitUntil(BooleanSupplier condition) throws Exception {
+        for (int i = 0; i < 250; i++) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            Thread.sleep(20);
+            idleMain();
+        }
+        assertTrue(condition.getAsBoolean());
+    }
+
+    private static ViewPager getPager(RepositoryActivity activity) throws Exception {
+        // getPager() is protected in BasePagerActivity (package com.gh4a),
+        // not accessible from this package except via reflection.
+        Method m = BasePagerActivity.class.getDeclaredMethod("getPager");
+        m.setAccessible(true);
+        return (ViewPager) m.invoke(activity);
+    }
+
+    private static void setPagerCurrentItem(RepositoryActivity activity, int item)
+            throws Exception {
+        Field f = ViewPager.class.getDeclaredField("mCurItem");
+        f.setAccessible(true);
+        f.setInt(getPager(activity), item);
+    }
+
+    private static RepositoryService mockRepoService(Repository repo) {
+        RepositoryService service = mock(RepositoryService.class);
+        when(service.getRepository(anyString(), anyString()))
+                .thenReturn(Single.just(Response.success(repo)));
+        return service;
+    }
+
+    @Test
+    public void loadRepository_success_setsTitleSubtitleAndTabs() throws Exception {
+        RepositoryService service = mockRepoService(mockRepo());
+        try (MockedStatic<ServiceFactory> sf =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            sf.when(() -> ServiceFactory.get(eq(RepositoryService.class), anyBoolean()))
+                    .thenReturn(service);
+            try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+                RepositoryActivity activity = c.setup().get();
+                waitUntil(() -> activity.getTabTitleResIds() != null);
+                assertEquals("octocat/hello",
+                        activity.getSupportActionBar().getTitle().toString());
+                assertEquals("main",
+                        activity.getSupportActionBar().getSubtitle().toString());
+                assertEquals(4, activity.getTabTitleResIds().length);
+            }
+        }
+    }
+
+    @Test
+    public void loadRepository_success_withInitialPage_selectsFilesPage() throws Exception {
+        RepositoryService service = mockRepoService(mockRepo());
+        try (MockedStatic<ServiceFactory> sf =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            sf.when(() -> ServiceFactory.get(eq(RepositoryService.class), anyBoolean()))
+                    .thenReturn(service);
+            try (ActivityController<RepositoryActivity> c = Robolectric.buildActivity(
+                    RepositoryActivity.class,
+                    RepositoryActivity.makeIntent(context(), "octocat", "hello",
+                            null, null, RepositoryActivity.PAGE_FILES))) {
+                RepositoryActivity activity = c.setup().get();
+                waitUntil(() -> activity.getTabTitleResIds() != null);
+                assertEquals(1, getPager(activity).getCurrentItem());
+                assertEquals(Integer.valueOf(-1),
+                        getRepoField(activity, "mInitialPage"));
+            }
+        }
+    }
+
+    @Test
+    public void loadRepository_success_initialPageBelowRange_skipsSelection() throws Exception {
+        // mInitialPage=-1：399 行 >= 下界为假，跳过 setCurrentItem。
+        RepositoryService service = mockRepoService(mockRepo());
+        try (MockedStatic<ServiceFactory> sf =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            sf.when(() -> ServiceFactory.get(eq(RepositoryService.class), anyBoolean()))
+                    .thenReturn(service);
+            try (ActivityController<RepositoryActivity> c = Robolectric.buildActivity(
+                    RepositoryActivity.class,
+                    RepositoryActivity.makeIntent(context(), "octocat", "hello",
+                            null, null, -1))) {
+                RepositoryActivity activity = c.setup().get();
+                waitUntil(() -> activity.getTabTitleResIds() != null);
+                assertEquals(Integer.valueOf(-1),
+                        getRepoField(activity, "mInitialPage"));
+                assertEquals(0, getPager(activity).getCurrentItem());
+            }
+        }
+    }
+
+    @Test
+    public void loadRepository_success_initialPageAboveRange_skipsSelection() throws Exception {
+        // mInitialPage=99（> PAGE_ACTIVITY=3）：399 行 <= 上界为假，跳过。
+        RepositoryService service = mockRepoService(mockRepo());
+        try (MockedStatic<ServiceFactory> sf =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            sf.when(() -> ServiceFactory.get(eq(RepositoryService.class), anyBoolean()))
+                    .thenReturn(service);
+            try (ActivityController<RepositoryActivity> c = Robolectric.buildActivity(
+                    RepositoryActivity.class,
+                    RepositoryActivity.makeIntent(context(), "octocat", "hello",
+                            null, null, 99))) {
+                RepositoryActivity activity = c.setup().get();
+                waitUntil(() -> activity.getTabTitleResIds() != null);
+                assertEquals(Integer.valueOf(99),
+                        getRepoField(activity, "mInitialPage"));
+                assertEquals(0, getPager(activity).getCurrentItem());
+            }
+        }
+    }
+
+    @Test
+    public void onBackPressed_contentFragmentHandlesBack_doesNotFinish() throws Exception {
+        try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+            RepositoryActivity activity = c.setup().get();
+            setPagerCurrentItem(activity, 1);
+            ContentListContainerFragment content =
+                    mock(ContentListContainerFragment.class);
+            when(content.handleBackPress()).thenReturn(true);
+            setRepoField(activity, "mContentListFragment", content);
+            activity.onBackPressed();
+            assertFalse(activity.isFinishing());
+            verify(content).handleBackPress();
+        }
+    }
+
+    @Test
+    public void onBackPressed_contentFragmentDeclinesBack_finishes() throws Exception {
+        try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+            RepositoryActivity activity = c.setup().get();
+            setPagerCurrentItem(activity, 1);
+            ContentListContainerFragment content =
+                    mock(ContentListContainerFragment.class);
+            when(content.handleBackPress()).thenReturn(false);
+            setRepoField(activity, "mContentListFragment", content);
+            activity.onBackPressed();
+            assertTrue(activity.isFinishing());
+        }
+    }
+
+    @Test
+    public void onBackPressed_notOnFilesPage_finishesWithoutAskingFragment() throws Exception {
+        try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+            RepositoryActivity activity = c.setup().get();
+            setPagerCurrentItem(activity, 0);
+            ContentListContainerFragment content =
+                    mock(ContentListContainerFragment.class);
+            when(content.handleBackPress()).thenReturn(true);
+            setRepoField(activity, "mContentListFragment", content);
+            activity.onBackPressed();
+            assertTrue(activity.isFinishing());
+            verify(content, never()).handleBackPress();
+        }
+    }
+
+    @Test
+    public void onOptionsItemSelected_zipDownload_noDefaultBranch_returnsTrueWithoutDownload()
+            throws Exception {
+        try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+            RepositoryActivity activity = c.setup().get();
+            Repository repo = mockRepo();
+            when(repo.defaultBranch()).thenReturn(null);
+            setRepoField(activity, "mRepository", repo);
+            setRepoField(activity, "mSelectedRef", null);
+            int recordsBefore = DownloadRecordManager.getRecords(context()).size();
+            MenuBuilder menu = new MenuBuilder(activity);
+            menu.add(0, R.id.zip_download, 0, "Zip");
+            assertTrue(activity.onOptionsItemSelected(menu.findItem(R.id.zip_download)));
+            idleMain();
+            assertEquals(recordsBefore,
+                    DownloadRecordManager.getRecords(context()).size());
+        }
+    }
+
+    @Test
+    public void onOptionsItemSelected_fork_confirmPositive_forksAndToastsSuccess()
+            throws Exception {
+        RepositoryForkService forkService = mock(RepositoryForkService.class);
+        Repository forked = mock(Repository.class);
+        when(forked.name()).thenReturn("hello");
+        when(forkService.createFork(anyString(), anyString()))
+                .thenReturn(Single.just(Response.success(forked)));
+        try (MockedStatic<ServiceFactory> sf =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            sf.when(() -> ServiceFactory.get(eq(RepositoryForkService.class), anyBoolean()))
+                    .thenReturn(forkService);
+            try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+                RepositoryActivity activity = c.setup().get();
+                MenuBuilder menu = new MenuBuilder(activity);
+                menu.add(0, R.id.fork, 0, "Fork");
+                assertTrue(activity.onOptionsItemSelected(menu.findItem(R.id.fork)));
+                idleMain();
+                activity.getSupportFragmentManager().executePendingTransactions();
+                AlertDialog dialog =
+                        (AlertDialog) ShadowAlertDialog.getShownDialogs().get(0);
+                dialog.getButton(DialogInterface.BUTTON_POSITIVE).performClick();
+                String expected =
+                        activity.getString(R.string.repo_fork_success, "hello");
+                waitUntil(() -> expected.equals(ShadowToast.getTextOfLatestToast()));
+                assertEquals(expected, ShadowToast.getTextOfLatestToast());
+            }
+        }
+    }
+
+    @Test
+    public void onOptionsItemSelected_fork_confirmPositive_forkError_toastsFailure()
+            throws Exception {
+        RepositoryForkService forkService = mock(RepositoryForkService.class);
+        when(forkService.createFork(anyString(), anyString()))
+                .thenReturn(Single.error(new IOException("boom")));
+        try (MockedStatic<ServiceFactory> sf =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            sf.when(() -> ServiceFactory.get(eq(RepositoryForkService.class), anyBoolean()))
+                    .thenReturn(forkService);
+            try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+                RepositoryActivity activity = c.setup().get();
+                MenuBuilder menu = new MenuBuilder(activity);
+                menu.add(0, R.id.fork, 0, "Fork");
+                assertTrue(activity.onOptionsItemSelected(menu.findItem(R.id.fork)));
+                idleMain();
+                activity.getSupportFragmentManager().executePendingTransactions();
+                AlertDialog dialog =
+                        (AlertDialog) ShadowAlertDialog.getShownDialogs().get(0);
+                dialog.getButton(DialogInterface.BUTTON_POSITIVE).performClick();
+                String expected = activity.getString(R.string.repo_fork_failed);
+                waitUntil(() -> expected.equals(ShadowToast.getTextOfLatestToast()));
+                assertEquals(expected, ShadowToast.getTextOfLatestToast());
+            }
+        }
+    }
+
+    @Test
+    public void loadOrShowRefSelection_noBranches_loadsBranchesAndTagsAndShowsDialog()
+            throws Exception {
+        RepositoryBranchService branchService = mock(RepositoryBranchService.class);
+        Page<Branch> branchPage = mock(Page.class);
+        Branch mainBranch = branch("main", "a1");
+        Branch devBranch = branch("dev", "b2");
+        when(branchPage.items()).thenReturn(Arrays.asList(mainBranch, devBranch));
+        when(branchPage.next()).thenReturn(null);
+        when(branchService.getBranches(anyString(), anyString(), anyLong()))
+                .thenReturn(Single.just(Response.success(branchPage)));
+        RepositoryService repoService = mock(RepositoryService.class);
+        Page<Branch> tagPage = mock(Page.class);
+        Branch tagBranch = branch("v1.0", "c3");
+        when(tagPage.items()).thenReturn(Collections.singletonList(tagBranch));
+        when(tagPage.next()).thenReturn(null);
+        when(repoService.getTags(anyString(), anyString(), anyLong()))
+                .thenReturn(Single.just(Response.success(tagPage)));
+        try (MockedStatic<ServiceFactory> sf =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            sf.when(() -> ServiceFactory.getForFullPagedLists(
+                            eq(RepositoryBranchService.class), anyBoolean()))
+                    .thenReturn(branchService);
+            sf.when(() -> ServiceFactory.getForFullPagedLists(
+                            eq(RepositoryService.class), anyBoolean()))
+                    .thenReturn(repoService);
+            RxJavaPlugins.setIoSchedulerHandler(scheduler -> Schedulers.trampoline());
+            try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+                RepositoryActivity activity = c.setup().get();
+                setRepoField(activity, "mRepository", mockRepo());
+                MenuBuilder menu = new MenuBuilder(activity);
+                menu.add(0, R.id.ref, 0, "Ref");
+                assertTrue(activity.onOptionsItemSelected(menu.findItem(R.id.ref)));
+                waitUntil(() -> !ShadowAlertDialog.getShownDialogs().isEmpty());
+                assertEquals(2, ((List<?>) getRepoField(activity, "mBranches")).size());
+                assertEquals(1, ((List<?>) getRepoField(activity, "mTags")).size());
+            } finally {
+                RxJavaPlugins.reset();
+            }
+        }
+    }
+
+    @Test
+    public void onFragmentInstantiated_unknownPosition_doesNothing() throws Exception {
+        try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+            RepositoryActivity activity = c.setup().get();
+            activity.onFragmentInstantiated(mock(RepositoryFragment.class), 99);
+            assertNull(getRepoField(activity, "mRepositoryFragment"));
+            assertNull(getRepoField(activity, "mContentListFragment"));
+            assertNull(getRepoField(activity, "mCommitListFragment"));
+            assertNull(getRepoField(activity, "mActivityFragment"));
+        }
+    }
+
+    @Test
+    public void branchDialog_commitNullAndNoNameMatch_skipsShaCheck() {
+        try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+            RepositoryActivity activity = c.setup().get();
+            List<Branch> branches = Arrays.asList(branch("main", null), branch("dev", "b2"));
+            List<Branch> tags = Collections.singletonList(branch("v1.0", "c3"));
+            RepositoryActivity.BranchSelectionDialogFragment f =
+                    RepositoryActivity.BranchSelectionDialogFragment.newInstance(
+                            branches, tags, "zzz", "main");
+            f.show(activity.getSupportFragmentManager(), "ref");
+            ShadowLooper.idleMainLooper();
+            activity.getSupportFragmentManager().executePendingTransactions();
+            AlertDialog dialog =
+                    (AlertDialog) ShadowDialog.getShownDialogs().get(0);
+            assertEquals(-1, dialog.getListView().getCheckedItemPosition());
+        }
+    }
+
+    @Test
+    public void branchDialog_nullSelectedRefWithNullNameMatch_skipsMasterFallback() {
+        try (ActivityController<RepositoryActivity> c = launch("octocat", "hello")) {
+            RepositoryActivity activity = c.setup().get();
+            List<Branch> branches = Collections.singletonList(branch(null, "a1"));
+            List<Branch> tags = Collections.emptyList();
+            RepositoryActivity.BranchSelectionDialogFragment f =
+                    RepositoryActivity.BranchSelectionDialogFragment.newInstance(
+                            branches, tags, null, "main");
+            f.show(activity.getSupportFragmentManager(), "ref");
+            ShadowLooper.idleMainLooper();
+            activity.getSupportFragmentManager().executePendingTransactions();
+            AlertDialog dialog =
+                    (AlertDialog) ShadowDialog.getShownDialogs().get(0);
+            assertEquals(0, dialog.getListView().getCheckedItemPosition());
         }
     }
 

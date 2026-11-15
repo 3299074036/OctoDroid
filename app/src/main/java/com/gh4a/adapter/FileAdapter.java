@@ -40,7 +40,7 @@ public class FileAdapter extends RootAdapter<Content, FileAdapter.ViewHolder> {
     }
 
     public void setSubModuleNames(Set<String> subModules) {
-        mSubModuleNames = subModules;
+        mSubModuleNames = subModules != null ? subModules : Collections.emptySet();
         notifyDataSetChanged();
     }
 
@@ -58,7 +58,8 @@ public class FileAdapter extends RootAdapter<Content, FileAdapter.ViewHolder> {
         holder.icon.setBackgroundResource(getIconId(content.type(), name));
         holder.fileName.setText(name);
 
-        if (!isSubModule && content.type() == ContentType.File) {
+        if (!isSubModule && content.type() == ContentType.File && content.size() != null) {
+            // T-119：content.size() 是可空 Integer，拆箱前判空；为 null 时按无大小处理。
             holder.fileSize.setText(Formatter.formatShortFileSize(mContext, content.size()));
             holder.fileSize.setVisibility(View.VISIBLE);
         } else {

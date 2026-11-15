@@ -4,20 +4,27 @@ import android.content.Context;
 import android.os.Bundle;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.view.menu.MenuBuilder;
+import androidx.appcompat.widget.SearchView;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity;
 import androidx.lifecycle.Lifecycle;
 import androidx.test.core.app.ApplicationProvider;
 
 import com.gh4a.R;
+import com.meisolsson.githubsdk.model.Repository;
+
+import java.lang.reflect.Field;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.android.controller.ActivityController;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -26,6 +33,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** RepositoryListContainerFragment：仓库列表容器 + 抽屉助手（Robolectric）。 */
@@ -44,6 +52,49 @@ public class RepositoryListContainerFragmentTest {
         mActivity.getSupportFragmentManager().beginTransaction().add(fragment, "test")
                 .setMaxLifecycle(fragment, Lifecycle.State.CREATED).commitNow();
         return fragment;
+    }
+
+    /** AppCompat host: menu inflation needs the AppCompat inflater for the
+     *  SearchView action view. Also implements the container's filter Callback. */
+    public static class MenuHostActivity extends AppCompatActivity
+            implements RepositoryListContainerFragment.Callback {
+        boolean filterInitiated;
+
+        @Override
+        public void initiateFilter() {
+            filterInitiated = true;
+        }
+    }
+
+    private static MenuHostActivity attachMenuHost(RepositoryListContainerFragment f) {
+        MenuHostActivity activity = Robolectric.buildActivity(MenuHostActivity.class).setup().get();
+        activity.getSupportFragmentManager().beginTransaction().add(f, "test")
+                .setMaxLifecycle(f, Lifecycle.State.CREATED).commitNow();
+        return activity;
+    }
+
+    private static void setPrivate(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
+    }
+
+    /** Attach at CREATED with real children already added, then drive onViewCreated
+     *  so it takes the existing-children branch (setSearchVisibility path).
+     *  Children stay at CREATED, so their loaders never fire (no network). */
+    private RepositoryListContainerFragment attachWithRealChildren() {
+        RepositoryListContainerFragment f =
+                RepositoryListContainerFragment.newInstance("octo", false);
+        mActivity.getSupportFragmentManager().beginTransaction().add(f, "test")
+                .setMaxLifecycle(f, Lifecycle.State.CREATED).commitNow();
+        f.getChildFragmentManager().beginTransaction()
+                .add(RepositoryListFragment.newInstance(
+                        "octo", false, "all", "full_name", "asc"), "main")
+                .add(RepositorySearchFragment.newInstance("octo"), "search")
+                .commitNow();
+        f.onViewCreated(new View(mContext), null);
+        f.getChildFragmentManager().executePendingTransactions();
+        return f;
     }
 
     @Test
@@ -261,6 +312,365 @@ public class RepositoryListContainerFragmentTest {
         menu.add(0, R.id.sort_name_asc, 0, "Name A-Z");
         helper.selectSortType(menu, "bogus", "desc", false);
         assertFalse(menu.findItem(R.id.sort_name_asc).isChecked());
+    }
+
+    // ---------- onCreate restore ----------
+
+    @Test
+    public void onCreate_restoresFromSavedInstanceState() throws Exception {
+        // Direct f.onCreate(bundle) on an unattached fragment NPEs in
+        // Fragment.onCreate (child FragmentManager not initialized yet), so drive
+        // the restore through the real FragmentManager save/restore path.
+        ActivityController<FragmentActivity> controller =
+                Robolectric.buildActivity(FragmentActivity.class).setup();
+        FragmentActivity activity = controller.get();
+        RepositoryListContainerFragment f =
+                RepositoryListContainerFragment.newInstance("octo", false);
+        activity.getSupportFragmentManager().beginTransaction().add(f, "test")
+                .setMaxLifecycle(f, Lifecycle.State.CREATED).commitNow();
+        // The search fields have no public setters; set them reflectively.
+        setPrivate(f, "mFilterType", "starred");
+        setPrivate(f, "mSortOrder", "updated");
+        setPrivate(f, "mSortDirection", "desc");
+        setPrivate(f, "mSearchVisible", true);
+        setPrivate(f, "mSearchQuery", "foo");
+        setPrivate(f, "mSearchIsExpanded", true);
+        controller.recreate();
+        RepositoryListContainerFragment restored =
+                (RepositoryListContainerFragment) controller.get().getSupportFragmentManager()
+                        .findFragmentByTag("test");
+        assertNotNull(restored);
+        assertEquals("starred", restored.getFilterType());
+        assertEquals("updated", restored.getSortOrder());
+        assertEquals("desc", restored.getSortDirection());
+        Bundle out = new Bundle();
+        restored.onSaveInstanceState(out);
+        assertTrue(out.getBoolean("search_visible"));
+        assertEquals("foo", out.getString("search_query"));
+        assertTrue(out.getBoolean("search_is_expanded"));
+    }
+
+    @Test
+    public void onCreate_nonNullBundleWithoutKeys_keepsArgs() {
+        RepositoryListContainerFragment f =
+                RepositoryListContainerFragment.newInstance("octo", false, "watched");
+        // Attach first so the child FragmentManager is initialized, then re-invoke
+        // onCreate with a keyless bundle to hit the containsKey false arm.
+        attach(f);
+        f.onCreate(new Bundle());
+        assertEquals("watched", f.getFilterType());
+        assertEquals("full_name", f.getSortOrder());
+    }
+
+    @Test
+    public void setFilterType_beforeAttach_skipsArgsFilterOnCreate() {
+        RepositoryListContainerFragment f =
+                RepositoryListContainerFragment.newInstance("octo", false);
+        f.setFilterType("starred");
+        assertEquals("starred", f.getFilterType());
+        attach(f);
+        assertEquals("starred", f.getFilterType());
+    }
+
+    // ---------- sort order validation arms ----------
+
+    @Test
+    public void setSortOrder_starredCreated_keepsCreatedAsc() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false, "starred"));
+        f.setSortOrder("created", "asc");
+        assertEquals("created", f.getSortOrder());
+        assertEquals("asc", f.getSortDirection());
+    }
+
+    @Test
+    public void setSortOrder_created_keepsCreatedDesc() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        f.setSortOrder("created", "desc");
+        assertEquals("created", f.getSortOrder());
+        assertEquals("desc", f.getSortDirection());
+    }
+
+    @Test
+    public void setSortOrder_pushed_keepsPushedAsc() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        f.setSortOrder("pushed", "asc");
+        assertEquals("pushed", f.getSortOrder());
+        assertEquals("asc", f.getSortDirection());
+    }
+
+    @Test
+    public void setSortOrder_sameValue_isNoop() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        f.setSortOrder("full_name", "asc");
+        assertEquals("full_name", f.getSortOrder());
+        assertEquals("asc", f.getSortDirection());
+    }
+
+    // ---------- refresh / destroy / scroll ----------
+
+    @Test
+    public void onRefresh_delegatesToBothChildren() throws Exception {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        PagedDataBaseFragment<Repository> main = mock(PagedDataBaseFragment.class);
+        RepositorySearchFragment search = mock(RepositorySearchFragment.class);
+        setPrivate(f, "mMainFragment", main);
+        setPrivate(f, "mSearchFragment", search);
+        f.onRefresh();
+        verify(main).onRefresh();
+        verify(search).onRefresh();
+    }
+
+    @Test
+    public void destroyChildren_beforeViewCreated_bothNull_noop() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        f.destroyChildren();
+    }
+
+    @Test
+    public void destroyChildren_withChildren_removesBoth() throws Exception {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        RepositoryListFragment main =
+                RepositoryListFragment.newInstance("octo", false, "all", "full_name", "asc");
+        RepositorySearchFragment search = RepositorySearchFragment.newInstance("octo");
+        f.getChildFragmentManager().beginTransaction()
+                .add(main, "main").add(search, "search").commitNow();
+        setPrivate(f, "mMainFragment", main);
+        setPrivate(f, "mSearchFragment", search);
+        f.destroyChildren();
+        assertNull(f.getChildFragmentManager().findFragmentByTag("main"));
+        assertNull(f.getChildFragmentManager().findFragmentByTag("search"));
+    }
+
+    @Test
+    public void canChildScrollUp_noFilterItem_delegatesToMain() throws Exception {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        PagedDataBaseFragment<Repository> main = mock(PagedDataBaseFragment.class);
+        RepositorySearchFragment search = mock(RepositorySearchFragment.class);
+        setPrivate(f, "mMainFragment", main);
+        setPrivate(f, "mSearchFragment", search);
+        assertFalse(f.canChildScrollUp());
+        verify(main).canChildScrollUp();
+    }
+
+    @Test
+    public void canChildScrollUp_searchMode_delegatesToSearch() throws Exception {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        PagedDataBaseFragment<Repository> main = mock(PagedDataBaseFragment.class);
+        RepositorySearchFragment search = mock(RepositorySearchFragment.class);
+        setPrivate(f, "mMainFragment", main);
+        setPrivate(f, "mSearchFragment", search);
+        MenuItem filter = mock(MenuItem.class);
+        when(filter.isVisible()).thenReturn(false);
+        setPrivate(f, "mFilterItem", filter);
+        assertFalse(f.canChildScrollUp());
+        verify(search).canChildScrollUp();
+    }
+
+    @Test
+    public void canChildScrollUp_filterVisible_delegatesToMain() throws Exception {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        PagedDataBaseFragment<Repository> main = mock(PagedDataBaseFragment.class);
+        RepositorySearchFragment search = mock(RepositorySearchFragment.class);
+        setPrivate(f, "mMainFragment", main);
+        setPrivate(f, "mSearchFragment", search);
+        MenuItem filter = mock(MenuItem.class);
+        when(filter.isVisible()).thenReturn(true);
+        setPrivate(f, "mFilterItem", filter);
+        assertFalse(f.canChildScrollUp());
+        verify(main).canChildScrollUp();
+    }
+
+    // ---------- view / search visibility ----------
+
+    @Test
+    public void onViewCreated_existingChildren_restoresSearchVisibility() {
+        RepositoryListContainerFragment f = attachWithRealChildren();
+        assertNotNull(f.getChildFragmentManager().findFragmentByTag("main"));
+        assertNotNull(f.getChildFragmentManager().findFragmentByTag("search"));
+        assertFalse(f.getChildFragmentManager().findFragmentByTag("main").isHidden());
+        assertTrue(f.getChildFragmentManager().findFragmentByTag("search").isHidden());
+    }
+
+    // ---------- options menu ----------
+
+    @Test
+    public void onCreateOptionsMenu_allFilter_setsUpSearch() {
+        RepositoryListContainerFragment f =
+                RepositoryListContainerFragment.newInstance("octo", false);
+        MenuHostActivity activity = attachMenuHost(f);
+        MenuBuilder menu = new MenuBuilder(activity);
+        f.onCreateOptionsMenu(menu, activity.getMenuInflater());
+        assertNotNull(menu.findItem(R.id.search));
+        assertNotNull(menu.findItem(R.id.filter));
+        assertTrue(menu.findItem(R.id.filter).isVisible());
+    }
+
+    @Test
+    public void onCreateOptionsMenu_expandedSearch_restoresQuery() throws Exception {
+        RepositoryListContainerFragment f =
+                RepositoryListContainerFragment.newInstance("octo", false);
+        setPrivate(f, "mSearchIsExpanded", true);
+        setPrivate(f, "mSearchQuery", "foo");
+        MenuHostActivity activity = attachMenuHost(f);
+        MenuBuilder menu = new MenuBuilder(activity);
+        f.onCreateOptionsMenu(menu, activity.getMenuInflater());
+        SearchView searchView = (SearchView) menu.findItem(R.id.search).getActionView();
+        assertNotNull(searchView);
+        assertEquals("foo", searchView.getQuery().toString());
+    }
+
+    // ---------- options item selection ----------
+
+    @Test
+    public void onOptionsItemSelected_search_showsSearch() {
+        RepositoryListContainerFragment f = attachWithRealChildren();
+        MenuItem search = mock(MenuItem.class);
+        when(search.getItemId()).thenReturn(R.id.search);
+        assertTrue(f.onOptionsItemSelected(search));
+        f.getChildFragmentManager().executePendingTransactions();
+        assertFalse(f.getChildFragmentManager().findFragmentByTag("search").isHidden());
+        assertTrue(f.getChildFragmentManager().findFragmentByTag("main").isHidden());
+    }
+
+    @Test
+    public void onOptionsItemSelected_filter_withoutCallback_returnsTrue() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        MenuItem filter = mock(MenuItem.class);
+        when(filter.getItemId()).thenReturn(R.id.filter);
+        assertTrue(f.onOptionsItemSelected(filter));
+    }
+
+    @Test
+    public void onOptionsItemSelected_filter_withCallback_initiatesFilter() {
+        RepositoryListContainerFragment f =
+                RepositoryListContainerFragment.newInstance("octo", false);
+        MenuHostActivity activity = attachMenuHost(f);
+        MenuItem filter = mock(MenuItem.class);
+        when(filter.getItemId()).thenReturn(R.id.filter);
+        assertTrue(f.onOptionsItemSelected(filter));
+        assertTrue(activity.filterInitiated);
+    }
+
+    @Test
+    public void onOptionsItemSelected_unknown_returnsFalse() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        MenuItem other = mock(MenuItem.class);
+        when(other.getItemId()).thenReturn(R.id.filter_type_all);
+        assertFalse(f.onOptionsItemSelected(other));
+    }
+
+    // ---------- search query / close / expand ----------
+
+    @Test
+    public void onQueryTextSubmit_withSearchFragment_setsQuery() throws Exception {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        RepositorySearchFragment search = mock(RepositorySearchFragment.class);
+        setPrivate(f, "mSearchFragment", search);
+        assertFalse(f.onQueryTextSubmit("foo"));
+        verify(search).setQuery("foo");
+    }
+
+    @Test
+    public void onQueryTextSubmit_noSearchFragment_returnsFalse() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        assertFalse(f.onQueryTextSubmit("foo"));
+    }
+
+    @Test
+    public void onQueryTextChange_storesQuery() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        assertFalse(f.onQueryTextChange("bar"));
+        Bundle out = new Bundle();
+        f.onSaveInstanceState(out);
+        assertEquals("bar", out.getString("search_query"));
+    }
+
+    @Test
+    public void onClose_hidesSearch() {
+        RepositoryListContainerFragment f = attachWithRealChildren();
+        assertFalse(f.onClose());
+        Bundle out = new Bundle();
+        f.onSaveInstanceState(out);
+        assertFalse(out.getBoolean("search_is_expanded"));
+        assertNull(out.getString("search_query"));
+        f.getChildFragmentManager().executePendingTransactions();
+        assertTrue(f.getChildFragmentManager().findFragmentByTag("search").isHidden());
+    }
+
+    @Test
+    public void onMenuItemActionExpand_marksExpanded() {
+        RepositoryListContainerFragment f = attach(
+                RepositoryListContainerFragment.newInstance("octo", false));
+        assertTrue(f.onMenuItemActionExpand(mock(MenuItem.class)));
+        Bundle out = new Bundle();
+        f.onSaveInstanceState(out);
+        assertTrue(out.getBoolean("search_is_expanded"));
+    }
+
+    @Test
+    public void onMenuItemActionCollapse_hidesSearch() {
+        RepositoryListContainerFragment f = attachWithRealChildren();
+        assertTrue(f.onMenuItemActionCollapse(mock(MenuItem.class)));
+        Bundle out = new Bundle();
+        f.onSaveInstanceState(out);
+        assertFalse(out.getBoolean("search_is_expanded"));
+        assertNull(out.getString("search_query"));
+        f.getChildFragmentManager().executePendingTransactions();
+        assertTrue(f.getChildFragmentManager().findFragmentByTag("search").isHidden());
+    }
+
+    @Test
+    public void onCreateOptionsMenu_searchVisible_hidesFilterItem() throws Exception {
+        RepositoryListContainerFragment f =
+                RepositoryListContainerFragment.newInstance("octo", false);
+        setPrivate(f, "mSearchVisible", true);
+        MenuHostActivity activity = attachMenuHost(f);
+        MenuBuilder menu = new MenuBuilder(activity);
+        f.onCreateOptionsMenu(menu, activity.getMenuInflater());
+        assertFalse(menu.findItem(R.id.filter).isVisible());
+    }
+
+    @Test
+    public void onOptionsItemSelected_search_withFilterItem_hidesFilterItem() {
+        RepositoryListContainerFragment f =
+                RepositoryListContainerFragment.newInstance("octo", false);
+        MenuHostActivity activity = attachMenuHost(f);
+        f.getChildFragmentManager().beginTransaction()
+                .add(RepositoryListFragment.newInstance(
+                        "octo", false, "all", "full_name", "asc"), "main")
+                .add(RepositorySearchFragment.newInstance("octo"), "search")
+                .commitNow();
+        f.onViewCreated(new View(activity), null);
+        f.getChildFragmentManager().executePendingTransactions();
+        MenuBuilder menu = new MenuBuilder(activity);
+        f.onCreateOptionsMenu(menu, activity.getMenuInflater());
+        assertTrue(menu.findItem(R.id.filter).isVisible());
+        MenuItem search = mock(MenuItem.class);
+        when(search.getItemId()).thenReturn(R.id.search);
+        assertTrue(f.onOptionsItemSelected(search));
+        f.getChildFragmentManager().executePendingTransactions();
+        assertFalse(menu.findItem(R.id.filter).isVisible());
+        assertFalse(f.getChildFragmentManager().findFragmentByTag("search").isHidden());
+        // Closing search flips the same branch the other way (visible=false).
+        assertFalse(f.onClose());
+        f.getChildFragmentManager().executePendingTransactions();
+        assertTrue(menu.findItem(R.id.filter).isVisible());
+        assertTrue(f.getChildFragmentManager().findFragmentByTag("search").isHidden());
     }
 
     private static MenuItem item(int id) {

@@ -31,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 
@@ -668,20 +669,20 @@ public class DiagnosticLogActivityTest {
     }
 
     @Test
-    public void showExportOptions_share_showsFailedToast_A1_8() throws Exception {
-        // A1-8: share can never succeed -- FileProvider.getUriForFile throws
-        // StringIndexOutOfBoundsException because file_paths.xml exposes the
-        // export file itself as the root (see the shareExport direct test).
-        // The production catch converts it to the failed toast, so that is
-        // the behaviour this test locks in.
+    public void showExportOptions_share_startsChooser_A1_8() throws Exception {
+        // A1-8 (fixed): the export file now lives in the diag-export/ subdir,
+        // which is the configured FileProvider root, so getUriForFile succeeds
+        // and the share chooser starts instead of the failed toast.
         write(traceFile(), "10:00:01 TAG x\n");
         DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
         freezePoller(activity);
         clickExportItem(activity, 0);
-        waitForBackground(() -> ShadowToast.getTextOfLatestToast() != null, 8000);
-        assertEquals(activity.getString(R.string.diagnostic_log_export_failed),
-                ShadowToast.getTextOfLatestToast());
-        assertNull(Shadows.shadowOf(activity).getNextStartedActivity());
+        waitForBackground(
+                () -> activity.findViewById(R.id.diag_export_button).isEnabled(), 8000);
+        Intent started = Shadows.shadowOf(activity).getNextStartedActivity();
+        assertNotNull(started);
+        assertEquals(Intent.ACTION_CHOOSER, started.getAction());
+        assertNull(ShadowToast.getTextOfLatestToast());
     }
 
     @Test
@@ -723,8 +724,8 @@ public class DiagnosticLogActivityTest {
         freezePoller(activity);
         // No idle after the click: the background export must still be in
         // flight when finish() runs, so the result post hits the destroyed
-        // check instead of copying. The copy path is used because share
-        // never produces an observable effect (A1-8).
+        // check instead of copying. The copy path is used because its effect
+        // (clipboard) is directly observable here.
         clickExportItem(activity, 2, false);
         activity.finish();
         // Wait until the export button is re-enabled: the post ran, and the
@@ -777,27 +778,40 @@ public class DiagnosticLogActivityTest {
         DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
         File other = new File(activity.getCacheDir(), "other.txt");
         Files.write(other.toPath(), "x".getBytes(StandardCharsets.UTF_8));
-        // Not under the configured cache-path diag-export.txt: FileProvider
+        // Not under the configured cache-path diag-export/: FileProvider
         // throws, the catch shows the failed toast.
         call(activity, "shareExport", new Class<?>[]{File.class}, new Object[]{other});
         assertEquals(activity.getString(R.string.diagnostic_log_export_failed),
                 ShadowToast.getTextOfLatestToast());
     }
 
+    // FileProvider caches its PathStrategy statically per authority, built
+    // from the first caller's context; under Robolectric each test gets its
+    // own cache dir, so a strategy built by an earlier test points at a
+    // stale root and getUriForFile throws for this test's file. Clear it so
+    // the strategy is rebuilt from this test's context.
+    private static void clearFileProviderCache() throws Exception {
+        Field f = androidx.core.content.FileProvider.class.getDeclaredField("sCache");
+        f.setAccessible(true);
+        ((Map<?, ?>) f.get(null)).clear();
+    }
+
     @Test
-    public void shareExport_validFile_showsFailedToast_A1_8() {
-        // A1-8: getUriForFile throws StringIndexOutOfBoundsException for the
-        // export file itself (it equals the configured FileProvider root),
-        // so even a valid export file ends in the failed toast, never a
-        // chooser. See ProbeDiagTest output in the session notes for the
-        // stack trace (FileProvider.java:876, real androidx code).
+    public void shareExport_validFile_startsChooser_A1_8() throws Exception {
+        // A1-8 (fixed): the export file used to BE the configured FileProvider
+        // root (file_paths.xml path="diag-export.txt"), so getUriForFile threw
+        // StringIndexOutOfBoundsException and even a valid export ended in
+        // the failed toast. The file now lives under the diag-export/ root,
+        // so the share chooser starts.
+        clearFileProviderCache();
         DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
         File export = DiagTrace.exportFile(appContext());
         assertNotNull(export);
         call(activity, "shareExport", new Class<?>[]{File.class}, new Object[]{export});
-        assertEquals(activity.getString(R.string.diagnostic_log_export_failed),
-                ShadowToast.getTextOfLatestToast());
-        assertNull(Shadows.shadowOf(activity).getNextStartedActivity());
+        Intent started = Shadows.shadowOf(activity).getNextStartedActivity();
+        assertNotNull(started);
+        assertEquals(Intent.ACTION_CHOOSER, started.getAction());
+        assertNull(ShadowToast.getTextOfLatestToast());
     }
 
     @Test
@@ -1163,5 +1177,128 @@ public class DiagnosticLogActivityTest {
                 entryViaReflection(activity, 0, "10:00:01", "one"),
                 entryViaReflection(activity, 1, "10:00:02", "two"));
         assertEquals(2, ((RecyclerView.Adapter<?>) get(activity, "mAdapter")).getItemCount());
+    }
+
+    // ---------- missed-line close-out (2026-11-15 §6) ----------
+
+    @Test
+    public void loadTraceFile_nullText_addsNothing() throws Exception {
+        // readText returns null on IO failure: the null arm of
+        // `text == null || text.isEmpty()` (line 278).
+        DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
+        freezePoller(activity);
+        File f = File.createTempFile("trace-null", ".txt", activity.getCacheDir());
+        List<Object> out = new ArrayList<>();
+        try (MockedStatic<DiagTrace> mock = Mockito.mockStatic(DiagTrace.class)) {
+            mock.when(() -> DiagTrace.readText(any(File.class), anyInt())).thenReturn(null);
+            call(activity, "loadTraceFile",
+                    new Class<?>[]{List.class, File.class}, new Object[]{out, f});
+        }
+        assertTrue(out.isEmpty());
+    }
+
+    @Test
+    public void loadCrashEntry_nullText_emptyFullSkipsLoop() throws Exception {
+        // readText null: `text != null ? text : ""` takes the "" arm (306)
+        // and the `if (text != null)` loop is skipped (308).
+        DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
+        freezePoller(activity);
+        File f = new File(activity.getCacheDir(), "crash-20261110-123456-789.txt");
+        Files.write(f.toPath(), "boom\n".getBytes(StandardCharsets.UTF_8));
+        Object entry;
+        try (MockedStatic<DiagTrace> mock = Mockito.mockStatic(DiagTrace.class)) {
+            mock.when(() -> DiagTrace.readText(any(File.class), anyInt())).thenReturn(null);
+            entry = call(activity, "loadCrashEntry",
+                    new Class<?>[]{File.class}, new Object[]{f});
+        }
+        assertEquals("", get(entry, "full"));
+        assertEquals(f.getName(), get(entry, "detail"));
+        assertEquals("12:34:56", get(entry, "time"));
+    }
+
+    @Test
+    public void deleteQuietly_deleteThrows_caughtSilently() {
+        // File.delete() throws SecurityException: the catch (361) swallows it.
+        DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
+        File mockFile = Mockito.mock(File.class);
+        Mockito.when(mockFile.exists()).thenReturn(true);
+        Mockito.when(mockFile.delete()).thenThrow(new SecurityException("denied"));
+        call(activity, "deleteQuietly", new Class<?>[]{File.class}, new Object[]{mockFile});
+        // No exception escapes; survival is the assertion.
+    }
+
+    @Test
+    public void shareExport_mockedFileProvider_startsChooser() throws Exception {
+        // The success path (411-418) with a stubbed Uri: the real-provider
+        // case is covered by shareExport_validFile_startsChooser_A1_8; this
+        // one pins the intent-building in isolation.
+        DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
+        freezePoller(activity);
+        File export = DiagTrace.exportFile(appContext());
+        assertNotNull(export);
+        android.net.Uri fakeUri = android.net.Uri.parse(
+                "content://com.gh4a.debug.fileprovider/diag-export.txt");
+        try (MockedStatic<androidx.core.content.FileProvider> mock =
+                Mockito.mockStatic(androidx.core.content.FileProvider.class)) {
+            mock.when(() -> androidx.core.content.FileProvider.getUriForFile(
+                            any(), any(), any())).thenReturn(fakeUri);
+            call(activity, "shareExport", new Class<?>[]{File.class}, new Object[]{export});
+        }
+        Intent started = Shadows.shadowOf(activity).getNextStartedActivity();
+        assertNotNull(started);
+        assertEquals(Intent.ACTION_CHOOSER, started.getAction());
+    }
+
+    @Test
+    public void saveToDownloads_emptyFile_savesEmptyAndShowsSavedToast() throws Exception {
+        // Zero-byte export: the copy loop runs zero iterations, then the
+        // normal try-with-resources close (461) and the saved toast.
+        android.net.Uri target =
+                android.net.Uri.parse("content://media/external/downloads/1");
+        registerDownloadsProvider(target, null, false);
+        DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
+        freezePoller(activity);
+        File empty = File.createTempFile("empty-export", ".txt", activity.getCacheDir());
+        call(activity, "saveToDownloads", new Class<?>[]{File.class}, new Object[]{empty});
+        assertEquals(activity.getString(R.string.diagnostic_log_saved),
+                ShadowToast.getTextOfLatestToast());
+        assertNotNull(TestDownloadsProvider.sWrittenFile);
+        assertEquals(0, TestDownloadsProvider.sWrittenFile.length());
+    }
+
+    @Test
+    public void copyExport_nullText_copiesEmptyString() throws Exception {
+        // readText null: `text != null ? text : ""` takes the "" arm (486).
+        DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
+        freezePoller(activity);
+        File f = File.createTempFile("copy-null", ".txt", activity.getCacheDir());
+        Files.write(f.toPath(), "x".getBytes(StandardCharsets.UTF_8));
+        try (MockedStatic<DiagTrace> mock = Mockito.mockStatic(DiagTrace.class)) {
+            mock.when(() -> DiagTrace.readText(any(File.class), anyInt())).thenReturn(null);
+            call(activity, "copyExport", new Class<?>[]{File.class}, new Object[]{f});
+        }
+        ClipboardManager cm = (ClipboardManager)
+                appContext().getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = cm.getPrimaryClip();
+        assertNotNull(clip);
+        assertEquals("", clip.getItemAt(0).getText().toString());
+        assertEquals(activity.getString(R.string.diagnostic_log_copied),
+                ShadowToast.getTextOfLatestToast());
+    }
+
+    @Test
+    public void copyExport_noClipboardManager_showsFailedToast() throws Exception {
+        // getSystemService(CLIPBOARD_SERVICE) returns null: the `cm == null`
+        // arm (480-483). The removal is scoped to this activity instance's
+        // shadow; the next test launches a fresh activity.
+        DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
+        freezePoller(activity);
+        assertNotNull(activity.getSystemService(Context.CLIPBOARD_SERVICE));
+        Shadows.shadowOf(activity).removeSystemService(Context.CLIPBOARD_SERVICE);
+        File f = File.createTempFile("copy-nocm", ".txt", activity.getCacheDir());
+        Files.write(f.toPath(), "copy me".getBytes(StandardCharsets.UTF_8));
+        call(activity, "copyExport", new Class<?>[]{File.class}, new Object[]{f});
+        assertEquals(activity.getString(R.string.diagnostic_log_export_failed),
+                ShadowToast.getTextOfLatestToast());
     }
 }

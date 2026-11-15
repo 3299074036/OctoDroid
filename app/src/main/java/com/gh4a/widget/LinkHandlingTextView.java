@@ -40,6 +40,7 @@ public class LinkHandlingTextView extends AppCompatTextView {
 
     public LinkHandlingTextView(Context context) {
         super(context, null);
+        initAttributes(context, null, 0);
     }
 
     public LinkHandlingTextView(Context context, AttributeSet attrs) {

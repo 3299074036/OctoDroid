@@ -295,10 +295,10 @@ public class CommitListFragment extends PagedDataBaseFragment<Commit> implements
             Commit commit, String currentFileName, RepositoryCommitService service) {
         return service.getCommit(mRepoOwner, mRepoName, commit.sha())
                 .filter(Response::isSuccessful)
-                .map(Response::body)
-                .map(actualCommit -> {
-                    List<GitHubFile> files = actualCommit != null ? actualCommit.files() : null;
-                    List<Commit> parents = actualCommit != null ? actualCommit.parents() : null;
+                .map(r -> Optional.ofNullable(r.body()))
+                .map(opt -> opt.map(actualCommit -> {
+                    List<GitHubFile> files = actualCommit.files();
+                    List<Commit> parents = actualCommit.parents();
                     if (files == null || parents == null || parents.isEmpty()) {
                         return Optional.<FileRenameFollowData>empty();
                     }
@@ -306,7 +306,7 @@ public class CommitListFragment extends PagedDataBaseFragment<Commit> implements
                             .filter(f -> currentFileName.equals(f.filename()) && f.previousFilename() != null)
                             .findFirst()
                             .map(f -> new FileRenameFollowData(parents.get(0).sha(), f.previousFilename()));
-                })
+                }).orElse(Optional.empty()))
                 .filter(Optional::isPresent)
                 .map(Optional::get);
     }

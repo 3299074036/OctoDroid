@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -12,20 +13,39 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.view.Gravity;
+import android.view.Menu;
 
+import androidx.activity.result.ActivityResultRegistry;
+import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.test.core.app.ApplicationProvider;
 
 import com.gh4a.Gh4Application;
 import com.gh4a.R;
+import com.gh4a.ServiceFactory;
+import com.gh4a.activities.Github4AndroidActivity;
+import com.gh4a.activities.SettingsActivity;
+import com.gh4a.utils.DrawerManager;
+import com.gh4a.utils.SingleFactory;
+import com.google.android.material.navigation.NavigationBarView;
+import com.google.android.material.navigation.NavigationView;
 import com.gh4a.fragment.NotificationListFragment;
 import com.gh4a.fragment.SettingsFragment;
 import com.gh4a.model.NotificationHolder;
+import com.gh4a.model.NotificationListLoadResult;
+import com.gh4a.utils.NotificationCountProvider;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.meisolsson.githubsdk.model.NotificationThread;
+import com.meisolsson.githubsdk.model.Page;
 import com.meisolsson.githubsdk.model.User;
+import com.meisolsson.githubsdk.service.activity.NotificationService;
+import com.meisolsson.githubsdk.service.users.UserService;
 
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.MockedStatic;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.android.controller.ActivityController;
@@ -33,8 +53,10 @@ import org.robolectric.shadows.ShadowToast;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import androidx.appcompat.view.menu.MenuBuilder;
 import java.lang.reflect.Field;
 import org.robolectric.Shadows;
@@ -43,6 +65,16 @@ import org.robolectric.shadows.ShadowDialog;
 import org.robolectric.shadows.ShadowLooper;
 import static org.junit.Assert.assertNotSame;
 import java.lang.reflect.Method;
+
+import io.reactivex.Single;
+import retrofit2.Response;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mockStatic;
 
 @RunWith(RobolectricTestRunner.class)
 public class HomeActivityTest {
@@ -61,6 +93,61 @@ public class HomeActivityTest {
         when(thread.unread()).thenReturn(unread);
         when(thread.repository()).thenReturn(null);
         return new NotificationHolder(thread);
+    }
+
+    // ---- 真实网络挡掉（每测前后开关） ----
+    // HomeActivity 启动即发两路真实请求：loadUserInfo（UserService.getUser）
+    // 与 loadNotificationIndicator / updateMeBadge（NotificationService）。
+    // 无 token 时通知请求返回 401，ApiHelpers.throwOnFailure 遇 401 即
+    // logout()，会把刚切换的登录在 switchActiveUser 的窗口内清掉（见
+    // onLoginFinished_addsAccountAndSwitches 旧注释），还是跨测试静态
+    // 状态污染的头号嫌疑。全部挡成空数据：其余 ServiceFactory/SingleFactory
+    // 调用仍走真实方法（CALLS_REAL_METHODS），只拦截这两路。
+    // 另清掉 NotificationCountProvider 单例缓存（TTL 2 分钟，跨测试存活），
+    // 否则上一个测试的拉取结果会漏进本测试。
+    private MockedStatic<ServiceFactory> mockedServiceFactory;
+    private MockedStatic<SingleFactory> mockedSingleFactory;
+
+    @Before
+    public void stubNetworkServices() {
+        NotificationCountProvider.getInstance().invalidate();
+
+        UserService userService = mock(UserService.class);
+        User octocat = User.builder().login("octocat").id(1L).build();
+        // any() 而非 anyString()：未登录时 login 为 null 也要返回 Single；
+        // 真实 service.getUser(null) 同样先返回 Single（@Path 校验在订阅时），
+        // 返回 null 会让 loadUserInfo 在 onCreate 里同步 NPE。
+        when(userService.getUser(any()))
+                .thenReturn(Single.just(Response.success(octocat)));
+
+        NotificationService notificationService = mock(NotificationService.class);
+        Page<NotificationThread> emptyPage = mock(Page.class);
+        when(emptyPage.items()).thenReturn(Collections.emptyList());
+        when(notificationService.getNotifications(anyMap(), anyLong()))
+                .thenReturn(Single.just(Response.success(emptyPage)));
+
+        mockedServiceFactory = mockStatic(ServiceFactory.class, CALLS_REAL_METHODS);
+        mockedServiceFactory.when(() -> ServiceFactory.get(eq(UserService.class), anyBoolean()))
+                .thenReturn(userService);
+        mockedServiceFactory.when(() -> ServiceFactory.get(eq(NotificationService.class),
+                anyBoolean(), any())).thenReturn(notificationService);
+
+        mockedSingleFactory = mockStatic(SingleFactory.class, CALLS_REAL_METHODS);
+        mockedSingleFactory.when(() -> SingleFactory.getNotifications(false, false, false))
+                .thenReturn(Single.just(
+                        new NotificationListLoadResult(Collections.emptyList())));
+    }
+
+    @After
+    public void closeNetworkStubs() {
+        if (mockedSingleFactory != null) {
+            mockedSingleFactory.close();
+            mockedSingleFactory = null;
+        }
+        if (mockedServiceFactory != null) {
+            mockedServiceFactory.close();
+            mockedServiceFactory = null;
+        }
     }
 
     // ---- countUnread（静态纯逻辑） ----
@@ -376,14 +463,12 @@ public class HomeActivityTest {
 
     @Test
     public void onLoginFinished_addsAccountAndSwitches() {
-        // onLoginFinished → addAccount + switchActiveUser。注意：测试 JVM 经
-        // MITM 代理可达真实 api.github.com；无 token 的通知请求返回 401，
-        // ApiHelpers.throwOnFailure 遇 401 即 logout()，会把刚切换的登录
-        // 在 switchActiveUser 的 fragment 切换窗口内清掉（诊断：seed 后
-        // active=octocat，setup() 后即为空；addAccount 后为 newuser，
-        // switchActiveUser 后为空），故“切换后仍为新用户”在该环境下不可
-        // 确定。此处只验证 addAccount 的切换本身生效、且 onLoginFinished
-        // 全程不崩。
+        // onLoginFinished → addAccount + switchActiveUser。旧注：无 token 的
+        // 通知请求打真实 api.github.com 返回 401，ApiHelpers.throwOnFailure
+        // 遇 401 即 logout()，把刚切换的登录在 switchActiveUser 的窗口内
+        // 清掉，故“切换后仍为新用户”不可确定。现 @Before 已把 UserService /
+        // NotificationService / SingleFactory.getNotifications 全挡成空数据、
+        // 且清掉通知单例缓存，不再发真实请求，切换应真正保持。
         try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
             HomeActivity activity = c.setup().get();
             User user = User.builder().login("newuser").id(123L).build();
@@ -391,6 +476,7 @@ public class HomeActivityTest {
             assertEquals("newuser", Gh4Application.get().getAuthLogin());
             activity.onLoginFinished("token-xyz", user);
             assertNotNull(activity);
+            assertEquals("newuser", Gh4Application.get().getAuthLogin());
         }
     }
 
@@ -1326,4 +1412,772 @@ public class HomeActivityTest {
         }
     }
 
+    // ---- §6 补缺口：HomeActivity（15:40 报告残 39 行 / 60 分支） ----
+
+    /** 把结果发给最后一次启动的 launcher（DiffViewerActivityTest 同款）。 */
+    private static boolean dispatchLastLaunchedResult(android.app.Activity activity,
+            int resultCode, Intent data) throws Exception {
+        ActivityResultRegistry registry =
+                ((androidx.activity.ComponentActivity) activity).getActivityResultRegistry();
+        @SuppressWarnings("unchecked")
+        Collection<String> launchedKeys =
+                (Collection<String>) a2GetField(registry, "launchedKeys");
+        if (launchedKeys == null || launchedKeys.isEmpty()) {
+            return false;
+        }
+        String key = launchedKeys.iterator().next();
+        @SuppressWarnings("unchecked")
+        Map<String, Integer> keyToRc =
+                (Map<String, Integer>) a2GetField(registry, "keyToRc");
+        Integer rc = keyToRc.get(key);
+        if (rc == null) {
+            return false;
+        }
+        return registry.dispatchResult(rc, resultCode, data);
+    }
+
+    /** 主 looper 空闲直到条件成立（loader 投递用），最多约 1 秒。 */
+    private static void idleUntil(java.util.function.BooleanSupplier condition) throws Exception {
+        for (int i = 0; i < 50 && !condition.getAsBoolean(); i++) {
+            ShadowLooper.idleMainLooper();
+            Thread.sleep(20);
+        }
+    }
+
+    /** 新建仓库输入框走一遍正按钮，返回最新 Toast 文案。 */
+    private static String repoInputDialogToast(HomeActivity activity, String text)
+            throws Exception {
+        a2Invoke(activity, "showRepoInputDialog", new Class<?>[]{boolean.class}, false);
+        androidx.appcompat.app.AlertDialog dialog =
+                (androidx.appcompat.app.AlertDialog)
+                        ShadowDialog.getShownDialogs().get(0);
+        android.widget.EditText input = a2FindEditText(dialog.getWindow().getDecorView());
+        assertNotNull(input);
+        input.setText(text);
+        dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).performClick();
+        ShadowLooper.idleMainLooper();
+        return ShadowToast.getTextOfLatestToast();
+    }
+
+    @Test
+    public void settingsLauncher_themeChanged_restartsToToplevel() throws Exception {
+        // 先把“通知权限已问”置位，避免 onResume 顺带启动权限 launcher，
+        // 保证 launchedKeys 里只有 settings 一个 key。
+        prefs().edit().putBoolean("notification_permission_asked_v1", true).apply();
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            MenuBuilder menu = new MenuBuilder(activity);
+            menu.add(0, R.id.settings, 0, "Settings");
+            assertTrue(activity.onNavigationItemSelected(menu.findItem(R.id.settings)));
+            Intent settingsIntent = Shadows.shadowOf(activity)
+                    .getNextStartedActivityForResult().intent;
+            assertNotNull(settingsIntent);
+            assertEquals(SettingsActivity.class.getName(),
+                    settingsIntent.getComponent().getClassName());
+            // startActivityForResult 同时进 plain 队列：先排空，否则后面的
+            // getNextStartedActivity() 拿到的是 SettingsActivity 的启动 intent。
+            Intent launchIntent = Shadows.shadowOf(activity).getNextStartedActivity();
+            assertNotNull(launchIntent);
+            assertEquals(SettingsActivity.class.getName(),
+                    launchIntent.getComponent().getClassName());
+            Intent result = new Intent();
+            result.putExtra(SettingsActivity.RESULT_EXTRA_THEME_CHANGED, true);
+            assertTrue(dispatchLastLaunchedResult(activity,
+                    android.app.Activity.RESULT_OK, result));
+            ShadowLooper.idleMainLooper();
+            Intent toplevel = Shadows.shadowOf(activity).getNextStartedActivity();
+            assertNotNull(toplevel);
+            // 未登录（无 token）时 getToplevelActivityIntent() 返回
+            // Github4AndroidActivity；回调本身（goToToplevelActivity）已覆盖。
+            assertEquals(Github4AndroidActivity.class.getName(),
+                    toplevel.getComponent().getClassName());
+        }
+    }
+
+    @Test
+    public void settingsLauncher_noThemeChange_doesNotRestart() throws Exception {
+        prefs().edit().putBoolean("notification_permission_asked_v1", true).apply();
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            MenuBuilder menu = new MenuBuilder(activity);
+            menu.add(0, R.id.settings, 0, "Settings");
+            assertTrue(activity.onNavigationItemSelected(menu.findItem(R.id.settings)));
+            assertNotNull(Shadows.shadowOf(activity).getNextStartedActivityForResult());
+            assertNotNull(Shadows.shadowOf(activity).getNextStartedActivity());
+            assertTrue(dispatchLastLaunchedResult(activity,
+                    android.app.Activity.RESULT_OK, new Intent()));
+            ShadowLooper.idleMainLooper();
+            assertNull(Shadows.shadowOf(activity).getNextStartedActivity());
+        }
+    }
+
+    @Test
+    public void notificationPermissionLauncher_result_runsEmptyCallback() throws Exception {
+        // 保证未问过：onResume 才会启动权限 launcher。须先有账号（token），
+        // 否则 isAuthorized() 为假、onResume 不启动 launcher，dispatch 返回 false。
+        User user = mock(User.class);
+        when(user.login()).thenReturn("octocat");
+        when(user.id()).thenReturn(1L);
+        Gh4Application.get().addAccount(user, "fake-token");
+        prefs().edit().putBoolean("notification_permission_asked_v1", false).apply();
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            // onResume 已把权限请求发出，launcher 在 launchedKeys 里。
+            assertTrue(dispatchLastLaunchedResult(activity,
+                    android.app.Activity.RESULT_OK, null));
+            assertTrue(prefs().getBoolean("notification_permission_asked_v1", false));
+        }
+    }
+
+    @Test
+    public void maybeRequestNotificationPermission_alreadyGranted_returnsWithoutAsking()
+            throws Exception {
+        // 须先有账号（token），否则 isAuthorized() 为假、方法在 327 行提前返回，
+        // 测不到 333 行的已授权分支。
+        User user = mock(User.class);
+        when(user.login()).thenReturn("octocat");
+        when(user.id()).thenReturn(1L);
+        Gh4Application.get().addAccount(user, "fake-token");
+        android.app.Application app = ApplicationProvider.getApplicationContext();
+        Shadows.shadowOf(app).grantPermissions(
+                android.Manifest.permission.POST_NOTIFICATIONS);
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2Invoke(activity, "maybeRequestNotificationPermission", new Class<?>[]{});
+            assertFalse(prefs().getBoolean("notification_permission_asked_v1", false));
+        }
+    }
+
+    @Test
+    public void setupBottomNav_secondCall_usesExistingBottomNav() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            BottomNavigationView first = activity.findViewById(R.id.bottom_nav);
+            assertNotNull(first);
+            a2Invoke(activity, "setupBottomNav", new Class<?>[]{});
+            BottomNavigationView after = activity.findViewById(R.id.bottom_nav);
+            assertSame(first, after);
+            assertSame(first, a2GetField(activity, "mBottomNav"));
+        }
+    }
+
+    @Test
+    public void setupBottomNav_noSwipeContainer_skipsMargin() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            androidx.coordinatorlayout.widget.CoordinatorLayout coordinator =
+                    activity.getRootLayout();
+            android.view.View bottom = activity.findViewById(R.id.bottom_nav);
+            android.view.View swipe = activity.findViewById(R.id.swipe_container);
+            assertNotNull(bottom);
+            assertNotNull(swipe);
+            coordinator.removeView(bottom);
+            coordinator.removeView(swipe);
+            assertNull(activity.findViewById(R.id.bottom_nav));
+            a2Invoke(activity, "setupBottomNav", new Class<?>[]{});
+            // 重新 inflate 出底栏，且未因 swipe_container 缺失而崩。
+            assertNotNull(activity.findViewById(R.id.bottom_nav));
+        }
+    }
+
+    @Test
+    public void setupBottomNav_nonCoordinatorLayoutParams_skipsMargin() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            androidx.coordinatorlayout.widget.CoordinatorLayout coordinator =
+                    activity.getRootLayout();
+            android.view.View bottom = activity.findViewById(R.id.bottom_nav);
+            android.view.View swipe = activity.findViewById(R.id.swipe_container);
+            assertNotNull(bottom);
+            assertNotNull(swipe);
+            coordinator.removeView(bottom);
+            android.view.ViewGroup.LayoutParams orig = swipe.getLayoutParams();
+            swipe.setLayoutParams(new android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
+            a2Invoke(activity, "setupBottomNav", new Class<?>[]{});
+            // 立即恢复原 LayoutParams，避免后续布局把普通 params 当 CoordinatorLayout 用。
+            swipe.setLayoutParams(orig);
+            assertNotNull(activity.findViewById(R.id.bottom_nav));
+        }
+    }
+
+    @Test
+    public void updateDrawerMode_twoAccounts_repopulatesOtherAccounts() throws Exception {
+        seedTwoAccounts();
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            android.view.Menu menu = (android.view.Menu) a2GetField(activity, "mLeftDrawerMenu");
+            assertNotNull(menu);
+            a2Invoke(activity, "updateDrawerMode", new Class<?>[]{boolean.class}, true);
+            android.view.MenuItem other = menu.findItem(1000);
+            assertNotNull(other);
+            assertEquals("seconduser", other.getTitle().toString());
+            // 第二次调用：先删旧项（1276），再重新加回。
+            a2Invoke(activity, "updateDrawerMode", new Class<?>[]{boolean.class}, true);
+            android.view.MenuItem other2 = menu.findItem(1000);
+            assertNotNull(other2);
+            assertEquals("seconduser", other2.getTitle().toString());
+            // 当前登录不进 other 列表：只有 1 个 other 项。
+            assertNull(menu.findItem(1001));
+        }
+    }
+
+    @Test
+    public void updateDrawerMode_hiddenItem_skipsVisibility() throws Exception {
+        Context context = context();
+        DrawerManager.setVisible(context, "my_repos", false);
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2Invoke(activity, "updateDrawerMode", new Class<?>[]{boolean.class}, true);
+            android.view.Menu menu = (android.view.Menu) a2GetField(activity, "mLeftDrawerMenu");
+            assertNull(menu.findItem(R.id.my_repos));
+        } finally {
+            DrawerManager.setVisible(context, "my_repos", true);
+        }
+    }
+
+    @Test
+    public void setupThemeToggle_noDrawer_returnsEarly() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            android.view.View drawer = activity.findViewById(R.id.left_drawer);
+            assertNotNull(drawer);
+            android.view.ViewGroup parent = (android.view.ViewGroup) drawer.getParent();
+            parent.removeView(drawer);
+            assertNull(activity.findViewById(R.id.left_drawer));
+            a2Invoke(activity, "setupThemeToggle", new Class<?>[]{});
+        }
+    }
+
+    @Test
+    public void setupThemeToggle_noThemeItem_returnsEarly() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            NavigationView drawer = activity.findViewById(R.id.left_drawer);
+            assertNotNull(drawer);
+            drawer.getMenu().removeItem(R.id.theme_toggle);
+            assertNull(drawer.getMenu().findItem(R.id.theme_toggle));
+            a2Invoke(activity, "setupThemeToggle", new Class<?>[]{});
+        }
+    }
+
+    @Test
+    public void updateNotificationIndicator_nullIndicator_returnsEarly() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2SetField(activity, "mNotificationsIndicator", null);
+            a2Invoke(activity, "updateNotificationIndicator",
+                    new Class<?>[]{int.class}, R.id.notifications);
+        }
+    }
+
+    @Test
+    public void updateNotificationIndicator_notificationsItem_usesAccent() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertNotNull(a2GetField(activity, "mNotificationsIndicator"));
+            a2Invoke(activity, "updateNotificationIndicator",
+                    new Class<?>[]{int.class}, R.id.notifications);
+            android.widget.ImageView indicator =
+                    (android.widget.ImageView) a2GetField(activity, "mNotificationsIndicator");
+            assertNotNull(indicator.getDrawable());
+        }
+    }
+
+    @Test
+    public void setNotificationsIndicatorVisible_nullIndicator_returnsEarly() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2SetField(activity, "mNotificationsIndicator", null);
+            activity.setNotificationsIndicatorVisible(true);
+        }
+    }
+
+    @Test
+    public void setPinnedTrendRangeRow_nullRow_clearsWithoutAdding() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            activity.setPinnedTrendRangeRow(null);
+            assertNull(a2GetField(activity, "mPinnedTrendRangeRow"));
+        }
+    }
+
+    @Test
+    public void removePinnedTrendRangeRow_nullRow_doesNothing() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            activity.removePinnedTrendRangeRow(null);
+        }
+    }
+
+    @Test
+    public void updateStarBadgeFromCache_nullBottomNav_returnsEarly() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2SetField(activity, "mBottomNav", null);
+            activity.updateStarBadgeFromCache();
+        }
+    }
+
+    @Test
+    public void setTrendRange_nonDiscoverFactory_isNoOp() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            activity.navigateToHomePage(R.id.search);
+            assertEquals(R.id.search, (int) a2GetField(activity, "mSelectedFactoryId"));
+            activity.setTrendRange(7);
+            // 非趋势工厂：不刷新页面，工厂不变。
+            assertEquals(R.id.search, (int) a2GetField(activity, "mSelectedFactoryId"));
+        }
+    }
+
+    @Test
+    public void repoInputDialog_positive_trailingSlash_showsToast() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertEquals(activity.getString(R.string.create_repo_invalid),
+                    repoInputDialogToast(activity, "owner/"));
+        }
+    }
+
+    @Test
+    public void repoInputDialog_positive_dotPrefixName_showsToast() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertEquals(activity.getString(R.string.create_repo_invalid),
+                    repoInputDialogToast(activity, "owner/.hidden"));
+        }
+    }
+
+    @Test
+    public void repoInputDialog_positive_dotSuffixName_showsToast() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertEquals(activity.getString(R.string.create_repo_invalid),
+                    repoInputDialogToast(activity, "owner/name."));
+        }
+    }
+
+    @Test
+    public void repoInputDialog_positive_doubleDotName_showsToast() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertEquals(activity.getString(R.string.create_repo_invalid),
+                    repoInputDialogToast(activity, "owner/na..me"));
+        }
+    }
+
+    @Test
+    public void repoInputDialog_positive_badNameChars_showsToast() throws Exception {
+        // 名字含空格，正则 [A-Za-z0-9._-]+ 不匹配：覆盖 643 行 !matches 真分支。
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertEquals(activity.getString(R.string.create_repo_invalid),
+                    repoInputDialogToast(activity, "owner/na me"));
+        }
+    }
+
+    @Test
+    public void onCreateOptionsMenu_handledFactory_returnsTrue() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            FragmentFactory mockFactory = mock(FragmentFactory.class);
+            when(mockFactory.onCreateOptionsMenu(any(Menu.class))).thenReturn(true);
+            a2SetField(activity, "mFactory", mockFactory);
+            assertTrue(activity.onCreateOptionsMenu(new MenuBuilder(activity)));
+        }
+    }
+
+    @Test
+    public void onBackPressed_drawerOpen_closesDrawerWithoutPopping() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            activity.navigateToHomePage(R.id.search);
+            assertEquals(R.id.search, (int) a2GetField(activity, "mSelectedFactoryId"));
+            DrawerLayout drawerLayout = activity.findViewById(R.id.drawer_container);
+            assertNotNull(drawerLayout);
+            drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED, Gravity.LEFT);
+            drawerLayout.openDrawer(Gravity.LEFT, false);
+            assertTrue(drawerLayout.isDrawerOpen(Gravity.LEFT));
+            activity.onBackPressed();
+            // closeDrawers() 调的是动画版 closeDrawer（ViewDragHelper 平滑滑动），
+            // Robolectric 下不会自动走完：推进虚拟时钟并反复调 computeScroll
+            // 驱动滑块，直到抽屉真正合上（最多 ~1.6s 虚拟时间）。
+            for (int i = 0; i < 100 && drawerLayout.isDrawerOpen(Gravity.LEFT); i++) {
+                org.robolectric.shadows.ShadowSystemClock.advanceBy(16,
+                        java.util.concurrent.TimeUnit.MILLISECONDS);
+                drawerLayout.computeScroll();
+                ShadowLooper.idleMainLooper();
+            }
+            assertFalse(drawerLayout.isDrawerOpen(Gravity.LEFT));
+            // 抽屉关掉后走 else 分支：回初始页，不结束。
+            assertFalse(activity.isFinishing());
+            assertEquals(R.id.discover_hub, (int) a2GetField(activity, "mSelectedFactoryId"));
+        }
+    }
+
+    @Test
+    public void onBackPressed_offInitialPage_nullLeftDrawerMenu_skipsCheck() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            activity.navigateToHomePage(R.id.search);
+            a2SetField(activity, "mLeftDrawerMenu", null);
+            activity.onBackPressed();
+            assertFalse(activity.isFinishing());
+            assertEquals(R.id.discover_hub, (int) a2GetField(activity, "mSelectedFactoryId"));
+        }
+    }
+
+    @Test
+    public void onBackPressed_offInitialPage_hiddenInitialItem_skipsCheck() throws Exception {
+        Context context = context();
+        DrawerManager.setVisible(context, "discover_hub", false);
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            // 初始页被隐藏，启动时已回落到首个可见项（search）。
+            assertEquals(R.id.search, (int) a2GetField(activity, "mSelectedFactoryId"));
+            activity.onBackPressed();
+            assertFalse(activity.isFinishing());
+            assertEquals(R.id.discover_hub, (int) a2GetField(activity, "mSelectedFactoryId"));
+        } finally {
+            DrawerManager.setVisible(context, "discover_hub", true);
+        }
+    }
+
+    @Test
+    public void getInitialLeftDrawerSelection_hiddenSelectedItem_fallsBackToFirstVisible()
+            throws Exception {
+        Context context = context();
+        DrawerManager.setVisible(context, "discover_hub", false);
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertEquals(R.id.search, (int) a2GetField(activity, "mSelectedFactoryId"));
+            assertTrue(a2GetField(activity, "mFactory") instanceof SearchHubFactory);
+        } finally {
+            DrawerManager.setVisible(context, "discover_hub", true);
+        }
+    }
+
+    @Test
+    public void getInitialLeftDrawerSelection_allHidden_skipsFallback() throws Exception {
+        Context context = context();
+        String[] keys = {"search", "feed_hub", "notifications", "discover_hub",
+                "my_repos", "star_hub", "my_items", "topic_discovery"};
+        for (String key : keys) {
+            DrawerManager.setVisible(context, key, false);
+        }
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            // 无可见项：不回落，仍留在趋势页。
+            assertEquals(R.id.discover_hub, (int) a2GetField(activity, "mSelectedFactoryId"));
+        } finally {
+            for (String key : keys) {
+                DrawerManager.setVisible(context, key, true);
+            }
+        }
+    }
+
+    @Test
+    public void getInitialLeftDrawerSelection_hiddenNotifications_skipsIndicator()
+            throws Exception {
+        Context context = context();
+        DrawerManager.setVisible(context, "notifications", false);
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertNull(a2GetField(activity, "mNotificationsMenuItem"));
+            assertNull(a2GetField(activity, "mNotificationsIndicator"));
+        } finally {
+            DrawerManager.setVisible(context, "notifications", true);
+        }
+    }
+
+    @Test
+    public void updateUserInfo_nullViews_skipsAvatarAndExtra() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            User user = User.builder().login("octocat").id(1L).build();
+            a2SetField(activity, "mUserInfo", user);
+            a2SetField(activity, "mAvatarView", null);
+            a2SetField(activity, "mUserExtraView", null);
+            a2Invoke(activity, "updateUserInfo", new Class<?>[]{});
+        }
+    }
+
+    @Test
+    public void switchActiveUser_finishingActivity_skipsRecreate() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            HomeActivity before = activity;
+            a2Invoke(activity, "switchActiveUser", new Class<?>[]{String.class}, "octocat");
+            activity.finish();
+            ShadowLooper.idleMainLooper();
+            // 已在结束：posted 的 recreate 被跳过，实例不变。
+            assertSame(before, c.get());
+            assertTrue(activity.isFinishing());
+        }
+    }
+
+    @Test
+    public void switchActiveUser_destroyedActivity_skipsRecreate() throws Exception {
+        // 974 行另一半：isDestroyed() 为真时短路，isFinishing() 不求值。
+        // 先 post recreate，再 destroy 掉 activity，runnable 运行时
+        // isDestroyed() 为真 → 跳过 recreate。
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2Invoke(activity, "switchActiveUser", new Class<?>[]{String.class}, "octocat");
+            c.destroy();
+            assertTrue(activity.isDestroyed());
+            ShadowLooper.idleMainLooper();
+            assertNull(Shadows.shadowOf(activity).getNextStartedActivity());
+        }
+    }
+
+    @Test
+    public void onPageSelected_nullFactory_doesNotCrash() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2SetField(activity, "mFactory", null);
+            activity.onPageSelected(0);
+        }
+    }
+
+    @Test
+    public void onNavigationItemSelected_themeToggle_nullSwitch_returnsTrue() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2SetField(activity, "mThemeSwitch", null);
+            MenuBuilder menu = new MenuBuilder(activity);
+            menu.add(0, R.id.theme_toggle, 0, "Theme");
+            assertTrue(activity.onNavigationItemSelected(menu.findItem(R.id.theme_toggle)));
+        }
+    }
+
+    @Test
+    public void onNavigationItemSelected_smallUnknownId_returnsFalse() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            MenuBuilder menu = new MenuBuilder(activity);
+            menu.add(0, 5, 0, "Unknown");
+            assertFalse(activity.onNavigationItemSelected(menu.findItem(5)));
+        }
+    }
+
+    @Test
+    public void onNavigationItemSelected_nullFactory_fallsThrough() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2SetField(activity, "mFactory", null);
+            MenuBuilder menu = new MenuBuilder(activity);
+            menu.add(0, R.id.search, 0, "Search");
+            assertTrue(activity.onNavigationItemSelected(menu.findItem(R.id.search)));
+            assertEquals(R.id.search, (int) a2GetField(activity, "mSelectedFactoryId"));
+        }
+    }
+
+    @Test
+    public void loadNotificationIndicator_nullResult_returnsFalse() throws Exception {
+        NotificationService service = mock(NotificationService.class);
+        // 用 SingleSubject 控流：等 loader 真订阅（有观察者）再发 null，
+        // 保证 map 在 result==null 时跑过（1347 行首条件假分支）。
+        // Single.just 版只证明 service 被调，不证明 loader 已订阅、map 已跑。
+        io.reactivex.subjects.SingleSubject<Response<Page<NotificationThread>>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        when(service.getNotifications(anyMap(), anyLong())).thenReturn(subject);
+        mockedServiceFactory.when(() -> ServiceFactory.get(eq(NotificationService.class),
+                anyBoolean(), any())).thenReturn(service);
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            android.widget.ImageView indicator =
+                    (android.widget.ImageView) a2GetField(activity, "mNotificationsIndicator");
+            assertNotNull(indicator);
+            idleUntil(subject::hasObservers);
+            assertTrue(subject.hasObservers());
+            subject.onSuccess(Response.success(null));
+            ShadowLooper.idleMainLooper();
+            assertEquals(android.view.View.GONE, indicator.getVisibility());
+        }
+    }
+
+    @Test
+    public void loadNotificationIndicator_nullItems_returnsFalse() throws Exception {
+        NotificationService service = mock(NotificationService.class);
+        Page<NotificationThread> page = mock(Page.class);
+        // Mockito 默认对 List 返回空列表而非 null：必须显式桩成 null，
+        // 否则测到的是空列表（!isEmpty 假分支），不是 items()==null 分支。
+        when(page.items()).thenReturn(null);
+        // 与 nullResult 同理用 SingleSubject：等 loader 真订阅再发，
+        // 保证 map 在 items()==null 时跑过（1347 行第二条件假分支）。
+        io.reactivex.subjects.SingleSubject<Response<Page<NotificationThread>>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        when(service.getNotifications(anyMap(), anyLong())).thenReturn(subject);
+        mockedServiceFactory.when(() -> ServiceFactory.get(eq(NotificationService.class),
+                anyBoolean(), any())).thenReturn(service);
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            android.widget.ImageView indicator =
+                    (android.widget.ImageView) a2GetField(activity, "mNotificationsIndicator");
+            assertNotNull(indicator);
+            idleUntil(subject::hasObservers);
+            assertTrue(subject.hasObservers());
+            // 探针：确认桩真的让 items() 返回 null（若 Mockito 实际给的是
+            // 空列表，map 会走 isEmpty 假分支而非 items()==null 分支）。
+            assertNull(page.items());
+            // 先置 VISIBLE 再发：loader 尚未投递（subject 未发），发后 map
+            // 得 false → 投递 false → 变 GONE。若 map 没跑到，仍为 VISIBLE，
+            // 断言失败——这才是非空过的验证（默认 GONE 时断言 GONE 是空过）。
+            indicator.setVisibility(android.view.View.VISIBLE);
+            subject.onSuccess(Response.success(page));
+            idleUntil(() -> indicator.getVisibility() == android.view.View.GONE);
+            assertEquals(android.view.View.GONE, indicator.getVisibility());
+        }
+    }
+
+    @Test
+    public void loadNotificationIndicator_nonEmptyItems_returnsTrue() throws Exception {
+        NotificationService service = mock(NotificationService.class);
+        Page<NotificationThread> page = mock(Page.class);
+        NotificationThread thread = mock(NotificationThread.class);
+        when(page.items()).thenReturn(Collections.singletonList(thread));
+        when(service.getNotifications(anyMap(), anyLong()))
+                .thenReturn(Single.just(Response.success(page)));
+        mockedServiceFactory.when(() -> ServiceFactory.get(eq(NotificationService.class),
+                anyBoolean(), any())).thenReturn(service);
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            android.widget.ImageView indicator =
+                    (android.widget.ImageView) a2GetField(activity, "mNotificationsIndicator");
+            assertNotNull(indicator);
+            idleUntil(() -> indicator.getVisibility() == android.view.View.VISIBLE);
+            assertEquals(android.view.View.VISIBLE, indicator.getVisibility());
+        }
+    }
+
+    @Test
+    public void bottomNavItemSelected_unknownItem_returnsFalse() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            BottomNavigationView bottomNav = activity.findViewById(R.id.bottom_nav);
+            assertNotNull(bottomNav);
+            NavigationBarView.OnItemSelectedListener listener =
+                    (NavigationBarView.OnItemSelectedListener)
+                            a2GetField(bottomNav, "selectedListener");
+            assertNotNull(listener);
+            MenuBuilder menu = new MenuBuilder(activity);
+            menu.add(0, 999999, 0, "Unknown");
+            assertFalse(listener.onNavigationItemSelected(menu.findItem(999999)));
+        }
+    }
+
+    @Test
+    public void bottomNavItemSelected_validItem_nullLeftDrawerMenu_skipsCheck() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            BottomNavigationView bottomNav = activity.findViewById(R.id.bottom_nav);
+            NavigationBarView.OnItemSelectedListener listener =
+                    (NavigationBarView.OnItemSelectedListener)
+                            a2GetField(bottomNav, "selectedListener");
+            a2SetField(activity, "mLeftDrawerMenu", null);
+            MenuBuilder menu = new MenuBuilder(activity);
+            menu.add(0, R.id.search, 0, "Search");
+            assertTrue(listener.onNavigationItemSelected(menu.findItem(R.id.search)));
+            assertEquals(R.id.search, (int) a2GetField(activity, "mSelectedFactoryId"));
+        }
+    }
+
+    @Test
+    public void bottomNavItemSelected_validItem_hiddenDrawerItem_skipsCheck() throws Exception {
+        Context context = context();
+        DrawerManager.setVisible(context, "search", false);
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            BottomNavigationView bottomNav = activity.findViewById(R.id.bottom_nav);
+            NavigationBarView.OnItemSelectedListener listener =
+                    (NavigationBarView.OnItemSelectedListener)
+                            a2GetField(bottomNav, "selectedListener");
+            MenuBuilder menu = new MenuBuilder(activity);
+            menu.add(0, R.id.search, 0, "Search");
+            assertTrue(listener.onNavigationItemSelected(menu.findItem(R.id.search)));
+            assertEquals(R.id.search, (int) a2GetField(activity, "mSelectedFactoryId"));
+        } finally {
+            DrawerManager.setVisible(context, "search", true);
+        }
+    }
+
+    @Test
+    public void updateMeBadge_nullBottomNav_returnsEarly() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            a2SetField(activity, "mBottomNav", null);
+            activity.updateMeBadge();
+        }
+    }
+
+    @Test
+    public void switchTo_nullFactory_skipsDestroy() throws Exception {
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            FragmentFactory factory = (FragmentFactory) a2Invoke(activity,
+                    "getFactoryForItem", new Class<?>[]{int.class}, R.id.search);
+            assertNotNull(factory);
+            a2SetField(activity, "mFactory", null);
+            a2Invoke(activity, "switchTo",
+                    new Class<?>[]{int.class, FragmentFactory.class}, R.id.search, factory);
+            assertEquals(R.id.search, (int) a2GetField(activity, "mSelectedFactoryId"));
+            assertSame(factory, a2GetField(activity, "mFactory"));
+        }
+    }
+
+    // onRestoreInstanceState(null) 已删：super.onRestoreInstanceState(null)
+    // 在 Bundle.getBundle 处 NPE（AppCompatActivity 要求非空），框架只在有
+    // saved state 时才调它且恒传非空，故 802 行的 null 分支不可覆盖。
+
+    @Test
+    public void onRestoreInstanceState_nonNullBundle_callsFactory() throws Exception {
+        // 空 Bundle 直接调：super 恢复无 fragment 状态是 no-op，
+        // 802 行真分支 + 809 行 mFactory.onRestoreInstanceState 被覆盖。
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertNotNull(a2GetField(activity, "mFactory"));
+            activity.onRestoreInstanceState(new Bundle());
+        }
+    }
+    @Test
+    public void launches_autoCheckDisabled_skipsUpdateCheck() throws Exception {
+        prefs().edit().putBoolean(SettingsFragment.KEY_AUTO_CHECK_UPDATE, false).apply();
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            assertNotNull(activity);
+            assertEquals(R.id.discover_hub, (int) a2GetField(activity, "mSelectedFactoryId"));
+        } finally {
+            prefs().edit().remove(SettingsFragment.KEY_AUTO_CHECK_UPDATE).apply();
+        }
+    }
+
+    @Test
+    public void launches_withCrashFile_dismissingDialog_notesDismissedAfterIdle()
+            throws Exception {
+        HomeActivityTestHelper.seedLogin("octocat");
+        Context context = ApplicationProvider.getApplicationContext();
+        java.io.File crashFile = new java.io.File(context.getCacheDir(), "last_crash.txt");
+        java.nio.file.Files.write(crashFile.toPath(),
+                "fake crash trace".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            ShadowLooper.idleMainLooper();
+            androidx.appcompat.app.AlertDialog dialog =
+                    (androidx.appcompat.app.AlertDialog)
+                            ShadowDialog.getShownDialogs().get(0);
+            assertNotNull(dialog);
+            dialog.dismiss();
+            // dismiss 经 handler 投递：空闲后 OnDismissListener 才跑
+            // （CrashBreadcrumb 计数为跨测试静态量，不在此断言绝对值，以覆盖率为准）。
+            ShadowLooper.idleMainLooper();
+            assertFalse(dialog.isShowing());
+        } finally {
+            crashFile.delete();
+        }
+    }
+
 }
+

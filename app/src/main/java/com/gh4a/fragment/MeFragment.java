@@ -517,8 +517,6 @@ public class MeFragment extends Fragment {
         String base;
         if (DarkModeScheduler.MODE_SYSTEM.equals(mode)) {
             base = getString(R.string.dark_mode_system);
-        } else if (DarkModeScheduler.MODE_SCHEDULED.equals(mode)) {
-            base = getString(R.string.dark_mode_scheduled);
         } else {
             int theme = mPrefs.getInt(SettingsFragment.KEY_THEME, 1);
             base = theme == 0 ? getString(R.string.dark_mode_dark) : getString(R.string.dark_mode_light);

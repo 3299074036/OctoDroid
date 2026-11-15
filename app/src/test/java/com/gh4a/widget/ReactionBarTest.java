@@ -37,6 +37,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -322,6 +323,55 @@ public class ReactionBarTest {
         assertEquals(7L, (long) result.get().get().id());
         assertEquals(1, existing.size());
         assertEquals(1, cache.getReactions(item).size());
+    }
+
+    // ---------- addOrRemoveReaction (T-123: 不是死代码，菜单点击会调） ----------
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void addOrRemoveReaction_add_updatesOwnReactions() throws Exception {
+        TestItem item = new TestItem("k");
+        ReactionDetailsCache cache = cache();
+        Reaction added = reaction(7L, Reaction.CONTENT_HEART, "me", new Date());
+        ReactionBar.Callback cb = callbackReturning(Collections.emptyList());
+        when(cb.addReaction(item, Reaction.CONTENT_HEART)).thenReturn(Single.just(added));
+        AddReactionMenuHelper helper = new AddReactionMenuHelper(
+                activity(), mock(Menu.class), cb, item, cache);
+        Method method = accessibleMethod(helper, "addOrRemoveReaction", String.class, Long.class);
+        method.invoke(helper, Reaction.CONTENT_HEART, null);
+        long deadline = System.currentTimeMillis() + 5000;
+        Map<String, Long> own;
+        do {
+            Thread.sleep(20);
+            idleMainLooper();
+            own = (Map<String, Long>) field(helper, "mUserOwnReactions");
+        } while (!own.containsKey(Reaction.CONTENT_HEART)
+                && System.currentTimeMillis() < deadline);
+        assertEquals(7L, (long) own.get(Reaction.CONTENT_HEART));
+        verify(cb).addReaction(item, Reaction.CONTENT_HEART);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void addOrRemoveReaction_delete_removesOwnReaction() throws Exception {
+        TestItem item = new TestItem("k");
+        ReactionDetailsCache cache = cache();
+        ReactionBar.Callback cb = callbackReturning(Collections.emptyList());
+        when(cb.deleteReaction(item, 7L)).thenReturn(Single.just(true));
+        AddReactionMenuHelper helper = new AddReactionMenuHelper(
+                activity(), mock(Menu.class), cb, item, cache);
+        Map<String, Long> own = (Map<String, Long>) field(helper, "mUserOwnReactions");
+        own.put(Reaction.CONTENT_HEART, 7L);
+        Method method = accessibleMethod(helper, "addOrRemoveReaction", String.class, Long.class);
+        method.invoke(helper, Reaction.CONTENT_HEART, 7L);
+        long deadline = System.currentTimeMillis() + 5000;
+        while (own.containsKey(Reaction.CONTENT_HEART)
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+            idleMainLooper();
+        }
+        assertFalse(own.containsKey(Reaction.CONTENT_HEART));
+        verify(cb).deleteReaction(item, 7L);
     }
 
     @Test

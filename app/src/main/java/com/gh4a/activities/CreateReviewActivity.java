@@ -60,6 +60,11 @@ public class CreateReviewActivity extends AppCompatActivity implements
         setContentView(R.layout.comment_editor);
 
         Bundle extras = getIntent().getExtras();
+        if (extras == null) {
+            // T-114：无 extras 启动即 NPE；生产调用方恒走 makeIntent，但防御性收尾。
+            finish();
+            return;
+        }
         mRepoOwner = extras.getString(EXTRA_OWNER);
         mRepoName = extras.getString(EXTRA_REPO);
         mPullRequestNumber = extras.getInt(EXTRA_PR_NUMBER);

@@ -107,45 +107,36 @@ public class PullRequestDiffViewerActivityTest {
     }
 
     @Test
-    public void loadReactionDetails_nullId_throwsNpe_A1_2() {
-        // A1-2 (confirmed): unlike CommitDiffViewerActivity, the PR diff
-        // viewer passes comment.id() (nullable Long) straight into long
-        // parameters without the 216 null guard.
+    public void loadReactionDetails_nullId_returnsEmptyWithoutNetwork_A1_2() {
+        // A1-2 (fixed): the PR diff viewer now has the same 216 null guard
+        // as CommitDiffViewerActivity; id-less comments short-circuit to an
+        // empty reaction list instead of NPE-ing on unboxing.
         PullRequestDiffViewerActivity a = launch(PullRequestDiffViewerActivity.class, intent());
         DiffViewerActivity.CommentWrapper w =
                 new DiffViewerActivity.CommentWrapper(idLessComment());
-        try {
-            a.loadReactionDetails(w, false).blockingGet();
-            fail("expected NullPointerException for id-less review comment");
-        } catch (NullPointerException expected) {
-            // unboxing null Long in the service call arguments
-        }
+        List<Reaction> result = a.loadReactionDetails(w, false).blockingGet();
+        assertTrue(result.isEmpty());
     }
 
     @Test
-    public void addReaction_nullId_throwsNpe_A1_2() {
+    public void addReaction_nullId_returnsError_A1_2() {
         PullRequestDiffViewerActivity a = launch(PullRequestDiffViewerActivity.class, intent());
         DiffViewerActivity.CommentWrapper w =
                 new DiffViewerActivity.CommentWrapper(idLessComment());
         try {
             a.addReaction(w, "+1").blockingGet();
-            fail("expected NullPointerException for id-less review comment");
-        } catch (NullPointerException expected) {
-            // unboxing null Long in the service call arguments
+            fail("expected IllegalStateException for id-less review comment");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("no id"));
         }
     }
 
     @Test
-    public void deleteReaction_nullId_throwsNpe_A1_2() {
+    public void deleteReaction_nullId_returnsFalse_A1_2() {
         PullRequestDiffViewerActivity a = launch(PullRequestDiffViewerActivity.class, intent());
         DiffViewerActivity.CommentWrapper w =
                 new DiffViewerActivity.CommentWrapper(idLessComment());
-        try {
-            a.deleteReaction(w, 9L).blockingGet();
-            fail("expected NullPointerException for id-less review comment");
-        } catch (NullPointerException expected) {
-            // unboxing null Long in the service call arguments
-        }
+        assertFalse(a.deleteReaction(w, 9L).blockingGet());
     }
 
     @Test

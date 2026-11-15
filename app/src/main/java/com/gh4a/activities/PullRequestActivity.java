@@ -87,8 +87,9 @@ public class PullRequestActivity extends BaseFragmentPagerActivity implements
         PullRequestFilesFragment.CommentUpdateListener {
     public static Intent makeIntent(Context context, Issue issue) {
         Pair<String, String> repoOwnerAndName = ApiHelpers.extractRepoOwnerAndNameFromIssue(issue);
-        // 166：issue.number() 为可空 Integer，makeIntent(int) 会拆箱。
-        return makeIntent(context, repoOwnerAndName.first, repoOwnerAndName.second, ApiHelpers.orZero(issue.number()));
+        // T-115：与 IssueActivity.makeIntent 对齐，issue 为 null 时 number 默认为 0。
+        return makeIntent(context, repoOwnerAndName.first, repoOwnerAndName.second,
+                issue != null ? ApiHelpers.orZero(issue.number()) : 0);
     }
 
     public static Intent makeIntent(Context context, String repoOwner, String repoName, int number) {

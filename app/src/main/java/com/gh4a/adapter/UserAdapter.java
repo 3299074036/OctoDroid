@@ -16,6 +16,7 @@
 package com.gh4a.adapter;
 
 import android.content.Context;
+import android.content.Intent;
 import androidx.recyclerview.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -69,7 +70,10 @@ public class UserAdapter extends RootAdapter<User, UserAdapter.ViewHolder> {
     public void onClick(View v) {
         if (v.getId() == R.id.iv_gravatar) {
             User user = (User) v.getTag();
-            mContext.startActivity(UserActivity.makeIntent(mContext, user));
+            Intent intent = UserActivity.makeIntent(mContext, user);
+            if (intent != null) {
+                mContext.startActivity(intent);
+            }
         } else {
             super.onClick(v);
         }

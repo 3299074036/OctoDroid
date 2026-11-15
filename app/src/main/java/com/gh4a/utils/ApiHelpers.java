@@ -327,7 +327,7 @@ public class ApiHelpers {
         return response.body();
     }
 
-    public static boolean mapToTrueOnSuccess(Response<Void> response) throws ApiRequestException {
+    public static <T> boolean mapToTrueOnSuccess(Response<T> response) throws ApiRequestException {
         if (response.code() == HttpURLConnection.HTTP_UNAUTHORIZED) {
             Gh4Application.get().logout();
         }
@@ -419,6 +419,10 @@ public class ApiHelpers {
         @NonNull
         @Override
         public List<D> items() {
+            if (mPage == null) {
+                // T-130：200 空 body 时包装页为 null，返回空列表而不是 NPE。
+                return new ArrayList<>();
+            }
             List<U> items = mPage.items();
             if (items == null) {
                 // 134：本方法标 @NonNull，返回 null 会让下游
@@ -498,11 +502,7 @@ public class ApiHelpers {
                                 .toObservable()
                                 .compose(PageIterator::evaluateError)
                                 .map(resultPage -> {
-                                    // 204 响应 body 为 null，视为空页（后续被 filter 掉）
-                                    if (resultPage == null) {
-                                        return Pair.create((T) null, (Integer) null);
-                                    }
-                                    // 255：同上，items() 为 null 时按空页处理。
+                                    // 255：items() 为 null 时按空页处理。
                                     List<T> items = resultPage.items();
                                     if (items != null) {
                                         for (T item : items) {
@@ -523,7 +523,8 @@ public class ApiHelpers {
         private static <T> Observable<Page<T>> evaluateError(Observable<Response<Page<T>>> upstream) {
             return upstream.map(response -> {
                 throwOnFailure(response);
-                return response.body();
+                Page<T> body = response.body();
+                return body != null ? body : new DummyPage<>();
             });
         }
     }

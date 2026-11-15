@@ -13,10 +13,12 @@
     <external-files-path
         name="private_download"
         path="Download/" />
-    <!-- 78：只放行诊断导出文件 diag-export.txt（DiagnosticLogActivity 分享用）；
-         旧写法 path="." 暴露整个 cacheDir（含 OkHttp 缓存、last_crash.txt）。
-         last_crash.txt 只供应用内读，不走 FileProvider。 -->
+    <!-- 78：只放行诊断导出子目录 diag-export/（DiagnosticLogActivity 分享用）；
+         旧写法 path="diag-export.txt" 把导出文件本身配成根，文件路径 == 根路径，
+         getUriForFile 会 substring 越界；path="." 则暴露整个 cacheDir（含
+         OkHttp 缓存、last_crash.txt），0.2.2 特意收窄过。last_crash.txt 只供
+         应用内读，不走 FileProvider。 -->
     <cache-path
         name="trace"
-        path="diag-export.txt" />
+        path="diag-export/" />
 </paths>

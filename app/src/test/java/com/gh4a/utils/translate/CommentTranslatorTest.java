@@ -14,6 +14,7 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.shadows.ShadowToast;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -94,6 +95,76 @@ public class CommentTranslatorTest {
         @Override
         public String getName() {
             return "Gated";
+        }
+    }
+
+    /** Fake that blocks segment translation until released and signals
+     * when translate() has returned (so the test knows the completion
+     * callback has been posted to the main looper). */
+    private static class SignallingGatedTranslator implements Translator {
+        final CountDownLatch entered = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        final CountDownLatch returned = new CountDownLatch(1);
+
+        @Override
+        public String translate(String text, String sourceLang, String targetLang) {
+            if ("Hello".equals(text)) {
+                return "ok";
+            }
+            entered.countDown();
+            try {
+                if (!release.await(10, TimeUnit.SECONDS)) {
+                    throw new RuntimeException("gate timeout");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } finally {
+                returned.countDown();
+            }
+            return "TR:" + text;
+        }
+
+        @Override
+        public String getName() {
+            return "SignallingGated";
+        }
+    }
+
+    /** Fake whose probe passes but every segment fails, signalling when
+     * the failure was thrown. */
+    private static class SignallingFailTranslator implements Translator {
+        final CountDownLatch thrown = new CountDownLatch(1);
+
+        @Override
+        public String translate(String text, String sourceLang, String targetLang) {
+            if ("Hello".equals(text)) {
+                return "ok";
+            }
+            thrown.countDown();
+            throw new RuntimeException("segment down");
+        }
+
+        @Override
+        public String getName() {
+            return "SignallingFail";
+        }
+    }
+
+    /** Fake whose probe passes but every segment fails with a
+     * message-less exception. */
+    private static class NoMessageFailTranslator implements Translator {
+        @Override
+        public String translate(String text, String sourceLang, String targetLang) {
+            if ("Hello".equals(text)) {
+                return "ok";
+            }
+            throw new RuntimeException();
+        }
+
+        @Override
+        public String getName() {
+            return "NoMessageFail";
         }
     }
 
@@ -485,6 +556,319 @@ public class CommentTranslatorTest {
                     changed::incrementAndGet);
             pumpQuietly(500);
             assertEquals(0, changed.get());
+        });
+    }
+
+    // ---------- newly covered residuals ----------
+
+    @Test
+    public void translateAll_destroyed_returnsWithoutPicker() throws Exception {
+        AtomicInteger pickerCalls = new AtomicInteger();
+        try (MockedStatic<TranslationUiHelper> ui =
+                     Mockito.mockStatic(TranslationUiHelper.class);
+             MockedStatic<TranslationManager> mgr =
+                     Mockito.mockStatic(TranslationManager.class)) {
+            ui.when(() -> TranslationUiHelper.pickProviderAndRun(any(), any()))
+                    .thenAnswer(inv -> {
+                        pickerCalls.incrementAndGet();
+                        return null;
+                    });
+            CommentTranslator ct = new CommentTranslator();
+            ct.destroy();
+            BatchOutcome out = new BatchOutcome();
+            ct.translateAll(context(), Collections.singletonList(
+                    new CommentTranslator.TranslatableItem(1, "<p>hi</p>")), out);
+            pumpQuietly(500);
+            assertEquals("destroyed translator must not open the picker",
+                    0, pickerCalls.get());
+            assertEquals(1, out.done.getCount());
+        }
+    }
+
+    @Test
+    public void translateAllWithProvider_appendsToRunningBatch() throws Exception {
+        GatedTranslator gated = new GatedTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        AtomicReference<Translator> fakeRef = new AtomicReference<>(gated);
+        withStubs(fakeRef, () -> {
+            BatchOutcome first = new BatchOutcome();
+            ct.translateAllWithProvider(context(), "google", Arrays.asList(
+                    new CommentTranslator.TranslatableItem(1, "<p>one</p>"),
+                    new CommentTranslator.TranslatableItem(2, "<p>two</p>")), first);
+            assertTrue("segment never started",
+                    gated.entered.await(10, TimeUnit.SECONDS));
+            // Append a third item while the batch is running.
+            BatchOutcome second = new BatchOutcome();
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(3, "<p>three</p>")),
+                    second);
+            assertEquals(1, second.progress.size());
+            assertEquals(0, second.progress.get(0)[0]);
+            assertEquals(3, second.progress.get(0)[1]);
+            assertEquals("appended batch never completes on its own",
+                    1, second.done.getCount());
+            gated.release.countDown();
+            assertTrue("timed out", await(first.done));
+            assertTrue(first.completed);
+            assertEquals(3, first.progress.size());
+            assertEquals(3, first.progress.get(2)[0]);
+            assertEquals(3, first.progress.get(2)[1]);
+            assertEquals("<p>TR:three</p>", ct.getTranslatedHtml("comment", 3));
+            assertEquals(1, second.done.getCount());
+        });
+    }
+
+    @Test
+    public void startBatch_destroyed_returnsWithoutStarting() throws Exception {
+        // The guard is only reachable if destroy() lands between the
+        // checks in translateAllWithProvider and the startBatch call
+        // (same main-thread call stack, no yield point), so it is
+        // invoked reflectively to prove it drops the batch.
+        CommentTranslator ct = new CommentTranslator();
+        ct.destroy();
+        BatchOutcome out = new BatchOutcome();
+        Method startBatch = CommentTranslator.class.getDeclaredMethod("startBatch",
+                Context.class, String.class, List.class,
+                CommentTranslator.BatchCallback.class);
+        startBatch.setAccessible(true);
+        startBatch.invoke(ct, context(), "google",
+                Collections.singletonList(
+                        new CommentTranslator.TranslatableItem(1, "<p>hi</p>")), out);
+        assertFalse(ct.isBatchRunning());
+        assertEquals(1, out.done.getCount());
+    }
+
+    @Test
+    public void batchOnSuccess_afterCancel_returnsWithoutProgress() throws Exception {
+        // Cancel after the completion callback was posted to the main
+        // looper but before it is delivered: SingleCallback.onSuccess
+        // sees mBatchCancelled and returns. The item is still cached
+        // (caching happens in onComplete, before the guard).
+        SignallingGatedTranslator gated = new SignallingGatedTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        withStubs(gated, () -> {
+            BatchOutcome out = new BatchOutcome();
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(2, "<p>two</p>")),
+                    out);
+            assertTrue("segment never started",
+                    gated.entered.await(10, TimeUnit.SECONDS));
+            gated.release.countDown();
+            assertTrue("segment never returned",
+                    gated.returned.await(10, TimeUnit.SECONDS));
+            // Let the background thread post the completion callback
+            // to the (paused) main looper; it stays queued until pumped.
+            Thread.sleep(500);
+            ct.cancelBatch();
+            pumpQuietly(1000);
+            assertTrue(out.cancelled);
+            assertFalse(out.completed);
+            assertTrue(out.progress.isEmpty());
+            assertFalse(ct.isBatchRunning());
+            assertEquals("<p>TR:two</p>", ct.getTranslatedHtml("comment", 2));
+        });
+    }
+
+    @Test
+    public void batchOnError_afterCancel_returnsWithoutProgress() throws Exception {
+        SignallingFailTranslator fake = new SignallingFailTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        withStubs(fake, () -> {
+            BatchOutcome out = new BatchOutcome();
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(2, "<p>two</p>")),
+                    out);
+            assertTrue("segment never failed",
+                    fake.thrown.await(10, TimeUnit.SECONDS));
+            // Let the background thread post the error callback to the
+            // (paused) main looper; it stays queued until pumped.
+            Thread.sleep(500);
+            ct.cancelBatch();
+            pumpQuietly(1000);
+            assertTrue(out.cancelled);
+            assertFalse(out.completed);
+            assertTrue(out.progress.isEmpty());
+            assertFalse(ct.isBatchRunning());
+            assertTrue(ShadowToast.getTextOfLatestToast().contains("segment down"));
+            assertNull(ct.getTranslatedHtml("comment", 2));
+        });
+    }
+
+    @Test
+    public void startSingleTranslation_createTranslatorThrows_showsToast() throws Exception {
+        CommentTranslator ct = new CommentTranslator();
+        try (MockedStatic<TranslationUiHelper> ui =
+                     Mockito.mockStatic(TranslationUiHelper.class);
+             MockedStatic<TranslationManager> mgr =
+                     Mockito.mockStatic(TranslationManager.class)) {
+            ui.when(() -> TranslationUiHelper.pickProviderAndRun(any(), any()))
+                    .thenAnswer(inv -> {
+                        TranslationUiHelper.ProviderCallback cb = inv.getArgument(1);
+                        cb.onProviderSelected("google");
+                        return null;
+                    });
+            mgr.when(() -> TranslationManager.createTranslator(any(), eq("google")))
+                    .thenThrow(new RuntimeException("no provider"));
+            AtomicInteger changed = new AtomicInteger();
+            ct.toggleTranslation(context(), "comment", 5, "<p>Hello</p>",
+                    changed::incrementAndGet);
+            assertEquals(0, changed.get());
+            assertEquals(context().getString(R.string.translate_no_provider),
+                    ShadowToast.getTextOfLatestToast());
+            assertFalse(ct.hasTranslations());
+        }
+    }
+
+    @Test
+    public void startSingleTranslation_destroyedDuringPicker_returnsSilently()
+            throws Exception {
+        // Production race: the fragment is destroyed while the provider
+        // picker dialog is open; the picker callback then fires after
+        // destroy. createTranslator must never be built.
+        PrefixTranslator fake = new PrefixTranslator();
+        AtomicInteger createCalls = new AtomicInteger();
+        CommentTranslator ct = new CommentTranslator();
+        try (MockedStatic<TranslationUiHelper> ui =
+                     Mockito.mockStatic(TranslationUiHelper.class);
+             MockedStatic<TranslationManager> mgr =
+                     Mockito.mockStatic(TranslationManager.class)) {
+            ui.when(() -> TranslationUiHelper.pickProviderAndRun(any(), any()))
+                    .thenAnswer(inv -> {
+                        ct.destroy();
+                        TranslationUiHelper.ProviderCallback cb = inv.getArgument(1);
+                        cb.onProviderSelected("google");
+                        return null;
+                    });
+            mgr.when(() -> TranslationManager.createTranslator(any(), eq("google")))
+                    .thenAnswer(inv -> {
+                        createCalls.incrementAndGet();
+                        return fake;
+                    });
+            mgr.when(() -> TranslationManager.getTargetLanguage(any()))
+                    .thenReturn("zh-CN");
+            AtomicInteger changed = new AtomicInteger();
+            ct.toggleTranslation(context(), "comment", 1, "<p>hi</p>",
+                    changed::incrementAndGet);
+            pumpQuietly(500);
+            assertEquals(0, createCalls.get());
+            assertEquals(0, changed.get());
+            assertEquals(0, ShadowToast.shownToastCount());
+        }
+    }
+
+    @Test
+    public void readmeOnComplete_afterDestroy_dropsTranslation() throws Exception {
+        // Destroy after the completion callback was posted but before
+        // delivery: onComplete returns before caching the translation.
+        SignallingGatedTranslator gated = new SignallingGatedTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        withStubs(gated, () -> {
+            BatchOutcome out = new BatchOutcome();
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(2, "<p>two</p>")),
+                    out);
+            assertTrue("segment never started",
+                    gated.entered.await(10, TimeUnit.SECONDS));
+            gated.release.countDown();
+            assertTrue("segment never returned",
+                    gated.returned.await(10, TimeUnit.SECONDS));
+            // Let the background thread post the completion callback
+            // to the (paused) main looper; it stays queued until pumped.
+            Thread.sleep(500);
+            ct.destroy();
+            pumpQuietly(1000);
+            assertFalse(out.completed);
+            assertEquals(1, out.done.getCount());
+            assertNull(ct.getTranslatedHtml("comment", 2));
+        });
+    }
+
+    @Test
+    public void readmeOnError_afterDestroy_dropsErrorSilently() throws Exception {
+        SignallingFailTranslator fake = new SignallingFailTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        withStubs(fake, () -> {
+            BatchOutcome out = new BatchOutcome();
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(2, "<p>two</p>")),
+                    out);
+            assertTrue("segment never failed",
+                    fake.thrown.await(10, TimeUnit.SECONDS));
+            // Let the background thread post the error callback to the
+            // (paused) main looper; it stays queued until pumped.
+            Thread.sleep(500);
+            ct.destroy();
+            pumpQuietly(1000);
+            assertFalse(out.completed);
+            assertEquals(1, out.done.getCount());
+            assertEquals(0, ShadowToast.shownToastCount());
+            assertNull(ct.getTranslatedHtml("comment", 2));
+        });
+    }
+
+    @Test
+    public void readmeOnError_nullMessage_toastHasNoSuffix() throws Exception {
+        NoMessageFailTranslator fake = new NoMessageFailTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        withStubs(fake, () -> {
+            BatchOutcome out = new BatchOutcome();
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(2, "<p>two</p>")),
+                    out);
+            assertTrue("timed out", await(out.done));
+            assertTrue(out.completed);
+            assertEquals(1, out.progress.size());
+            assertEquals(context().getString(R.string.translate_failed),
+                    ShadowToast.getTextOfLatestToast());
+        });
+    }
+
+    @Test
+    public void cancelBatch_noBatchRunning_doesNothing() {
+        CommentTranslator ct = new CommentTranslator();
+        ct.cancelBatch();
+        assertFalse(ct.isBatchRunning());
+    }
+
+    @Test
+    public void clearTranslations_duringRunningBatch_cancelsSilently() throws Exception {
+        PrefixTranslator fake = new PrefixTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        AtomicReference<Translator> fakeRef = new AtomicReference<>(fake);
+        withStubs(fakeRef, () -> {
+            BatchOutcome first = new BatchOutcome();
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(1, "<p>one</p>")),
+                    first);
+            assertTrue("timed out", await(first.done));
+            assertEquals("<p>TR:one</p>", ct.getTranslatedHtml("comment", 1));
+            GatedTranslator gated = new GatedTranslator();
+            fakeRef.set(gated);
+            BatchOutcome second = new BatchOutcome();
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(2, "<p>two</p>")),
+                    second);
+            assertTrue("segment never started",
+                    gated.entered.await(10, TimeUnit.SECONDS));
+            ct.clearTranslations();
+            assertFalse(ct.hasTranslations());
+            assertNull(ct.getTranslatedHtml("comment", 1));
+            assertFalse(ct.isBatchRunning());
+            assertEquals("clear must not notify the batch callback",
+                    1, second.done.getCount());
+            gated.release.countDown();
+            pumpQuietly(1000);
+            assertEquals(1, second.done.getCount());
+            assertFalse(second.completed);
+            assertFalse(second.cancelled);
         });
     }
 }

@@ -67,11 +67,18 @@ public class DownloadListAdapter
 
     /** Queries DownloadManager for the live status of one download id. */
     public static int queryStatus(Context context, long downloadId) {
-        DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
-        try (Cursor c = dm.query(query)) {
-            if (c != null && c.moveToFirst()) {
-                return c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+        // T-120：getSystemService 在 try 外，抛异常会传播而非返回 STATUS_FAILED；
+        // 整段包进 try，context/dm 为 null 或查询抛异常都返回失败状态。
+        try {
+            DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm == null) {
+                return DownloadManager.STATUS_FAILED;
+            }
+            DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
+            try (Cursor c = dm.query(query)) {
+                if (c != null && c.moveToFirst()) {
+                    return c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                }
             }
         } catch (Exception ignored) {
         }

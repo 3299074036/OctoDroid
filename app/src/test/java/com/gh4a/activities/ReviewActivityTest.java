@@ -21,10 +21,15 @@ import org.robolectric.android.controller.ActivityController;
 import org.robolectric.shadows.ShadowToast;
 
 import com.gh4a.R;
+import com.gh4a.model.TimelineItem;
 import com.gh4a.utils.IntentUtils;
 import com.meisolsson.githubsdk.model.Review;
 import androidx.appcompat.view.menu.MenuBuilder;
 import org.robolectric.Shadows;
+
+import java.util.List;
+
+import io.reactivex.Single;
 
 @RunWith(RobolectricTestRunner.class)
 public class ReviewActivityTest {
@@ -164,17 +169,25 @@ public class ReviewActivityTest {
     }
 
     @Test
-    public void launches_withNullReview_crashesInReviewFragment() {
-        // A2-1：makeIntent 允许 review 为 null（onOptionsItemSelected 也
-        // 判空），但 ReviewFragment.onCreateDataSingle 在
-        // ReviewFragment.java:189 直接取 mReview.id()，建页即 NPE 崩溃。
+    public void launches_withNullReview_showsErrorPage() {
+        // T-010 修复后（错误页方案）：mReview 为 null 时 onCreateDataSingle
+        // 返回 Single.error，建页不再 NPE，loader 走错误态。
         ActivityController<ReviewActivity> c = launch(null);
         try {
-            c.setup();
-            throw new AssertionError("expected NullPointerException");
-        } catch (NullPointerException expected) {
-            assertTrue(expected.getMessage() != null
-                    && expected.getMessage().contains("mReview"));
+            ReviewActivity activity = c.setup().get();
+            assertTrue(activity.getFragment()
+                    instanceof com.gh4a.fragment.ReviewFragment);
+            @SuppressWarnings("unchecked")
+            Single<List<TimelineItem>> single = (Single<List<TimelineItem>>)
+                    ActivityTestHelper.call(activity.getFragment(),
+                            "onCreateDataSingle",
+                            new Class<?>[]{boolean.class}, false);
+            try {
+                single.blockingGet();
+                throw new AssertionError("expected IllegalStateException");
+            } catch (IllegalStateException expected) {
+                assertEquals("Review has no id", expected.getMessage());
+            }
         } finally {
             try {
                 c.destroy();
@@ -184,16 +197,24 @@ public class ReviewActivityTest {
     }
 
     @Test
-    public void launches_withNullReviewId_crashesInReviewFragment() {
-        // A2-1 同款：Review.id() 为可空 Long，null 时在 getReview(..., long)
-        // 拆箱处 NPE（同一行 ReviewFragment.java:189）。
+    public void launches_withNullReviewId_showsErrorPage() {
+        // T-010 同款：Review.id() 为 null 时同样走错误页。
         ActivityController<ReviewActivity> c = launch(review(null, null));
         try {
-            c.setup();
-            throw new AssertionError("expected NullPointerException");
-        } catch (NullPointerException expected) {
-            assertTrue(expected.getMessage() != null
-                    && expected.getMessage().contains("Review.id()"));
+            ReviewActivity activity = c.setup().get();
+            assertTrue(activity.getFragment()
+                    instanceof com.gh4a.fragment.ReviewFragment);
+            @SuppressWarnings("unchecked")
+            Single<List<TimelineItem>> single = (Single<List<TimelineItem>>)
+                    ActivityTestHelper.call(activity.getFragment(),
+                            "onCreateDataSingle",
+                            new Class<?>[]{boolean.class}, false);
+            try {
+                single.blockingGet();
+                throw new AssertionError("expected IllegalStateException");
+            } catch (IllegalStateException expected) {
+                assertEquals("Review has no id", expected.getMessage());
+            }
         } finally {
             try {
                 c.destroy();

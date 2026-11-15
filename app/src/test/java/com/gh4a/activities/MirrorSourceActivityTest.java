@@ -1284,7 +1284,7 @@ public class MirrorSourceActivityTest {
     // instead of replacing. The old URL stays in the list while the toast
     // still says "Saved".
     @Test
-    public void saveAddCard_editExisting_oldUrlRemains_A1_9() {
+    public void saveAddCard_editExisting_oldUrlReplaced_A1_9() {
         prefs().edit().putString(MirrorHelper.PREF_MIRROR_LIST,
                 "[\"https://a.example.com/\", \"https://b.example.com/\"]").apply();
         try (SpeedTestMocks mocks = new SpeedTestMocks()) {
@@ -1298,9 +1298,10 @@ public class MirrorSourceActivityTest {
             assertEquals(activity.getString(R.string.mirror_updated),
                     org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
             java.util.List<String> urls = MirrorHelper.getMirrorUrls(appContext());
-            assertTrue(urls.contains("https://a.example.com"));
+            // T-009 修复后：旧地址被替换掉，不再新旧并存。
+            assertFalse(urls.contains("https://a.example.com"));
             assertTrue(urls.contains("https://renamed.example.com"));
-            assertEquals(3, urls.size());
+            assertEquals(2, urls.size());
             assertEquals(mocks.handle, get(activity, "mSpeedTestHandle"));
         }
     }

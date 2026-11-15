@@ -303,10 +303,10 @@ public class FindActionModeCallbackTest {
         cb.onDestroyActionMode(mockMode(activity));
     }
 
-    @Test(expected = NullPointerException.class)
-    public void onDestroyActionMode_withoutWebView_throwsNpe() {
-        // Observed behavior (not covered by production callers, which always
-        // set a WebView first): mWebView.clearMatches() is unconditional.
+    @Test
+    public void onDestroyActionMode_withoutWebView_doesNotThrow() {
+        // T-015 修复后：未设 WebView 时直接返回，不再 NPE（生产调用方总先
+        // setWebView，本就是防御）。
         FragmentActivity activity = activity();
         FindActionModeCallback cb = callback(activity);
         cb.onDestroyActionMode(mockMode(activity));

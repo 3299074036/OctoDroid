@@ -946,11 +946,6 @@
         <item quantity="other">Updated by author %1$d days ago</item>
     </plurals>
     <string name="store_newest_updated_today">Updated by author today</string>
-    <string name="store_submit">Submit repository</string>
-    <string name="store_submit_url_label">GitHub repository address</string>
-    <string name="store_submit_url_hint">https://github.com/owner/repo</string>
-    <string name="store_submit_preview">Release preview</string>
-    <string name="store_submit_note">This is a local build with no server-side review: once the preview looks right, the repository joins your local follows.</string>
     <string name="store_fetch_preview">Fetch latest release preview</string>
     <string name="store_follow">Follow locally</string>
     <string name="store_followed">Followed</string>

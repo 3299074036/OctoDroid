@@ -27,9 +27,9 @@ public class FileUtilsTest {
         assertEquals("TXT", FileUtils.getFileExtension("a.TXT"));
     }
 
-    @Test(expected = NullPointerException.class)
-    public void getFileExtension_nullThrows() {
-        FileUtils.getFileExtension(null);
+    @Test
+    public void getFileExtension_nullReturnsEmpty() {
+        assertEquals("", FileUtils.getFileExtension(null));
     }
 
     @Test
@@ -52,13 +52,9 @@ public class FileUtilsTest {
     }
 
     @Test
-    public void getFolderPath_emptyPathThrows() {
-        // 空路径的 pathSegments 为空，remove(size-1) 越界；当前实现无守卫。
-        try {
-            FileUtils.getFolderPath("");
-            fail("expected IndexOutOfBoundsException");
-        } catch (IndexOutOfBoundsException expected) {
-        }
+    public void getFolderPath_emptyPathReturnsEmpty() {
+        // T-105：空路径守卫，与 getFileName 同款。
+        assertEquals("", FileUtils.getFolderPath(""));
     }
 
     @Test

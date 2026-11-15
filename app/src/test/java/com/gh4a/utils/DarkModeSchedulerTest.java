@@ -1,6 +1,5 @@
 package com.gh4a.utils;
 
-import android.app.AlarmManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 
@@ -13,22 +12,19 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import androidx.test.core.app.ApplicationProvider;
-import org.robolectric.Shadows;
-import org.robolectric.shadows.ShadowAlarmManager;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertNotNull;
 
 /**
- * A 组：DarkModeScheduler 读 SharedPreferences、调 AlarmManager/AppCompatDelegate，
- * 走 Robolectric。isInDarkPeriod 与 formatMinutes 是包内/纯函数，同包可直接测。
+ * A 组：DarkModeScheduler 读 SharedPreferences、调 AppCompatDelegate，
+ * 走 Robolectric。T-127：定时模式已删除，只剩 manual/system 与
+ * scheduled→system 迁移（BUG-20）。
  */
 @RunWith(RobolectricTestRunner.class)
 public class DarkModeSchedulerTest {
 
     private Context context;
-    private ShadowAlarmManager shadowAlarmManager;
 
     @Before
     public void setUp() {
@@ -45,8 +41,6 @@ public class DarkModeSchedulerTest {
             context.getSharedPreferences("Gh4a-pref", Context.MODE_PRIVATE)
                     .unregisterOnSharedPreferenceChangeListener(app);
         }
-        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        shadowAlarmManager = Shadows.shadowOf(am);
     }
 
     private SharedPreferences prefs() {
@@ -54,66 +48,8 @@ public class DarkModeSchedulerTest {
     }
 
     @Test
-    public void isInDarkPeriod_sameStartEndIsNeverDark() {
-        assertFalse(DarkModeScheduler.isInDarkPeriod(600, 600, 600));
-        assertFalse(DarkModeScheduler.isInDarkPeriod(0, 600, 600));
-    }
-
-    @Test
-    public void isInDarkPeriod_daytimeRangeBoundaries() {
-        // 09:00–17:00：左闭右开
-        assertFalse(DarkModeScheduler.isInDarkPeriod(8 * 60 + 59, 540, 1020));
-        assertTrue(DarkModeScheduler.isInDarkPeriod(9 * 60, 540, 1020));
-        assertTrue(DarkModeScheduler.isInDarkPeriod(16 * 60 + 59, 540, 1020));
-        assertFalse(DarkModeScheduler.isInDarkPeriod(17 * 60, 540, 1020));
-        assertFalse(DarkModeScheduler.isInDarkPeriod(0, 540, 1020));
-    }
-
-    @Test
-    public void isInDarkPeriod_overnightRangeWrapsMidnight() {
-        // 22:00–07:00：跨午夜
-        assertFalse(DarkModeScheduler.isInDarkPeriod(21 * 60 + 59, 1320, 420));
-        assertTrue(DarkModeScheduler.isInDarkPeriod(22 * 60, 1320, 420));
-        assertTrue(DarkModeScheduler.isInDarkPeriod(23 * 60 + 30, 1320, 420));
-        assertTrue(DarkModeScheduler.isInDarkPeriod(0, 1320, 420));
-        assertTrue(DarkModeScheduler.isInDarkPeriod(6 * 60 + 59, 1320, 420));
-        assertFalse(DarkModeScheduler.isInDarkPeriod(7 * 60, 1320, 420));
-        assertFalse(DarkModeScheduler.isInDarkPeriod(12 * 60, 1320, 420));
-    }
-
-    @Test
-    public void formatMinutes_zeroOneAndBoundaries() {
-        assertEquals("00:00", DarkModeScheduler.formatMinutes(0));
-        assertEquals("01:00", DarkModeScheduler.formatMinutes(60));
-        assertEquals("07:05", DarkModeScheduler.formatMinutes(7 * 60 + 5));
-        assertEquals("22:00", DarkModeScheduler.formatMinutes(1320));
-        assertEquals("23:59", DarkModeScheduler.formatMinutes(1439));
-    }
-
-    @Test
     public void getMode_defaultIsManual() {
         assertEquals(DarkModeScheduler.MODE_MANUAL, DarkModeScheduler.getMode(context));
-    }
-
-    @Test
-    public void getStartEndMinutes_defaultsAre22And7() {
-        assertEquals(22 * 60, DarkModeScheduler.getStartMinutes(context));
-        assertEquals(7 * 60, DarkModeScheduler.getEndMinutes(context));
-    }
-
-    @Test
-    public void setSchedule_persistsStartAndEnd() {
-        DarkModeScheduler.setSchedule(context, 21 * 60, 6 * 60);
-        assertEquals(21 * 60, DarkModeScheduler.getStartMinutes(context));
-        assertEquals(6 * 60, DarkModeScheduler.getEndMinutes(context));
-    }
-
-    @Test
-    public void isScheduled_falseByDefaultTrueWhenStored() {
-        assertFalse(DarkModeScheduler.isScheduled(context));
-        prefs().edit().putString(DarkModeScheduler.KEY_DARK_MODE,
-                DarkModeScheduler.MODE_SCHEDULED).apply();
-        assertTrue(DarkModeScheduler.isScheduled(context));
     }
 
     @Test
@@ -133,7 +69,6 @@ public class DarkModeSchedulerTest {
                 DarkModeScheduler.MODE_SCHEDULED).apply();
         DarkModeScheduler.migrateScheduledToSystem(context);
         assertEquals(DarkModeScheduler.MODE_SYSTEM, DarkModeScheduler.getMode(context));
-        assertFalse(DarkModeScheduler.isScheduled(context));
     }
 
     @Test
@@ -161,11 +96,9 @@ public class DarkModeSchedulerTest {
     }
 
     @Test
-    public void apply_unknownModeCancelsAlarmsWithoutCrashing() {
-        DarkModeScheduler.scheduleAlarms(context);
-        assertEquals(2, shadowAlarmManager.getScheduledAlarms().size());
+    public void apply_unknownModeDoesNotCrashAndKeepsManual() {
         DarkModeScheduler.apply(context, "bogus-mode");
-        assertEquals(0, shadowAlarmManager.getScheduledAlarms().size());
+        assertEquals(DarkModeScheduler.MODE_MANUAL, DarkModeScheduler.getMode(context));
     }
 
     @Test
@@ -188,16 +121,7 @@ public class DarkModeSchedulerTest {
     }
 
     @Test
-    public void scheduleAndCancelAlarms_twoAlarmsThenZero() {
-        DarkModeScheduler.scheduleAlarms(context);
-        assertEquals(2, shadowAlarmManager.getScheduledAlarms().size());
-        DarkModeScheduler.cancelAlarms(context);
-        assertEquals(0, shadowAlarmManager.getScheduledAlarms().size());
-    }
-
-    @Test
-    public void cancelAlarms_withNoAlarmsIsNoop() {
-        DarkModeScheduler.cancelAlarms(context);
-        assertEquals(0, shadowAlarmManager.getScheduledAlarms().size());
+    public void defaultConstructor_instantiates() {
+        assertNotNull(new DarkModeScheduler());
     }
 }

@@ -1497,4 +1497,256 @@ public class Gh4ApplicationTest {
             shown.set(null, 0);
         }
     }
+
+    // ---- §6 补缺口：Gh4Application（15:40 报告残 60 行 / 49 分支） ----
+
+    /** migratePlaintextTokensFromFallbackFile：token + 翻译凭据 + OAuth 键全量迁移。 */
+    @Test
+    public void migratePlaintextTokensFromFallbackFile_allKinds_migratedAndFallbackCleared()
+            throws Exception {
+        clearAccountState();
+        String allLogins = constString("KEY_ALL_LOGINS");
+        String tokenPrefix = constString("KEY_PREFIX_TOKEN");
+        SharedPreferences fallback = app().getSharedPreferences(
+                "Gh4a-secure-plain", Context.MODE_PRIVATE);
+        SharedPreferences dest = app().getSharedPreferences(
+                "test-secure-dest", Context.MODE_PRIVATE);
+        Field securePrefsField = Gh4Application.class.getDeclaredField("mSecurePrefs");
+        securePrefsField.setAccessible(true);
+        Object savedSecurePrefs = securePrefsField.get(app());
+        try {
+            prefs().edit()
+                    .putStringSet(allLogins, new HashSet<String>() {{
+                        add("mig-user");
+                        // 第二个带 token 的账号：589 行 secureEditor 已建时复用，
+                        // 否则该分支（editor 非空）永远走不到。
+                        add("mig-user-2");
+                        add("no-token-user");
+                    }})
+                    .apply();
+            fallback.edit()
+                    .putString(tokenPrefix + "mig-user", "tok-mig")
+                    .putString(tokenPrefix + "mig-user-2", "tok-mig-2")
+                    .putString("translation_api_key_youdao", "k-youdao")
+                    .putString("translation_api_secret_baidu", "s-baidu")
+                    .putString("oauth_state_pending", "state-1")
+                    .putString("oauth_verifier_pending", "verifier-1")
+                    .putInt("some_int", 42)
+                    .putString("random_key", "x")
+                    .apply();
+            // 先初始化（落到明文 fallback），再把 mSecurePrefs 指到独立目标文件，
+            // 这样“迁移”才是真实的文件间拷贝，而不是同文件自拷贝。
+            Gh4Application.securePrefs(app());
+            securePrefsField.set(app(), dest);
+            callPrivate(app(), "migratePlaintextTokensFromFallbackFile", new Class<?>[0]);
+            assertEquals("tok-mig", dest.getString(tokenPrefix + "mig-user", null));
+            assertEquals("tok-mig-2", dest.getString(tokenPrefix + "mig-user-2", null));
+            assertEquals("k-youdao", dest.getString("translation_api_key_youdao", null));
+            assertEquals("s-baidu", dest.getString("translation_api_secret_baidu", null));
+            assertEquals("state-1", dest.getString("oauth_state_pending", null));
+            assertEquals("verifier-1", dest.getString("oauth_verifier_pending", null));
+            assertTrue(fallback.getAll().isEmpty());
+        } finally {
+            dest.edit().clear().apply();
+            app().getSharedPreferences("Gh4a-secure-plain", Context.MODE_PRIVATE)
+                    .edit().clear().apply();
+            securePrefsField.set(app(), savedSecurePrefs);
+            app().removeAccount("mig-user");
+            app().removeAccount("mig-user-2");
+            app().removeAccount("no-token-user");
+            clearAccountState();
+        }
+    }
+
+    /** migratePlaintextTokensFromFallbackFile：空 fallback 时不建 editor，直接清删。 */
+    @Test
+    public void migratePlaintextTokensFromFallbackFile_emptyFallback_clearsAndDeletes()
+            throws Exception {
+        clearAccountState();
+        SharedPreferences fallback = app().getSharedPreferences(
+                "Gh4a-secure-plain", Context.MODE_PRIVATE);
+        fallback.edit().clear().apply();
+        Gh4Application.securePrefs(app());
+        callPrivate(app(), "migratePlaintextTokensFromFallbackFile", new Class<?>[0]);
+        assertTrue(fallback.getAll().isEmpty());
+    }
+
+    @Test
+    public void migratePlaintextTokensFromFallbackFile_emptyLoginsWithTranslationKey_migratesKey()
+            throws Exception {
+        // 585 行：登录集合为空集（非 null）时 !isEmpty 为假，跳过账号循环；
+        // 此时 secureEditor 仍为 null，getAll 循环里的第一个翻译 key 走
+        // 613 行建 editor（614 行），而不是复用。
+        clearAccountState();
+        SharedPreferences fallback = app().getSharedPreferences(
+                "Gh4a-secure-plain", Context.MODE_PRIVATE);
+        SharedPreferences dest = app().getSharedPreferences(
+                "test-secure-dest", Context.MODE_PRIVATE);
+        Field securePrefsField = Gh4Application.class.getDeclaredField("mSecurePrefs");
+        securePrefsField.setAccessible(true);
+        Object savedSecurePrefs = securePrefsField.get(app());
+        try {
+            prefs().edit()
+                    .putStringSet(constString("KEY_ALL_LOGINS"),
+                            new HashSet<String>())
+                    .apply();
+            fallback.edit()
+                    .putString("translation_api_key_youdao", "k-youdao")
+                    .apply();
+            Gh4Application.securePrefs(app());
+            securePrefsField.set(app(), dest);
+            callPrivate(app(), "migratePlaintextTokensFromFallbackFile", new Class<?>[0]);
+            assertEquals("k-youdao",
+                    dest.getString("translation_api_key_youdao", null));
+            assertTrue(fallback.getAll().isEmpty());
+        } finally {
+            dest.edit().clear().apply();
+            app().getSharedPreferences("Gh4a-secure-plain", Context.MODE_PRIVATE)
+                    .edit().clear().apply();
+            securePrefsField.set(app(), savedSecurePrefs);
+            clearAccountState();
+        }
+    }
+
+    /** migratePlaintextTokens：主 prefs 有 token 时 sweep 复用已建的 editor。 */
+    @Test
+    public void migratePlaintextTokens_bothMainAndOldPlain_reusesEditor() throws Exception {
+        clearAccountState();
+        String tokenKey = constString("KEY_PREFIX_TOKEN") + "both-user";
+        try {
+            prefs().edit()
+                    .putStringSet(constString("KEY_ALL_LOGINS"),
+                            new HashSet<String>() {{ add("both-user"); }})
+                    .putString(constString("KEY_ACTIVE_LOGIN"), "both-user")
+                    .putString(tokenKey, "tok-main")
+                    .apply();
+            Gh4Application.securePrefs(app());
+            // securePrefs() 内部已跑过一次 migratePlaintextTokens，把主 prefs
+            // 的 token 迁走并删除：直接调之前必须重种，否则 sweep 时
+            // secureEditor 恒为 null，测不到 697 行“已建 editor 复用”分支。
+            prefs().edit().putString(tokenKey, "tok-main").apply();
+            SharedPreferences oldPlain = mock(SharedPreferences.class);
+            SharedPreferences.Editor oldEditor = mock(SharedPreferences.Editor.class);
+            when(oldPlain.contains(tokenKey)).thenReturn(true);
+            when(oldPlain.getString(tokenKey, null)).thenReturn("tok-old");
+            when(oldPlain.edit()).thenReturn(oldEditor);
+            when(oldEditor.remove(tokenKey)).thenReturn(oldEditor);
+            callPrivate(app(), "migratePlaintextTokens",
+                    new Class<?>[]{SharedPreferences.class}, oldPlain);
+            // 旧文件里的 token 后写，覆盖主 prefs 的 token。
+            assertEquals("tok-old", app().getAuthToken());
+            verify(oldEditor).remove(tokenKey);
+        } finally {
+            app().removeAccount("both-user");
+            clearAccountState();
+        }
+    }
+
+    // redactUrlForLog 852-853（host == null）已删：该分支是死代码——
+    // getUserInfo() != null 蕴含 authority 存在，Uri.getHost() 此时恒返
+    // 回非空串（可能为空串）。实测 "https://user:pass@/path" 得
+    // "https:///path" 而非 "[unparseable-url]"，故 host-null 分支不可达。
+    // redactUrlForLog 865-866 的 catch 同样不可达：Uri.parse/build 对任何
+    // 输入都不抛异常（宽容解析）。实测 "mailto:foo@bar.com" 得 "mailto:"、
+    // "https://user:pass@[::1" 得 "https://[[:]:1"，均未进 catch。
+    // 该 catch 是防御性代码，无测试能覆盖。
+
+    @Test
+    public void redactCrashTrace_urlTerminatedByQuery_keepsAuthority() {
+        String out = (String) callStatic("redactCrashTrace",
+                new Class<?>[]{String.class}, "GET https://example.com?x=1 end");
+        assertTrue(out.contains("https://example.com"));
+        assertFalse(out.contains("?x=1"));
+    }
+
+    @Test
+    public void redactCrashTrace_urlTerminatedByFragment_keepsAuthority() {
+        String out = (String) callStatic("redactCrashTrace",
+                new Class<?>[]{String.class}, "GET https://example.com#frag end");
+        assertTrue(out.contains("https://example.com#frag"));
+    }
+
+    @Test
+    public void redactCrashTrace_atInPath_notRedactedAsUserinfo() {
+        String out = (String) callStatic("redactCrashTrace",
+                new Class<?>[]{String.class}, "GET https://example.com/path@evil end");
+        assertTrue(out.contains("https://example.com/path@evil"));
+        assertFalse(out.contains("[userinfo-redacted]"));
+    }
+
+    @Test
+    public void redactCrashTrace_urlNoTerminator_keepsAuthority() {
+        String out = (String) callStatic("redactCrashTrace",
+                new Class<?>[]{String.class}, "GET https://example.com end");
+        assertTrue(out.contains("https://example.com"));
+    }
+
+    @Test
+    public void isAllBenignDisposeErrors_emptyComposite_returnsFalse() {
+        // new CompositeException()（零参）构造时即抛 IllegalArgumentException
+        //（"errors is empty"），无法用公开 API 造出空复合异常；改用 mock，
+        // 把 getExceptions() 桩成空列表，覆盖 1046-1047 的 isEmpty 分支。
+        io.reactivex.exceptions.CompositeException empty =
+                mock(io.reactivex.exceptions.CompositeException.class);
+        when(empty.getExceptions()).thenReturn(Collections.emptyList());
+        assertFalse((Boolean) callStatic("isAllBenignDisposeErrors",
+                new Class<?>[]{Throwable.class}, empty));
+    }
+
+    @Test
+    public void takeLastCrashTrace_directory_returnsNull() throws Exception {
+        File crashDir = new File(app().getCacheDir(), "last_crash.txt");
+        assertTrue(crashDir.mkdir());
+        try {
+            assertNull(app().takeLastCrashTrace());
+        } finally {
+            crashDir.delete();
+        }
+    }
+
+    @Test
+    public void buildCrashBreadcrumbHeader_stoppedDialogShowing_reportsTrue() throws Exception {
+        java.lang.reflect.Field shown =
+                com.gh4a.utils.CrashBreadcrumb.class.getDeclaredField("sShownDialogs");
+        shown.setAccessible(true);
+        Field stopped = Gh4Application.class.getDeclaredField("mLastStoppedDialogShowing");
+        stopped.setAccessible(true);
+        Object savedShown = shown.get(null);
+        Object savedStopped = stopped.get(app());
+        try {
+            shown.set(null, 0);
+            stopped.set(app(), true);
+            String header = (String) callPrivate(app(),
+                    "buildCrashBreadcrumbHeader", new Class<?>[0]);
+            assertTrue(header.contains("dialogShowing=true"));
+        } finally {
+            shown.set(null, savedShown);
+            stopped.set(app(), savedStopped);
+        }
+    }
+
+    @Test
+    public void setActiveLogin_unknownLogin_doesNotChangeActive() {
+        clearAccountState();
+        User u = mock(User.class);
+        when(u.login()).thenReturn("octocat");
+        when(u.id()).thenReturn(1L);
+        app().addAccount(u, "fake-token");
+        try {
+            assertEquals("octocat", app().getAuthLogin());
+            app().setActiveLogin("nobody");
+            assertEquals("octocat", app().getAuthLogin());
+        } finally {
+            app().removeAccount("octocat");
+            clearAccountState();
+        }
+    }
+
+    @Test
+    public void setActiveLogin_noLogins_doesNothing() {
+        clearAccountState();
+        app().setActiveLogin("anyone");
+        assertNull(app().getAuthLogin());
+    }
+
 }

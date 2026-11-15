@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.text.style.StyleSpan;
 
 import com.gh4a.ApiRequestException;
+import com.gh4a.Gh4Application;
 import com.meisolsson.githubsdk.model.Commit;
 import com.meisolsson.githubsdk.model.GitHubCommentBase;
 import com.meisolsson.githubsdk.model.Issue;
@@ -34,8 +35,10 @@ import retrofit2.Response;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -674,11 +677,8 @@ public class ApiHelpersTest {
                 Arrays.asList("a", "b"), Arrays.asList("c"));
     }
 
-    // 疑似生产 bug（A 组 2026-11-10，测试保持失败态，不迁就）：
-    // 204 空 body 时 evaluateError 的 map 返回 response.body() == null，
-    // RxJava2 的 map 拒 null（"The mapper function returned a null value"），
-    // 直接走 onError；toObservable 里 responsePage == null 的判空是死代码，
-    // 永远到不了。按注释本意应返回空列表并结束分页。
+    // T-001 已修复（2026-11-15）：204 空 body 时 evaluateError 返回空页哨兵，
+    // RxJava2 的 map 不再收到 null，分页正常结束并返回空列表。
     @Test
     public void pageIteratorToSingle_nullBodyPageIsEmptyList() {
         ApiHelpers.PageIterator.PageProducer<String> producer =
@@ -733,5 +733,163 @@ public class ApiHelpersTest {
         TestObserver<List<String>> observer =
                 ApiHelpers.PageIterator.toSingle(producer).test();
         observer.assertError(ApiRequestException.class);
+    }
+
+    // ---- 缺口补齐（2026-11-15）：外层类剩余 8 行 / 11 分支 / 1 方法 ----
+
+    @Test
+    public void defaultConstructor_instantiates() {
+        assertNotNull(new ApiHelpers());
+    }
+
+    @Test
+    public void authorEqualsCommitter_committerWithoutAuthorIsFalse() {
+        // 117 的 (T,F) 半边：committer 非空、author 为空。
+        Commit commit = Commit.builder()
+                .committer(User.builder().login("bob").build())
+                .build();
+        assertFalse(ApiHelpers.authorEqualsCommitter(commit));
+    }
+
+    @Test
+    public void authorEqualsCommitter_gitCommitterWithoutAuthorIsFalse() {
+        // 127 的 (T,.) 半边：Git author 为空、committer 非空。
+        Commit commit = Commit.builder()
+                .commit(GitCommit.builder()
+                        .committer(GitUser.builder().name("B").build())
+                        .build())
+                .build();
+        assertFalse(ApiHelpers.authorEqualsCommitter(commit));
+    }
+
+    @Test
+    public void authorEqualsCommitter_authorEmailOnlyFallsBackToName() {
+        // 130 的 (T,F) 半边：author 有 email、committer 无 email，
+        // 回退到名字比较（同名即 true）。
+        Commit commit = Commit.builder()
+                .commit(GitCommit.builder()
+                        .author(GitUser.builder().name("Same").email("a@x.com").build())
+                        .committer(GitUser.builder().name("Same").build())
+                        .build())
+                .build();
+        assertTrue(ApiHelpers.authorEqualsCommitter(commit));
+    }
+
+    @Test
+    public void getUserLoginWithType_nullUserReturnsDeleted() {
+        // 154 的 false 半边：actualUser 为空时不追加类型后缀。
+        assertEquals(context().getString(com.gh4a.R.string.deleted),
+                ApiHelpers.getUserLoginWithType(context(), null).toString());
+    }
+
+    @Test
+    public void normalizeUri_apiInMiddleOfAuthorityKeepsAuthority() {
+        // 250 的 (!enterprise, !startsWith) 半边：authority 含 "api."
+        // 但不在开头时不削前缀，路径仍归一化。
+        assertEquals("https://www.api.github.com/o/r",
+                ApiHelpers.normalizeUri(Uri.parse(
+                        "https://www.api.github.com/repos/o/r")).toString());
+    }
+
+    @Test
+    public void extractRepoOwnerAndName_shortUrlReturnsNullPair() {
+        // 277 的 false 半边：URL 切分后不足 6 段时返回空 Pair。
+        Issue issue = Issue.builder()
+                .url("https://api.github.com/x").build();
+        android.util.Pair<String, String> pair =
+                ApiHelpers.extractRepoOwnerAndNameFromIssue(issue);
+        assertNull(pair.first);
+        assertNull(pair.second);
+    }
+
+    @Test
+    public void extractRepoOwnerAndNameFromIssue_repoWithoutFullNameFallsBackToUrl() {
+        // 268 的 (T,F) 半边：repo 非空但 fullName 为空时走 URL 解析。
+        Issue issue = Issue.builder()
+                .repository(Repository.builder().build())
+                .url("https://api.github.com/repos/o/r/issues/1").build();
+        android.util.Pair<String, String> pair =
+                ApiHelpers.extractRepoOwnerAndNameFromIssue(issue);
+        assertEquals("o", pair.first);
+        assertEquals("r", pair.second);
+    }
+
+    private static void loginAsTester() {
+        Gh4Application.get().addAccount(
+                User.builder().login("tester").id(999L).build(), "fake-token");
+    }
+
+    @Test
+    public void throwOnFailure_unauthorizedLogsOutThenThrows() throws Exception {
+        // 321-322：401 先 logout，再按 !successful 抛错。
+        loginAsTester();
+        try {
+            ApiHelpers.throwOnFailure(Response.error(401,
+                    ResponseBody.create(MediaType.parse("text/plain"), "")));
+            fail("expected ApiRequestException");
+        } catch (ApiRequestException e) {
+            assertFalse("401 must log out", Gh4Application.get().isAuthorized());
+        } finally {
+            if (Gh4Application.get().isAuthorized()) {
+                Gh4Application.get().logout();
+            }
+        }
+    }
+
+    @Test
+    public void mapToTrueOnSuccess_unauthorizedLogsOutThenThrows() throws Exception {
+        // 331-332：401 先 logout，再按 !successful 抛错。
+        loginAsTester();
+        try {
+            ApiHelpers.mapToTrueOnSuccess(Response.error(401,
+                    ResponseBody.create(MediaType.parse("text/plain"), "")));
+            fail("expected ApiRequestException");
+        } catch (ApiRequestException e) {
+            assertFalse("401 must log out", Gh4Application.get().isAuthorized());
+        } finally {
+            if (Gh4Application.get().isAuthorized()) {
+                Gh4Application.get().logout();
+            }
+        }
+    }
+
+    @Test
+    public void mapToBooleanOrThrowOnFailure_unauthorizedLogsOutThenThrows() throws Exception {
+        // 348-349：401（非 404）先 logout，再抛错。
+        loginAsTester();
+        try {
+            ApiHelpers.mapToBooleanOrThrowOnFailure(Response.error(401,
+                    ResponseBody.create(MediaType.parse("text/plain"), "")));
+            fail("expected ApiRequestException");
+        } catch (ApiRequestException e) {
+            assertFalse("401 must log out", Gh4Application.get().isAuthorized());
+        } finally {
+            if (Gh4Application.get().isAuthorized()) {
+                Gh4Application.get().logout();
+            }
+        }
+    }
+
+    // ---- PageIterator（同文件内部类）：隐式构造 + first() 的 null-items 分支 ----
+
+    @Test
+    public void pageIterator_defaultConstructor_instantiates() {
+        assertNotNull(new ApiHelpers.PageIterator<String>());
+    }
+
+    @Test
+    public void pageIteratorFirst_nullItemsPageReturnsEmpty() {
+        // 507 的 false 半边：items() 为 null 的页按空页处理。
+        @SuppressWarnings("unchecked")
+        Page<String> page = mock(Page.class);
+        when(page.items()).thenReturn(null);
+        when(page.next()).thenReturn(null);
+        ApiHelpers.PageIterator.PageProducer<String> producer =
+                p -> Single.just(Response.success(page));
+        TestObserver<java.util.Optional<String>> observer =
+                ApiHelpers.PageIterator.first(producer, "x"::equals).test();
+        observer.assertComplete();
+        observer.assertNoErrors();
+        observer.assertValue(java.util.Optional.empty());
     }
 }

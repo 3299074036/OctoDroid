@@ -30,8 +30,14 @@ public class ContextMenuAwareRecyclerView extends RecyclerView {
     @Override
     public boolean showContextMenuForChild(View view) {
         if (view.getLayoutParams() instanceof RecyclerView.LayoutParams) {
-            RecyclerView.LayoutParams params = (RecyclerView.LayoutParams) view.getLayoutParams();
-            final int position = params.getBindingAdapterPosition();
+            // T-016：未绑定 ViewHolder 的子 view（LayoutParams.mViewHolder
+            // 为 null）时直接返回 false；getBindingAdapterPosition() 只能
+            // 从已绑定的 holder 上取。
+            RecyclerView.ViewHolder holder = getChildViewHolder(view);
+            if (holder == null) {
+                return false;
+            }
+            final int position = holder.getBindingAdapterPosition();
             if (position == NO_POSITION) {
                 return false;
             }

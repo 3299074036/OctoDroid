@@ -39,7 +39,6 @@ import com.gh4a.activities.ReleaseInfoActivity;
 import com.gh4a.activities.RepositoryActivity;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.UiUtils;
-import com.gh4a.utils.UserListDialogHelper;
 import com.gh4a.utils.StringUtils;
 import com.meisolsson.githubsdk.model.Repository;
 import com.meisolsson.githubsdk.service.activity.StarringService;
@@ -82,7 +81,9 @@ import retrofit2.Response;
  * 预取结果只缓存，切页直接显示，不重复拉取；下拉刷新只刷当前页，刷完
  * 后台再把其余两页重新预取一遍以保持新鲜。
  */
-public class StarMergedFragment extends Fragment {
+public class StarMergedFragment extends Fragment implements
+        CreateListNameDialogFragment.Callback, AssignListsDialogFragment.Callback,
+        TextInputDialogFragment.Callback {
     public static StarMergedFragment newInstance(String login) {
         StarMergedFragment f = new StarMergedFragment();
         Bundle args = new Bundle();
@@ -1113,13 +1114,106 @@ public class StarMergedFragment extends Fragment {
         }
     }
 
+    // ---- 239：Star 分组对话框（DialogFragment 版）----
+    // 对话框回调经父 Fragment 接口回落，按 tag 区分调用点；创建／归属／改名
+    // 请求一律走 ViewModel，旋转不中断。
+    private static final String TAG_ASSIGN_SINGLE = "assign_single";
+    private static final String TAG_ASSIGN_MOVE = "assign_move";
+    private static final String TAG_CREATE_ASSIGN = "create_assign";
+    private static final String TAG_CREATE_MOVE = "create_move";
+    private static final String TAG_CREATE_PLAIN = "create_plain";
+    private static final String TAG_RENAME = "rename";
+
+    private ArrayList<String> officialListNames() {
+        ArrayList<String> names = new ArrayList<>();
+        if (mOfficialLists != null) {
+            for (UserListsGraphQL.UserList list : mOfficialLists) {
+                names.add(list.name);
+            }
+        }
+        return names;
+    }
+
+    private ArrayList<String> officialListIds() {
+        ArrayList<String> ids = new ArrayList<>();
+        if (mOfficialLists != null) {
+            for (UserListsGraphQL.UserList list : mOfficialLists) {
+                ids.add(list.id);
+            }
+        }
+        return ids;
+    }
+
+    @Override
+    public void onCreateListNameConfirmed(String tag, String passthrough,
+            String name, boolean isPrivate) {
+        if (mMoveViewModel == null) {
+            return;
+        }
+        if (TAG_CREATE_ASSIGN.equals(tag)) {
+            mMoveViewModel.createListAndAssign(passthrough, name, isPrivate);
+        } else if (TAG_CREATE_MOVE.equals(tag)) {
+            mMoveViewModel.createListAndStartMove(
+                    new ArrayList<>(mSelectedRepos), name, isPrivate);
+        } else if (TAG_CREATE_PLAIN.equals(tag)) {
+            mMoveViewModel.runSingleOp(
+                    UserListsGraphQL.createList(name, isPrivate),
+                    R.string.star_list_created,
+                    R.string.star_list_create_failed, null);
+        }
+    }
+
+    @Override
+    public void onCreateListNameCancelled(String tag, String passthrough) {
+        // 本页的新建框无取消语义（旧代码未传 onCancel）。
+    }
+
+    @Override
+    public void onAssignListsConfirmed(String tag, String repoFullName,
+            List<String> selectedIds) {
+        if (TAG_ASSIGN_SINGLE.equals(tag)) {
+            assignToOfficialLists(repoFullName, selectedIds);
+        } else if (TAG_ASSIGN_MOVE.equals(tag)) {
+            startBatchMove(selectedIds);
+        }
+    }
+
+    @Override
+    public void onAssignListsCreateNew(String tag, String repoFullName) {
+        if (TAG_ASSIGN_SINGLE.equals(tag)) {
+            showCreateListDialogForAssign(repoFullName);
+        } else if (TAG_ASSIGN_MOVE.equals(tag)) {
+            showCreateListDialogForMove();
+        }
+    }
+
+    @Override
+    public void onAssignListsCancelled(String tag, String repoFullName) {
+        // 本页的归属框无取消语义（旧代码未传 onCancel）。
+    }
+
+    @Override
+    public void onTextInputConfirmed(String tag, String passthrough,
+            String initial, String text) {
+        if (!TAG_RENAME.equals(tag)) {
+            return;
+        }
+        if (text.isEmpty() || text.equals(initial)) return;
+        // 0.2.4（58）：同 assignToOfficialLists，改名走 ViewModel。
+        if (mMoveViewModel == null) {
+            return;
+        }
+        mMoveViewModel.runSingleOp(UserListsGraphQL.renameList(passthrough, text),
+                R.string.star_list_renamed, R.string.star_list_rename_failed, null);
+    }
+
     // ---- long-press assign (same semantics as StarredRepositoryListFragment) ----
     private void showAssignToGroupDialog(Repository repository) {
         if (mOfficialLists != null && !mOfficialLists.isEmpty()) {
             showAssignToOfficialListsDialog(repository);
         } else {
             // 0.1.64：无任何官方列表时直接新建（无本机分组回退）。
-            showCreateListDialogForAssign(repository);
+            showCreateListDialogForAssign(repository.fullName());
         }
     }
 
@@ -1134,25 +1228,17 @@ public class StarMergedFragment extends Fragment {
                 }
             }
         }
-        UserListDialogHelper.showAssignDialog(requireActivity(), mOfficialLists,
-                checked, null,
-                () -> showCreateListDialogForAssign(repository),
-                selectedIds -> assignToOfficialLists(fullName, selectedIds));
+        AssignListsDialogFragment.show(getParentFragmentManager(), TAG_ASSIGN_SINGLE,
+                officialListNames(), officialListIds(), checked, null, fullName);
     }
 
     /** 0.1.64：新建官方列表后直接把该仓库归属到新列表。 */
-    private void showCreateListDialogForAssign(Repository repository) {
+    private void showCreateListDialogForAssign(String fullName) {
         // 215：建组请求原挂 Fragment 的 mDisposables，旋转即 dispose 中断；
         // 改走只收名称的对话框 + ViewModel 的 createListAndAssign（126
         // 同款，RepositoryFragment 已在用），请求挂 ViewModel，旋转不中断。
-        UserListDialogHelper.showCreateListNameDialog(requireActivity(),
-                mOfficialLists, (name, isPrivate) -> {
-                    if (mMoveViewModel == null) {
-                        return;
-                    }
-                    mMoveViewModel.createListAndAssign(
-                            repository.fullName(), name, isPrivate);
-                });
+        CreateListNameDialogFragment.show(getParentFragmentManager(), TAG_CREATE_ASSIGN,
+                officialListNames(), fullName);
     }
 
     private void assignToOfficialLists(String fullName, List<String> listIds) {
@@ -1197,30 +1283,14 @@ public class StarMergedFragment extends Fragment {
     private void showCreateListDialog() {
         // 215：同上；创建走 ViewModel 单发操作，成功后 onSingleOpChanged
         // Toast + 重拉（与旧回调同款）。
-        UserListDialogHelper.showCreateListNameDialog(requireActivity(),
-                mOfficialLists, (name, isPrivate) -> {
-                    if (mMoveViewModel == null) {
-                        return;
-                    }
-                    mMoveViewModel.runSingleOp(
-                            UserListsGraphQL.createList(name, isPrivate),
-                            R.string.star_list_created,
-                            R.string.star_list_create_failed, null);
-                });
+        CreateListNameDialogFragment.show(getParentFragmentManager(), TAG_CREATE_PLAIN,
+                officialListNames(), null);
     }
 
     /** 0.1.64：修改分组名（官方 updateUserList，组内仓库自动跟随）。 */
     private void showRenameListDialog(UserListsGraphQL.UserList list) {
-        com.gh4a.utils.TextInputDialogHelper.show(requireActivity(),
-                R.string.star_list_rename_title, list.name, name -> {
-                    if (name.isEmpty() || name.equals(list.name)) return;
-                    // 0.2.4（58）：同 assignToOfficialLists，改名走 ViewModel。
-                    if (mMoveViewModel == null) {
-                        return;
-                    }
-                    mMoveViewModel.runSingleOp(UserListsGraphQL.renameList(list.id, name),
-                            R.string.star_list_renamed, R.string.star_list_rename_failed, null);
-                });
+        TextInputDialogFragment.show(getParentFragmentManager(), TAG_RENAME,
+                getString(R.string.star_list_rename_title), list.name, list.id);
     }
 
     /** 0.1.64：删除分组（官方 deleteUserList；只解散列表，仓库仍保留 Star）。 */
@@ -1324,24 +1394,16 @@ public class StarMergedFragment extends Fragment {
             }
         }
         final Set<String> checked = common != null ? common : new java.util.HashSet<>();
-        UserListDialogHelper.showAssignDialog(requireActivity(), mOfficialLists,
-                checked, null,
-                () -> showCreateListDialogForMove(),
-                selectedIds -> startBatchMove(selectedIds));
+        AssignListsDialogFragment.show(getParentFragmentManager(), TAG_ASSIGN_MOVE,
+                officialListNames(), officialListIds(), checked, null, null);
     }
 
     /** 0.1.64：移组框里新建列表后按当前选中集合批量移入新列表。 */
     private void showCreateListDialogForMove() {
         // 215：同上；建组 + 批量移入整条链走 ViewModel
         //（createListAndStartMove），旋转不中断。
-        UserListDialogHelper.showCreateListNameDialog(requireActivity(),
-                mOfficialLists, (name, isPrivate) -> {
-                    if (mMoveViewModel == null) {
-                        return;
-                    }
-                    mMoveViewModel.createListAndStartMove(
-                            new ArrayList<>(mSelectedRepos), name, isPrivate);
-                });
+        CreateListNameDialogFragment.show(getParentFragmentManager(), TAG_CREATE_MOVE,
+                officialListNames(), null);
     }
 
     /**

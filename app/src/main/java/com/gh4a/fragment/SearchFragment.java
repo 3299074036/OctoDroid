@@ -806,6 +806,9 @@ public class SearchFragment extends PagedDataBaseFragment<Object> implements
 
     @Override
     public boolean onSuggestionClick(int position) {
+        if (mSearch == null) {
+            return false;
+        }
         // 129：getCursor() 可为 null（runQuery 在空查询时返回 null），
         // 直接 moveToPosition 即 NPE；clear 行改按 _id 判定，不再靠“末行恒为 clear 行”
         if (mSearch.getSuggestionsAdapter() == null) {

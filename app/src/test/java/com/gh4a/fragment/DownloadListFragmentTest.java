@@ -114,6 +114,17 @@ public class DownloadListFragmentTest {
     }
 
     @Test
+    public void onCreateDataSingle_afterDetach_returnsEmptyList() {
+        // 顺手修（未立项）：detach 后 getActivity() 为 null，数据回调返回空列表而不是 NPE。
+        NoLoad f = attached();
+        FragmentActivity activity = f.getActivity();
+        activity.getSupportFragmentManager().beginTransaction().remove(f).commitNow();
+        TestObserver<List<Item>> observer = f.realSingle(false).test();
+        observer.assertValue(List::isEmpty);
+        observer.assertComplete();
+    }
+
+    @Test
     public void onCreateDataSingle_withRecord_returnsItemWithStatus() {
         NoLoad f = attached();
         DownloadRecordManager.clear(f.getActivity());

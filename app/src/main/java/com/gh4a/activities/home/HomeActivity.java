@@ -125,7 +125,7 @@ public class HomeActivity extends BaseFragmentPagerActivity implements
         int unread = 0;
         if (notifications != null) {
             for (com.gh4a.model.NotificationHolder h : notifications) {
-                // 154/115：unread() 为可空 Boolean，缺字段按未读计。
+                // 154/115：unread() 为可空 Boolean，缺字段按已读计。
                 if (h.notification != null && Boolean.TRUE.equals(h.notification.unread())) unread++;
             }
         }

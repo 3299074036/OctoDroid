@@ -117,19 +117,16 @@ public class CommitDiffViewerActivityTest {
     }
 
     @Test
-    public void generateHtml_commentWithoutId_throwsNpe_A1_1() {
-        // A1-1 (confirmed): DiffViewerActivity.generateHtml unboxes
-        // comment.id() into a long; id-less comments crash the diff render
-        // (the Rx subscribe swallows it into a load-failure screen).
+    public void generateHtml_commentWithoutId_rendersWithZeroId_A1_1() {
+        // A1-1 (fixed): DiffViewerActivity.generateHtml used to unbox
+        // comment.id() into a long; id-less comments now render with id 0
+        // instead of crashing the diff render.
         List<GitComment> comments = new ArrayList<>();
         comments.add(GitComment.builder().body("x").bodyHtml("x").path("a.txt").position(1).build());
         CommitDiffViewerActivity a = launch(CommitDiffViewerActivity.class, intent(comments));
-        try {
-            a.generateHtml("light", false);
-            fail("expected NullPointerException for id-less comment");
-        } catch (NullPointerException expected) {
-            assertTrue(expected.getMessage().contains("id()"));
-        }
+        String html = a.generateHtml("light", false);
+        assertTrue(html.contains("comment0"));
+        assertTrue(html.contains("</div>x"));
     }
 
     @Test

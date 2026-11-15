@@ -23,6 +23,22 @@ import android.os.Looper;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.LooperMode;
 
+import com.gh4a.ServiceFactory;
+import com.meisolsson.githubsdk.model.User;
+import com.meisolsson.githubsdk.model.UserType;
+import com.meisolsson.githubsdk.service.users.UserService;
+
+import org.mockito.MockedStatic;
+
+import io.reactivex.Single;
+import retrofit2.Response;
+
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
+
 @RunWith(RobolectricTestRunner.class)
 public class BrowseFilterTest {
     private BrowseFilter launchWithData(String uriString) {
@@ -128,11 +144,23 @@ public class BrowseFilterTest {
     @Test(timeout = 120000)
     @LooperMode(LooperMode.Mode.LEGACY)
     public void onCreate_userReposTab_executesLoadTaskAndFinishes() {
-        // LEGACY looper mode: AsyncTask.execute() runs doInBackground
-        // synchronously, so the load task completes during setup().
-        BrowseFilter activity = launchWithData("https://github.com/octo?tab=repositories");
-        Shadows.shadowOf(Looper.getMainLooper()).idle();
-        assertTrue(activity.isFinishing());
+        // The repos-tab URL resolves to a UserReposLoadTask that fetches the
+        // user from the GitHub API; stub UserService so no real request is
+        // made (mock-only rule — the old version hit the live API and 401d).
+        UserService service = mock(UserService.class);
+        User user = mock(User.class);
+        when(user.login()).thenReturn("octo");
+        when(user.type()).thenReturn(UserType.User);
+        when(service.getUser(anyString())).thenReturn(Single.just(Response.success(user)));
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            mocked.when(() -> ServiceFactory.get(eq(UserService.class), eq(false)))
+                    .thenReturn(service);
+            // LEGACY looper mode: AsyncTask.execute() runs doInBackground
+            // synchronously, so the load task completes during setup().
+            BrowseFilter activity = launchWithData("https://github.com/octo?tab=repositories");
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertTrue(activity.isFinishing());
+        }
     }
 
 }

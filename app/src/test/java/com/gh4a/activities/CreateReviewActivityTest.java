@@ -87,16 +87,10 @@ public class CreateReviewActivityTest {
     }
 
     @Test
-    public void launch_withoutExtras_throwsNpe_A1_3() {
-        // A1-3 (suspected, low): onCreate dereferences getIntent().getExtras()
-        // without a null check, so launching without extras NPEs; every
-        // production caller goes through makeIntent, which always sets extras.
-        try {
-            launch(CreateReviewActivity.class);
-            fail("expected NullPointerException for missing extras");
-        } catch (NullPointerException expected) {
-            // getExtras() returned null
-        }
+    public void launch_withoutExtras_finishesWithoutCrash() {
+        // T-114：无 extras 启动不再 NPE，onCreate 直接 finish。
+        CreateReviewActivity activity = launch(CreateReviewActivity.class);
+        assertEquals(true, activity.isFinishing());
     }
 
     @Test

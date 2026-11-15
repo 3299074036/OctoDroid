@@ -42,10 +42,20 @@ public class ChainDownloadHelper {
      */
     public static void enqueueChain(Context context, String url, String fileName,
             String description, RequestCustomizer customizer, Callback callback) {
+        enqueueChain(context, url, fileName, description, customizer, callback, false);
+    }
+
+    /**
+     * usePublicDir=true 时落公共 Downloads/（发布页附件：用户在系统下载里
+     * 找得到、点开即装）；false 时落应用私有目录（0.2.2 S-M5 现状）。
+     */
+    public static void enqueueChain(Context context, String url, String fileName,
+            String description, RequestCustomizer customizer, Callback callback,
+            boolean usePublicDir) {
         final Context appContext = context.getApplicationContext();
         enqueueNext(appContext,
                 MirrorHelper.buildFallbackChain(context, url, false),
-                fileName, description, customizer, callback);
+                fileName, description, customizer, callback, usePublicDir);
     }
 
     /** 92：DM 永不广播时（如任务被外部删除）receiver 会永久挂在 application
@@ -71,7 +81,8 @@ public class ChainDownloadHelper {
 
     private static void enqueueNext(final Context context, final List<String> urls,
             final String fileName, final String description,
-            final RequestCustomizer customizer, final Callback callback) {
+            final RequestCustomizer customizer, final Callback callback,
+            final boolean usePublicDir) {
         // 262：buildFallbackChain 经 addDistinctUrl 组装，url 为 null 或 ""
         // 时返回空链；空链上 urls.get(0) 即越界。空链按入队失败处理。
         if (urls == null || urls.isEmpty()) {
@@ -84,8 +95,11 @@ public class ChainDownloadHelper {
                 (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
         // 90：外置存储未挂载时 getExternalFilesDir() 返回 null，
         // setDestinationInExternalFilesDir 直接抛 IllegalStateException（主线程崩溃）。
+        // 公共目录不走 getExternalFilesDir，跳过这道检查（存储不可用时
+        // dm.enqueue 抛 IllegalStateException，下面 catch 按入队失败处理）。
         if (dm == null
-                || context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) == null) {
+                || (!usePublicDir
+                        && context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) == null)) {
             Toast.makeText(context, R.string.download_failed, Toast.LENGTH_SHORT).show();
             callback.onDownloadComplete(context, false, null, -1);
             return;
@@ -110,12 +124,24 @@ public class ChainDownloadHelper {
             // 这里的 setDestinationInExternalFilesDir / dm.enqueue 之间
             // 存在检查-执行窗口；存储在入队瞬间卸载即抛
             // IllegalStateException / IllegalArgumentException（主线程崩溃）。
-            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-                    // 0.2.2（S-M5）：下载落到应用私有目录（Android/data/<包>/files/Download），
-                    // 不再进公共 Downloads/（其他应用可读）；打开时走 FileProvider。
-                    // 私有目录不需要 WRITE_EXTERNAL_STORAGE，任何 API 级别都不用申请。
-                    .setDestinationInExternalFilesDir(context,
-                            Environment.DIRECTORY_DOWNLOADS, safeName)
+            DownloadManager.Request request =
+                    new DownloadManager.Request(Uri.parse(url));
+            if (usePublicDir) {
+                // 发布页附件落公共 Downloads/：用户在系统下载里找得到、
+                // 点开即装。API 29+ 时 DownloadManager（系统服务）写公共
+                // 目录不需要应用持 WRITE_EXTERNAL_STORAGE；API 23-28 上
+                // 缺权限时 dm.enqueue 抛 SecurityException，下面 catch
+                // 按入队失败处理（toast，不崩溃）。
+                request.setDestinationInExternalPublicDir(
+                        Environment.DIRECTORY_DOWNLOADS, safeName);
+            } else {
+                // 0.2.2（S-M5）：下载落到应用私有目录（Android/data/<包>/files/Download），
+                // 不再进公共 Downloads/（其他应用可读）；打开时走 FileProvider。
+                // 私有目录不需要 WRITE_EXTERNAL_STORAGE，任何 API 级别都不用申请。
+                request.setDestinationInExternalFilesDir(context,
+                        Environment.DIRECTORY_DOWNLOADS, safeName);
+            }
+            request
                     // 57：系统下载完成通知只在校验通过后才由应用自己发（见
                     // DownloadUtils.notifyDownloadComplete）——这里只显示下载中
                     // 进度，不在完成瞬间弹系统通知，否则用户一点就装上还没验过
@@ -127,7 +153,7 @@ public class ChainDownloadHelper {
                 customizer.customize(request);
             }
             downloadId = dm.enqueue(request);
-        } catch (IllegalArgumentException | IllegalStateException e) {
+        } catch (IllegalArgumentException | IllegalStateException | SecurityException e) {
             failEnqueue(context, callback);
             return;
         }
@@ -146,7 +172,7 @@ public class ChainDownloadHelper {
                 ctx.unregisterReceiver(this);
                 removePendingReceiver(downloadId);
                 resolveResult(ctx, dm, downloadId, rest,
-                        fileName, description, customizer, callback);
+                        fileName, description, customizer, callback, usePublicDir);
             }
         };
         // 用 application context 注册，避免 Activity 销毁后 receiver 泄漏；
@@ -196,7 +222,7 @@ public class ChainDownloadHelper {
 
     private static void resolveResult(Context context, DownloadManager dm, long downloadId,
             List<String> rest, String fileName, String description,
-            RequestCustomizer customizer, Callback callback) {
+            RequestCustomizer customizer, Callback callback, boolean usePublicDir) {
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
         File file = null;
         try (Cursor cursor = dm.query(query)) {
@@ -222,7 +248,8 @@ public class ChainDownloadHelper {
             // 只有最后一条链路失败时才保留 FAILED 记录。
             DownloadRecordManager.remove(context, downloadId);
             Toast.makeText(context, R.string.download_retry_alt, Toast.LENGTH_SHORT).show();
-            enqueueNext(context, rest, fileName, description, customizer, callback);
+            enqueueNext(context, rest, fileName, description, customizer, callback,
+                    usePublicDir);
         } else {
             callback.onDownloadComplete(context, false, null, downloadId);
         }

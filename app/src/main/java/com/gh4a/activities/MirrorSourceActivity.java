@@ -710,12 +710,15 @@ public class MirrorSourceActivity extends BaseActivity {
         boolean wasCurrent = !mEditingIsNew
                 && mEditingOldUrl != null
                 && mEditingOldUrl.equalsIgnoreCase(mCurrentValue);
+        // T-009：collapseAddCard() 会把 mEditingOldUrl 置 null，先捕获旧地址，
+        // 否则下面的 updateMirrorUrl 收到 null、旧地址永远删不掉。
+        String oldUrl = mEditingOldUrl;
         collapseAddCard();
         if (mEditingIsNew) {
             MirrorHelper.addMirrorUrl(this, url);
             Toast.makeText(this, R.string.mirror_added, Toast.LENGTH_SHORT).show();
         } else {
-            MirrorHelper.updateMirrorUrl(this, mEditingOldUrl, url);
+            MirrorHelper.updateMirrorUrl(this, oldUrl, url);
             Toast.makeText(this, R.string.mirror_updated, Toast.LENGTH_SHORT).show();
             if (wasCurrent) {
                 // 改正在用的镜像地址：新地址接替当前选中

@@ -335,6 +335,7 @@ public class ReadmeTranslator {
                     }
                     replacement = codePoint >= 0
                             && Character.isValidCodePoint(codePoint)
+                            && (codePoint < 0xD800 || codePoint > 0xDFFF)
                             ? new String(Character.toChars(codePoint))
                             : m.group();
                     break;

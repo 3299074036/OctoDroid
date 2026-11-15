@@ -107,14 +107,11 @@ public class FileAdapterTest {
     }
 
     @Test
-    public void bind_fileWithNullSize_throwsNpe() {
-        // T-ADP-04 (suspicious): Content.size() is @Nullable in the SDK model;
-        // bind unboxes it without a null check, so a null size NPEs here.
-        // The GitHub contents API always sends a size, so this is not
-        // reachable from real API data.
+    public void bind_fileWithNullSize_hidesSize() {
+        // T-119：content.size() 为 null 时不再拆箱 NPE，大小行直接隐藏。
         FileAdapter.ViewHolder h = holder();
-        assertThrows(NullPointerException.class,
-                () -> adapter.onBindViewHolder(h, content("a.txt", ContentType.File, null)));
+        adapter.onBindViewHolder(h, content("a.txt", ContentType.File, null));
+        assertEquals(View.GONE, h.itemView.findViewById(R.id.tv_size).getVisibility());
     }
 
     @Test
@@ -126,12 +123,15 @@ public class FileAdapterTest {
     }
 
     @Test
-    public void bind_afterNullSubModuleSet_throwsNpe() {
-        // T-ADP-01 (suspicious, Low): setSubModuleNames(null) is accepted but the
-        // next bind dereferences the set; production callers never pass null.
+    public void bind_afterNullSubModuleSet_bindsNormally() {
+        // T-117 (fixed): setSubModuleNames(null) now stores an empty set
+        // instead of null, so the next bind no longer NPEs; the file binds
+        // normally and shows its size.
         adapter.setSubModuleNames(null);
         FileAdapter.ViewHolder h = holder();
-        assertThrows(NullPointerException.class,
-                () -> adapter.onBindViewHolder(h, content("a.txt", ContentType.File, 7)));
+        adapter.onBindViewHolder(h, content("a.txt", ContentType.File, 7));
+        assertEquals("a.txt",
+                ((TextView) h.itemView.findViewById(R.id.tv_text)).getText().toString());
+        assertEquals(View.VISIBLE, h.itemView.findViewById(R.id.tv_size).getVisibility());
     }
 }

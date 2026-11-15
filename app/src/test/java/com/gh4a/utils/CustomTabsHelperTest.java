@@ -2,21 +2,32 @@ package com.gh4a.utils;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.pm.ServiceInfo;
 import android.net.Uri;
+import android.os.PatternMatcher;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
+import androidx.browser.customtabs.CustomTabsService;
 import androidx.test.core.app.ApplicationProvider;
 import org.robolectric.Shadows;
 import org.robolectric.shadows.ShadowPackageManager;
 
+import java.util.Arrays;
+import java.util.List;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * A 组：CustomTabsHelper 查 PackageManager，走 Robolectric。
@@ -101,6 +112,209 @@ public class CustomTabsHelperTest {
         CustomTabsHelper.clearPackageNameCache();
         shadowPm.removeResolveInfosForIntent(viewIntent(), "com.android.chrome");
         assertNull(CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    // ---- 多包选择链 ----
+
+    private ResolveInfo viewInfo(String pkg) {
+        ResolveInfo info = new ResolveInfo();
+        info.activityInfo = new ActivityInfo();
+        info.activityInfo.packageName = pkg;
+        info.activityInfo.name = pkg + ".Main";
+        return info;
+    }
+
+    private void addViewApp(String pkg) {
+        shadowPm.addResolveInfoForIntent(viewIntent(), viewInfo(pkg));
+    }
+
+    private void addViewApp(String pkg, IntentFilter filter) {
+        ResolveInfo info = viewInfo(pkg);
+        info.filter = filter;
+        shadowPm.addResolveInfoForIntent(viewIntent(), info);
+    }
+
+    private void addServiceApp(String pkg) {
+        Intent serviceIntent = new Intent();
+        serviceIntent.setAction(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION);
+        serviceIntent.setPackage(pkg);
+        ResolveInfo serviceInfo = new ResolveInfo();
+        serviceInfo.serviceInfo = new ServiceInfo();
+        serviceInfo.serviceInfo.packageName = pkg;
+        serviceInfo.serviceInfo.name = pkg + ".CustomTabsService";
+        shadowPm.addResolveInfoForIntent(serviceIntent, serviceInfo);
+    }
+
+    private void addBrowserWithService(String pkg) {
+        addViewApp(pkg);
+        addServiceApp(pkg);
+    }
+
+    private static IntentFilter specializingFilter() {
+        IntentFilter filter = new IntentFilter();
+        filter.addDataAuthority("www.example.com", null);
+        filter.addDataPath("/x", PatternMatcher.PATTERN_LITERAL);
+        return filter;
+    }
+
+    @Test
+    public void getPackageNameToUse_twoPackages_defaultPickedWhenNoSpecializedHandler() {
+        addBrowserWithService("com.android.chrome");
+        addBrowserWithService("com.chrome.beta");
+        assertEquals("com.android.chrome",
+                CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    @Test
+    public void getPackageNameToUse_twoPackages_stablePickedWhenDefaultNotInList() {
+        // plain 先注入成默认 VIEW 处理者，但它没有 Custom Tabs 服务，
+        // 不进候选；默认包不在候选里时走 STABLE 兜底
+        addViewApp("com.example.plain");
+        addBrowserWithService("com.android.chrome");
+        addBrowserWithService("com.chrome.beta");
+        assertEquals("com.android.chrome",
+                CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    @Test
+    public void getPackageNameToUse_twoPackages_betaPickedWhenNoStable() {
+        addViewApp("com.example.plain");
+        addBrowserWithService("com.chrome.beta");
+        addBrowserWithService("com.chrome.dev");
+        assertEquals("com.chrome.beta",
+                CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    @Test
+    public void getPackageNameToUse_twoPackages_devPickedWhenNoStableOrBeta() {
+        addViewApp("com.example.plain");
+        addBrowserWithService("com.chrome.dev");
+        addBrowserWithService("com.google.android.apps.chrome");
+        assertEquals("com.chrome.dev",
+                CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    @Test
+    public void getPackageNameToUse_twoPackages_localPickedWhenOnlyLocal() {
+        addViewApp("com.example.plain");
+        addBrowserWithService("com.google.android.apps.chrome");
+        addBrowserWithService("com.example.other");
+        assertEquals("com.google.android.apps.chrome",
+                CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    @Test
+    public void getPackageNameToUse_twoPackages_noKnownPackageReturnsNull() {
+        addViewApp("com.example.plain");
+        addBrowserWithService("com.example.other1");
+        addBrowserWithService("com.example.other2");
+        assertNull(CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    @Test
+    public void getPackageNameToUse_twoPackages_specializedHandlerSkipsDefault() {
+        // 默认包带 specialized filter（authority＋path），默认分支被跳过，
+        // 兜底选 beta；若 specialization 没起作用会错选默认包
+        addViewApp("com.example.other", specializingFilter());
+        addServiceApp("com.example.other");
+        addBrowserWithService("com.chrome.beta");
+        assertEquals("com.chrome.beta",
+                CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    @Test
+    public void getPackageNameToUse_filterWithoutPathsIsSkipped() {
+        IntentFilter filter = new IntentFilter();
+        filter.addDataAuthority("www.example.com", null);
+        addViewApp("com.example.other", filter);
+        addServiceApp("com.example.other");
+        addBrowserWithService("com.chrome.beta");
+        assertEquals("com.example.other",
+                CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    @Test
+    public void getPackageNameToUse_filterWithoutAuthoritiesIsSkipped() {
+        IntentFilter filter = new IntentFilter();
+        filter.addDataPath("/x", PatternMatcher.PATTERN_LITERAL);
+        addViewApp("com.example.other", filter);
+        addServiceApp("com.example.other");
+        addBrowserWithService("com.chrome.beta");
+        assertEquals("com.example.other",
+                CustomTabsHelper.getPackageNameToUse(context));
+    }
+
+    // ---- hasSpecializedHandlerIntents：mock PackageManager ----
+
+    private Context mockContextWithTwoBrowsers() {
+        PackageManager mockPm = mock(PackageManager.class);
+        ResolveInfo chrome = viewInfo("com.android.chrome");
+        ResolveInfo beta = viewInfo("com.chrome.beta");
+        when(mockPm.resolveActivity(any(Intent.class), eq(0)))
+                .thenReturn(chrome);
+        when(mockPm.queryIntentActivities(any(Intent.class), eq(0)))
+                .thenReturn(Arrays.asList(chrome, beta));
+        ResolveInfo service = new ResolveInfo();
+        service.serviceInfo = new ServiceInfo();
+        when(mockPm.resolveService(any(Intent.class), eq(0)))
+                .thenReturn(service);
+        Context mockContext = mock(Context.class);
+        when(mockContext.getPackageManager()).thenReturn(mockPm);
+        return mockContext;
+    }
+
+    private PackageManager mockPmOf(Context mockContext) {
+        return mockContext.getPackageManager();
+    }
+
+    @Test
+    public void getPackageNameToUse_twoPackages_noDefaultHandlerFallsBackToStable() {
+        // 真机上 resolveActivity 可能为 null（无 DEFAULT 匹配），而
+        // queryIntentActivities 仍有候选：默认分支被短路，走 STABLE 兜底
+        PackageManager mockPm = mock(PackageManager.class);
+        ResolveInfo chrome = viewInfo("com.android.chrome");
+        ResolveInfo beta = viewInfo("com.chrome.beta");
+        when(mockPm.resolveActivity(any(Intent.class), eq(0)))
+                .thenReturn(null);
+        when(mockPm.queryIntentActivities(any(Intent.class), eq(0)))
+                .thenReturn(Arrays.asList(chrome, beta));
+        ResolveInfo service = new ResolveInfo();
+        service.serviceInfo = new ServiceInfo();
+        when(mockPm.resolveService(any(Intent.class), eq(0)))
+                .thenReturn(service);
+        Context mockContext = mock(Context.class);
+        when(mockContext.getPackageManager()).thenReturn(mockPm);
+        assertEquals("com.android.chrome",
+                CustomTabsHelper.getPackageNameToUse(mockContext));
+    }
+
+    @Test
+    public void hasSpecialized_nullHandlersReturnsFalse() {
+        Context mockContext = mockContextWithTwoBrowsers();
+        when(mockPmOf(mockContext).queryIntentActivities(any(Intent.class),
+                eq(PackageManager.GET_RESOLVED_FILTER))).thenReturn(null);
+        assertEquals("com.android.chrome",
+                CustomTabsHelper.getPackageNameToUse(mockContext));
+    }
+
+    @Test
+    public void hasSpecialized_emptyHandlersReturnsFalse() {
+        Context mockContext = mockContextWithTwoBrowsers();
+        when(mockPmOf(mockContext).queryIntentActivities(any(Intent.class),
+                eq(PackageManager.GET_RESOLVED_FILTER)))
+                .thenReturn(java.util.Collections.emptyList());
+        assertEquals("com.android.chrome",
+                CustomTabsHelper.getPackageNameToUse(mockContext));
+    }
+
+    @Test
+    public void hasSpecialized_runtimeExceptionReturnsFalse() {
+        Context mockContext = mockContextWithTwoBrowsers();
+        when(mockPmOf(mockContext).queryIntentActivities(any(Intent.class),
+                eq(PackageManager.GET_RESOLVED_FILTER)))
+                .thenThrow(new RuntimeException("boom"));
+        assertEquals("com.android.chrome",
+                CustomTabsHelper.getPackageNameToUse(mockContext));
     }
 
     @Test

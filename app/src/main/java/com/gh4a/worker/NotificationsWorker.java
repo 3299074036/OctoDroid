@@ -1,6 +1,7 @@
 package com.gh4a.worker;
+import android.Manifest;
+import androidx.annotation.RequiresPermission;
 
-import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -162,6 +163,7 @@ public class NotificationsWorker extends Worker {
 
     @NonNull
     @Override
+    @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
     public Result doWork() {
         // 53：无通知权限时直接成功返回，不拉取、不推进 lastCheck。
         // 否则权限关闭期间到达的通知会被记为"已检查"，授权后只进托盘、
@@ -281,10 +283,9 @@ public class NotificationsWorker extends Worker {
         return false;
     }
 
-    // 22：MissingPermission 压制附理由——权限已由 NotificationPermission
-    // .canPostNotifications() 检查（本方法开头 + doWork() 开头），lint
-    // 不认抽进 helper 的间接检查，故此处显式压制。
-    @SuppressLint("MissingPermission")
+    // 22：MissingPermission 改注解——权限仍由 NotificationPermission
+    // .canPostNotifications() 检查（本方法开头 + doWork() 开头）。
+    @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
     private void showRepoNotification(NotificationManagerCompat nm,
             List<NotificationThread> notifications, long lastCheck) {
         final Context context = getApplicationContext();
@@ -385,9 +386,9 @@ public class NotificationsWorker extends Worker {
         nm.notify(id, builder.build());
     }
 
-    // 22：MissingPermission 压制附理由——同 showRepoNotification，权限已由
-    // NotificationPermission.canPostNotifications() 检查，lint 不认间接检查。
-    @SuppressLint("MissingPermission")
+    // 22：MissingPermission 改注解——权限仍由 NotificationPermission
+    // .canPostNotifications() 检查。
+    @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
     private void showSummaryNotification(NotificationManagerCompat nm,
             List<List<NotificationThread>> notificationsPerRepo, boolean hasNewNotification) {
         final Context context = getApplicationContext();

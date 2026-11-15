@@ -526,7 +526,9 @@ public class RepositoryActivity extends BaseFragmentPagerActivity implements
             TextView title = convertView.findViewById(R.id.title);
 
             icon.setImageResource(position >= mFirstTagIndex ? R.drawable.tag : R.drawable.branch);
-            title.setText(mItems.get(position).name());
+            // T-012：branches 列表含 null 项时直接取 name() 即 NPE，空行留空占位。
+            Branch item = mItems.get(position);
+            title.setText(item == null ? "" : item.name());
 
             return convertView;
         }

@@ -400,20 +400,14 @@ public class DiffViewerActivityTest {
     }
 
     @Test
-    public void replaceOutdatedComment_unknownPosition_throwsNpe_A1_7() {
+    public void replaceOutdatedComment_unknownPosition_returnsQuietly_A1_7() {
+        // A1-7 (fixed): mCommentsByPosition.get() returns null for a position
+        // with no comments; the method now returns early instead of NPE-ing
+        // on comments.size().
         CommitDiffViewerActivity activity = launchCommit(new ArrayList<>());
-        try {
-            call(activity, "replaceOutdatedComment",
-                    new Class<?>[]{com.meisolsson.githubsdk.model.PositionalCommentBase.class},
-                    new Object[]{comment(99L, "alice", 42)});
-            fail("expected NullPointerException for unknown position");
-        } catch (AssertionError expected) {
-            // ActivityTestHelper.call wraps the real exception as the cause;
-            // rethrow anything else (e.g. the fail() above) unchanged.
-            if (!(expected.getCause() instanceof NullPointerException)) {
-                throw expected;
-            }
-        }
+        call(activity, "replaceOutdatedComment",
+                new Class<?>[]{com.meisolsson.githubsdk.model.PositionalCommentBase.class},
+                new Object[]{comment(99L, "alice", 42)});
     }
 
     // ---------- generateHtml ----------

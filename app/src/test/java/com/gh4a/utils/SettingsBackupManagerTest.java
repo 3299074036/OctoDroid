@@ -1,13 +1,22 @@
 package com.gh4a.utils;
 
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.provider.MediaStore;
 
+import androidx.preference.PreferenceManager;
 import androidx.test.core.app.ApplicationProvider;
 
+import com.gh4a.Gh4Application;
 import com.gh4a.fragment.SettingsFragment;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -15,15 +24,27 @@ import org.robolectric.Shadows;
 import org.robolectric.shadows.ShadowContentResolver;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * R-6（A 方案）：备份政策的回归网——凭据类键永不进入手动备份。
@@ -31,7 +52,8 @@ import static org.junit.Assert.fail;
  *
  * B 组试点扩充：backupContainsTranslationCredentials（纯 JSON）、
  * applyBackup 的格式校验路径、readBackupFile、collectBackup 回合。
- * writeBackupFile 依赖 MediaStore 真实落盘，Robolectric 下不覆盖。
+ * writeBackupFile 走 mock ContentResolver 覆盖 MediaStore Q 分支；
+ * pre-Q 文件分支 SDK 恒 35 不可达。
  */
 @RunWith(RobolectricTestRunner.class)
 public class SettingsBackupManagerTest {
@@ -70,10 +92,9 @@ public class SettingsBackupManagerTest {
         assertTrue(SettingsBackupManager.isExcluded("my_token"));
         assertTrue(SettingsBackupManager.isExcluded("TOKEN"));
         assertTrue(SettingsBackupManager.isExcluded("user_id_alice"));
-        // user_id_ 前缀检查是大小写敏感的（原始 key 直接 startsWith），
-        // 大写 USER_ID_ALICE 不排除；与 token 检查（先转小写）口径不一致，
-        // 但真实 key 均为小写写入，此处锁定现状。
-        assertFalse(SettingsBackupManager.isExcluded("USER_ID_ALICE"));
+        // T-106：user_id_ 前缀检查与 token 检查口径一致（先转小写再
+        // startsWith），大写 USER_ID_ALICE 同样排除。
+        assertTrue(SettingsBackupManager.isExcluded("USER_ID_ALICE"));
         // user_id_ 前缀才排除；不带下划线的 user_id 不排除
         assertFalse(SettingsBackupManager.isExcluded("user_id"));
         // 精确键才排除；带后缀的不排除
@@ -286,5 +307,482 @@ public class SettingsBackupManagerTest {
         assertEquals("en", gh4a.getJSONObject("language").getString("v"));
         assertFalse(gh4a.has("token_alice"));
         assertFalse(gh4a.has("active_login"));
+    }
+
+    // ---------- 补缺批（2026-11-15）：逐行缺口对照 JaCoCo ----------
+    // 每个测试前清三处 prefs + 加密存储，保证方法间不互相污染
+    //（本类曾因跨方法残留 version=4 误盖 restorePrefsSnapshot 的 Integer 分支）。
+
+    @Before
+    public void clearPrefs() {
+        gh4aPrefs().edit().clear().apply();
+        mContext.getSharedPreferences("drawer_config", Context.MODE_PRIVATE)
+                .edit().clear().apply();
+        PreferenceManager.getDefaultSharedPreferences(mContext).edit().clear().apply();
+        Gh4Application.securePrefs(mContext).edit().clear().apply();
+    }
+
+    private SharedPreferences gh4aPrefs() {
+        return mContext.getSharedPreferences(
+                SettingsFragment.PREF_NAME, Context.MODE_PRIVATE);
+    }
+
+    private static Object invokePrivate(String name, Class<?>[] types, Object... args)
+            throws Exception {
+        Method m = SettingsBackupManager.class.getDeclaredMethod(name, types);
+        m.setAccessible(true);
+        return m.invoke(null, args);
+    }
+
+    private static boolean putTypedValue(JSONObject holder, Object value) throws Exception {
+        return (Boolean) invokePrivate("putTypedValue",
+                new Class<?>[]{JSONObject.class, Object.class}, holder, value);
+    }
+
+    private static boolean isGh4aPrefKeyAllowed(String key) throws Exception {
+        return (Boolean) invokePrivate("isGh4aPrefKeyAllowed",
+                new Class<?>[]{String.class}, key);
+    }
+
+    private static boolean isTranslationKeyAllowed(String key) throws Exception {
+        return (Boolean) invokePrivate("isTranslationKeyAllowed",
+                new Class<?>[]{String.class}, key);
+    }
+
+    private static boolean isTranslationCredentialKey(String key) throws Exception {
+        return (Boolean) invokePrivate("isTranslationCredentialKey",
+                new Class<?>[]{String.class}, key);
+    }
+
+    private static JSONObject holder(String type, Object value) throws JSONException {
+        JSONObject h = new JSONObject();
+        h.put("t", type);
+        h.put("v", value);
+        return h;
+    }
+
+    private static JSONObject backupWithPrefs(JSONObject prefs) throws JSONException {
+        JSONObject backup = new JSONObject();
+        backup.put("app", "OctoDroid");
+        backup.put("version", 1);
+        backup.put("prefs", prefs);
+        return backup;
+    }
+
+    private static Context mockResolverContext(ContentResolver resolver) {
+        Context ctx = mock(Context.class);
+        when(ctx.getContentResolver()).thenReturn(resolver);
+        return ctx;
+    }
+
+    @Test
+    public void defaultConstructor_instantiates() {
+        assertNotNull(new SettingsBackupManager());
+    }
+
+    @Test
+    public void putTypedValue_allTypes() throws Exception {
+        JSONObject h = new JSONObject();
+        assertTrue(putTypedValue(h, "x"));
+        assertEquals("s", h.getString("t"));
+        assertEquals("x", h.getString("v"));
+
+        h = new JSONObject();
+        assertTrue(putTypedValue(h, 7));
+        assertEquals("i", h.getString("t"));
+        assertEquals(7, h.getInt("v"));
+
+        h = new JSONObject();
+        assertTrue(putTypedValue(h, 123456789L));
+        assertEquals("l", h.getString("t"));
+        assertEquals(123456789L, h.getLong("v"));
+
+        h = new JSONObject();
+        assertTrue(putTypedValue(h, 1.5f));
+        assertEquals("f", h.getString("t"));
+        assertEquals(1.5, h.getDouble("v"), 0.0);
+
+        h = new JSONObject();
+        assertTrue(putTypedValue(h, Boolean.TRUE));
+        assertEquals("b", h.getString("t"));
+        assertTrue(h.getBoolean("v"));
+
+        h = new JSONObject();
+        assertTrue(putTypedValue(h, new HashSet<>(Arrays.asList("a", "b"))));
+        assertEquals("set", h.getString("t"));
+        assertEquals(2, h.getJSONArray("v").length());
+
+        // SharedPreferences 存不下的类型（Double）返回 false
+        h = new JSONObject();
+        assertFalse(putTypedValue(h, 2.5));
+        assertFalse(h.has("t"));
+    }
+
+    @Test
+    public void prefsToJson_skipsUnsupportedType() throws Exception {
+        SharedPreferences prefs = mock(SharedPreferences.class);
+        Map<String, Object> all = new HashMap<>();
+        all.put("good", "v");
+        all.put("bad", 2.5);
+        when(prefs.getAll()).thenAnswer(invocation -> all);
+        JSONObject out = (JSONObject) invokePrivate("prefsToJson",
+                new Class<?>[]{SharedPreferences.class, boolean.class}, prefs, true);
+        assertTrue(out.has("good"));
+        assertFalse(out.has("bad"));
+    }
+
+    @Test
+    public void isGh4aPrefKeyAllowed_prefixes() throws Exception {
+        assertTrue(isGh4aPrefKeyAllowed("token_alice"));
+        assertTrue(isGh4aPrefKeyAllowed("user_id_123"));
+        assertTrue(isGh4aPrefKeyAllowed("search_sort_repos_sort"));
+        assertTrue(isGh4aPrefKeyAllowed("start_page"));
+        assertFalse(isGh4aPrefKeyAllowed("mirror_list"));
+        assertFalse(isGh4aPrefKeyAllowed("unknown_key"));
+    }
+
+    @Test
+    public void isTranslationKeyAllowed_cases() throws Exception {
+        assertTrue(isTranslationKeyAllowed("translation_provider"));
+        assertTrue(isTranslationKeyAllowed("translation_cred_migrated_v1"));
+        assertTrue(isTranslationKeyAllowed("translation_api_key_youdao"));
+        assertTrue(isTranslationKeyAllowed("translation_region_youdao"));
+        assertFalse(isTranslationKeyAllowed("translation_url_youdao"));
+        assertFalse(isTranslationKeyAllowed("other_key"));
+    }
+
+    @Test
+    public void isTranslationCredentialKey_cases() throws Exception {
+        assertTrue(isTranslationCredentialKey("translation_api_key_youdao"));
+        assertTrue(isTranslationCredentialKey("translation_api_secret_baidu"));
+        assertFalse(isTranslationCredentialKey("translation_provider"));
+        assertFalse(isTranslationCredentialKey("translation_url_youdao"));
+        assertFalse(isTranslationCredentialKey("translation_region_x"));
+    }
+
+    @Test
+    public void collectBackup_drawerKeepsExcludedKeys() throws JSONException {
+        mContext.getSharedPreferences("drawer_config", Context.MODE_PRIVATE)
+                .edit()
+                .putString("order", "abc")
+                .putString("token_alice", "ghp_secret")
+                .apply();
+        JSONObject backup = SettingsBackupManager.collectBackup(mContext);
+        JSONObject drawer = backup.getJSONObject("prefs").getJSONObject("drawer_config");
+        // drawer 走 excludeAccounts=false：token 键也保留（112 的 false 半边）
+        assertEquals("abc", drawer.getJSONObject("order").getString("v"));
+        assertTrue(drawer.has("token_alice"));
+    }
+
+    @Test
+    public void collectBackup_translationSection() throws JSONException {
+        PreferenceManager.getDefaultSharedPreferences(mContext).edit()
+                .putString("translation_provider", "youdao")
+                .putString("translation_region_youdao", "cn-north-1")
+                .putString("translation_api_key_youdao", "plain-key")
+                .putString("other_key", "x")
+                .apply();
+        JSONObject backup = SettingsBackupManager.collectBackup(mContext);
+        JSONObject def = backup.getJSONObject("prefs").getJSONObject("default");
+        assertEquals("youdao", def.getJSONObject("translation_provider").getString("v"));
+        assertEquals("cn-north-1", def.getJSONObject("translation_region_youdao").getString("v"));
+        assertFalse(def.has("other_key"));
+        // 凭据现为明文存储（用户决定 2026-11-15）：以明文导出。
+        assertEquals("plain-key", def.getJSONObject("translation_api_key_youdao")
+                .getString("v"));
+    }
+
+    @Test
+    public void collectBackup_exportsStoredPlaintexts() throws JSONException {
+        PreferenceManager.getDefaultSharedPreferences(mContext).edit()
+                .putString("translation_api_key_baidu", "plain-key")
+                .putString("translation_api_secret_baidu", "plain-secret")
+                .apply();
+        JSONObject backup = SettingsBackupManager.collectBackup(mContext);
+        JSONObject def = backup.getJSONObject("prefs").getJSONObject("default");
+        assertEquals("plain-key",
+                def.getJSONObject("translation_api_key_baidu").getString("v"));
+        assertEquals("plain-secret",
+                def.getJSONObject("translation_api_secret_baidu").getString("v"));
+        assertFalse(def.has("translation_api_key_youdao"));
+    }
+
+    @Test
+    public void writeBackupFile_success() throws Exception {
+        JSONObject backup = new JSONObject("{\"app\":\"OctoDroid\",\"version\":1}");
+        ContentResolver resolver = mock(ContentResolver.class);
+        Uri uri = Uri.parse("content://com.android.providers.downloads.documents/document/1");
+        when(resolver.insert(eq(MediaStore.Downloads.EXTERNAL_CONTENT_URI),
+                any(ContentValues.class))).thenReturn(uri);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        when(resolver.openOutputStream(uri)).thenReturn(out);
+        String name = SettingsBackupManager.writeBackupFile(
+                mockResolverContext(resolver), backup);
+        assertTrue(name.matches("OctoDroid_backup_\\d{8}_\\d{6}_[0-9a-f]{6}\\.json"));
+        assertEquals(backup.toString(), out.toString(StandardCharsets.UTF_8.name()));
+    }
+
+    @Test
+    public void writeBackupFile_insertNullThrows() throws JSONException {
+        JSONObject backup = new JSONObject("{\"app\":\"OctoDroid\",\"version\":1}");
+        ContentResolver resolver = mock(ContentResolver.class);
+        when(resolver.insert(eq(MediaStore.Downloads.EXTERNAL_CONTENT_URI),
+                any(ContentValues.class))).thenReturn(null);
+        try {
+            SettingsBackupManager.writeBackupFile(mockResolverContext(resolver), backup);
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertEquals("MediaStore insert failed", e.getMessage());
+        }
+    }
+
+    @Test
+    public void writeBackupFile_outputStreamNullThrows() throws Exception {
+        JSONObject backup = new JSONObject("{\"app\":\"OctoDroid\",\"version\":1}");
+        ContentResolver resolver = mock(ContentResolver.class);
+        Uri uri = Uri.parse("content://test/doc/1");
+        when(resolver.insert(eq(MediaStore.Downloads.EXTERNAL_CONTENT_URI),
+                any(ContentValues.class))).thenReturn(uri);
+        when(resolver.openOutputStream(uri)).thenReturn(null);
+        try {
+            SettingsBackupManager.writeBackupFile(mockResolverContext(resolver), backup);
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertEquals("openOutputStream failed", e.getMessage());
+        }
+    }
+
+    @Test
+    public void readBackupFile_nullStreamThrows() throws Exception {
+        ContentResolver resolver = mock(ContentResolver.class);
+        when(resolver.openInputStream(any(Uri.class))).thenReturn(null);
+        try {
+            SettingsBackupManager.readBackupFile(mockResolverContext(resolver),
+                    Uri.parse("content://test/backup.json"));
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertEquals("openInputStream failed", e.getMessage());
+        } catch (JSONException e) {
+            fail("expected IOException, got JSONException");
+        }
+    }
+
+    @Test
+    public void readBackupFile_tooLargeThrows() {
+        Uri uri = Uri.parse("content://test/huge.json");
+        Shadows.shadowOf(mContext.getContentResolver())
+                .registerInputStream(uri,
+                        new ByteArrayInputStream(new byte[16 * 1024 * 1024 + 1]));
+        try {
+            SettingsBackupManager.readBackupFile(mContext, uri);
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertTrue(e.getMessage().startsWith("Backup file too large"));
+        } catch (JSONException e) {
+            fail("expected IOException, got JSONException");
+        }
+    }
+
+    @Test
+    public void backupContainsTranslationCredentials_nonObjectHolder() throws JSONException {
+        JSONObject def = new JSONObject();
+        def.put("translation_api_key_youdao", "plaintext");
+        JSONObject prefs = new JSONObject();
+        prefs.put("default", def);
+        JSONObject backup = new JSONObject();
+        backup.put("prefs", prefs);
+        assertFalse(SettingsBackupManager.backupContainsTranslationCredentials(backup));
+    }
+
+    @Test
+    public void applyBackup_emptyGh4aPrefSectionSucceeds() throws JSONException {
+        JSONObject prefs = new JSONObject();
+        prefs.put("Gh4a-pref", new JSONObject());
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        // names()==null 提前返回；version 缺失 → 写回 4
+        assertEquals(4, gh4aPrefs().getInt("version", -1));
+    }
+
+    @Test
+    public void applyBackup_correctTypeThemeRestores() throws JSONException {
+        JSONObject gh4a = new JSONObject();
+        gh4a.put("theme", holder("i", 2));
+        JSONObject prefs = new JSONObject();
+        prefs.put("Gh4a-pref", gh4a);
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        assertEquals(2, gh4aPrefs().getInt("theme", -1));
+    }
+
+    @Test
+    public void applyBackup_longFloatBoolTypesRestore() throws JSONException {
+        JSONObject gh4a = new JSONObject();
+        gh4a.put("last_notification_check", holder("l", 123456789L));
+        gh4a.put("webview_initial_zoom", holder("f", 1.5));
+        gh4a.put("notifications", holder("b", true));
+        JSONObject prefs = new JSONObject();
+        prefs.put("Gh4a-pref", gh4a);
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        assertEquals(123456789L, gh4aPrefs().getLong("last_notification_check", -1));
+        assertEquals(1.5f, gh4aPrefs().getFloat("webview_initial_zoom", -1f), 0f);
+        assertTrue(gh4aPrefs().getBoolean("notifications", false));
+    }
+
+    @Test
+    public void applyBackup_drawerSetRestores() throws JSONException {
+        JSONObject drawer = new JSONObject();
+        drawer.put("hidden", holder("set", new JSONArray(Arrays.asList("a", "b"))));
+        JSONObject prefs = new JSONObject();
+        prefs.put("drawer_config", drawer);
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        Set<String> hidden = mContext.getSharedPreferences("drawer_config", Context.MODE_PRIVATE)
+                .getStringSet("hidden", null);
+        assertNotNull(hidden);
+        assertTrue(hidden.contains("a"));
+        assertTrue(hidden.contains("b"));
+    }
+
+    @Test
+    public void applyBackup_unknownTypeDropped() throws JSONException {
+        JSONObject gh4a = new JSONObject();
+        gh4a.put("start_page", holder("x", "?"));
+        JSONObject prefs = new JSONObject();
+        prefs.put("Gh4a-pref", gh4a);
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        assertFalse(gh4aPrefs().contains("start_page"));
+    }
+
+    @Test
+    public void applyBackup_versionStringBumpsToFour() throws JSONException {
+        JSONObject gh4a = new JSONObject();
+        gh4a.put("version", holder("s", "3"));
+        JSONObject prefs = new JSONObject();
+        prefs.put("Gh4a-pref", gh4a);
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        assertEquals(4, gh4aPrefs().getInt("version", -1));
+    }
+
+    @Test
+    public void applyBackup_versionFourStays() throws JSONException {
+        JSONObject gh4a = new JSONObject();
+        gh4a.put("version", holder("i", 4));
+        JSONObject prefs = new JSONObject();
+        prefs.put("Gh4a-pref", gh4a);
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        assertEquals(4, gh4aPrefs().getInt("version", -1));
+    }
+
+    @Test
+    public void applyBackup_intUserIdMigratedToLong() throws JSONException {
+        gh4aPrefs().edit().putInt("user_id_123", 456).apply();
+        JSONObject gh4a = new JSONObject();
+        gh4a.put("start_page", holder("s", "dark"));
+        JSONObject prefs = new JSONObject();
+        prefs.put("Gh4a-pref", gh4a);
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        assertEquals(456L, gh4aPrefs().getLong("user_id_123", -1));
+        assertTrue(gh4aPrefs().getAll().get("user_id_123") instanceof Long);
+    }
+
+    @Test
+    public void applyBackup_alreadyLongUserIdNotMigrated() throws JSONException {
+        gh4aPrefs().edit().putLong("user_id_456", 789L).apply();
+        JSONObject gh4a = new JSONObject();
+        gh4a.put("start_page", holder("s", "dark"));
+        JSONObject prefs = new JSONObject();
+        prefs.put("Gh4a-pref", gh4a);
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        assertEquals(789L, gh4aPrefs().getLong("user_id_456", -1));
+    }
+
+    @Test
+    public void applyBackup_defaultSectionWritesCredAndPlainToDefaultPrefs() throws JSONException {
+        JSONObject def = new JSONObject();
+        def.put("translation_provider", holder("s", "youdao"));
+        def.put("translation_region_youdao", holder("s", "cn-north-1"));
+        def.put("translation_url_youdao", holder("s", "https://evil.example.com"));
+        def.put("translation_api_key_youdao", holder("s", "v1:YWJj"));
+        def.put("translation_api_secret_deepl", holder("s", "v1:ZGVm"));
+        JSONObject prefs = new JSONObject();
+        prefs.put("default", def);
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        SharedPreferences defPrefs = PreferenceManager.getDefaultSharedPreferences(mContext);
+        assertEquals("youdao", defPrefs.getString("translation_provider", null));
+        assertEquals("cn-north-1", defPrefs.getString("translation_region_youdao", null));
+        assertFalse(defPrefs.contains("translation_url_youdao"));
+        // 凭据与其它翻译键一样写默认 prefs（明文存储）；旧备份的密文值原样写入。
+        assertEquals("v1:YWJj", defPrefs.getString("translation_api_key_youdao", null));
+        assertEquals("v1:ZGVm", defPrefs.getString("translation_api_secret_deepl", null));
+        SharedPreferences secure = Gh4Application.securePrefs(mContext);
+        assertFalse(secure.contains("translation_api_key_youdao"));
+        assertFalse(secure.contains("translation_api_secret_deepl"));
+    }
+
+    @Test
+    public void applyBackup_emptyDefaultSectionSucceeds() throws JSONException {
+        JSONObject prefs = new JSONObject();
+        prefs.put("default", new JSONObject());
+        assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+    }
+
+    @Test
+    public void applyBackup_prefsNotObjectReturnsFalse() throws JSONException {
+        JSONObject backup = new JSONObject();
+        backup.put("app", "OctoDroid");
+        backup.put("version", 1);
+        backup.put("prefs", "not-an-object");
+        assertFalse(SettingsBackupManager.applyBackup(mContext, backup));
+    }
+
+    @Test
+    public void applyBackup_badDefaultHolderRollsBack() throws JSONException {
+        PreferenceManager.getDefaultSharedPreferences(mContext).edit()
+                .putString("translation_provider", "deepl").apply();
+        Gh4Application.securePrefs(mContext).edit()
+                .putString("translation_api_key_youdao", "v1:c2VlZA==").apply();
+        JSONObject def = new JSONObject();
+        def.put("translation_provider", "not-an-object");
+        JSONObject prefs = new JSONObject();
+        prefs.put("default", def);
+        assertFalse(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        // 快照回滚：default 与 secure 的旧值都在
+        assertEquals("deepl", PreferenceManager.getDefaultSharedPreferences(mContext)
+                .getString("translation_provider", null));
+        assertEquals("v1:c2VlZA==", Gh4Application.securePrefs(mContext)
+                .getString("translation_api_key_youdao", null));
+    }
+
+    @Test
+    public void applyBackup_rollbackRestoresAllTypes() throws JSONException {
+        gh4aPrefs().edit()
+                .putString("language", "en")
+                .putInt("theme", 2)
+                .putLong("last_notification_check", 999L)
+                .putFloat("webview_initial_zoom", 1.5f)
+                .putBoolean("notifications", true)
+                .putStringSet("last_notification_repo_ids",
+                        new HashSet<>(Arrays.asList("a", "b")))
+                .apply();
+        mContext.getSharedPreferences("drawer_config", Context.MODE_PRIVATE).edit()
+                .putString("order", "abc").apply();
+        JSONObject gh4a = new JSONObject();
+        gh4a.put("start_page", holder("s", "dark"));
+        JSONObject drawer = new JSONObject();
+        drawer.put("order", "not-an-object");
+        JSONObject prefs = new JSONObject();
+        prefs.put("Gh4a-pref", gh4a);
+        prefs.put("drawer_config", drawer);
+        assertFalse(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+        assertFalse(gh4aPrefs().contains("start_page"));
+        assertEquals("en", gh4aPrefs().getString("language", null));
+        assertEquals(2, gh4aPrefs().getInt("theme", -1));
+        assertEquals(999L, gh4aPrefs().getLong("last_notification_check", -1));
+        assertEquals(1.5f, gh4aPrefs().getFloat("webview_initial_zoom", -1f), 0f);
+        assertTrue(gh4aPrefs().getBoolean("notifications", false));
+        Set<String> ids = gh4aPrefs().getStringSet("last_notification_repo_ids", null);
+        assertNotNull(ids);
+        assertTrue(ids.contains("a"));
+        assertTrue(ids.contains("b"));
+        assertEquals("abc", mContext.getSharedPreferences("drawer_config", Context.MODE_PRIVATE)
+                .getString("order", null));
     }
 }

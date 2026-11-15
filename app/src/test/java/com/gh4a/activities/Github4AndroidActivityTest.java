@@ -288,16 +288,15 @@ public class Github4AndroidActivityTest {
     }
 
     @Test
-    public void launch_authorized_callbackWithoutCode_throwsNpe_A1_6() {
-        // A1-6: in the authorized branch onCreate never inflates the login
-        // layout, so mContent/mProgress stay null; a callback that reaches
-        // onLoginCanceled() (no code / state mismatch / no verifier) calls
-        // setProgressShown(), which dereferences the null mContent.
+    public void launch_authorized_callbackWithoutCode_cancelsWithoutCrash_A1_6() {
+        // A1-6 (fixed): onCreate now inflates the login layout before the
+        // authorization check, so mContent/mProgress are set when a code-less
+        // OAuth callback reaches onLoginCanceled() -> setProgressShown().
         authorize();
         assertTrue(Gh4Application.get().isAuthorized());
-        assertThrowsNpe(() -> launch(Github4AndroidActivity.class,
-                new Intent(Intent.ACTION_VIEW, Uri.parse("gh4a://oauth?state=x"))),
-                "authorized onCreate with a code-less OAuth callback");
+        Github4AndroidActivity activity = launch(Github4AndroidActivity.class,
+                new Intent(Intent.ACTION_VIEW, Uri.parse("gh4a://oauth?state=x")));
+        assertTrue(activity.isFinishing());
     }
 
     @Test

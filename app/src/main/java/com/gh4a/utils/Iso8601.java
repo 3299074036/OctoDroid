@@ -16,8 +16,10 @@ import java.util.TimeZone;
  * 解析失败返回 0（或 null），不抛异常——一条坏日期不应拖垮整个列表。
  */
 public class Iso8601 {
-    /** GitHub 常用的 ISO-8601 形：带/不带毫秒、带/不带 Z、纯日期（Z 形优先）。 */
+    /** GitHub 常用的 ISO-8601 形：带/不带毫秒、Z 或数字时区（+08:00）、纯日期（XXX 形优先于字面 'Z'）。 */
     private static final String[] PATTERNS = {
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
             "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
             "yyyy-MM-dd'T'HH:mm:ss'Z'",
             "yyyy-MM-dd'T'HH:mm:ss",
@@ -49,27 +51,40 @@ public class Iso8601 {
                 return f;
             });
 
-    /** 解析 ISO-8601 字符串为 epoch 毫秒；null/空/非法返回 0。 */
-    public static long parseOrZero(String value) {
+    /**
+     * 循环 PATTERNS 解析；含 'T' 的输入不回落到纯日期格式（T-002：SimpleDateFormat
+     * 前缀匹配会把 "2026-11-05T25:00:00Z" 算成当日零点）；失败返回 null。
+     */
+    private static Date tryParse(String value) {
         if (value == null || value.isEmpty()) {
-            return 0;
+            return null;
         }
-        for (SimpleDateFormat f : FORMATTERS.get()) {
+        boolean hasTime = value.indexOf('T') >= 0;
+        SimpleDateFormat[] formats = FORMATTERS.get();
+        for (int i = 0; i < PATTERNS.length; i++) {
+            if (hasTime && "yyyy-MM-dd".equals(PATTERNS[i])) {
+                continue;
+            }
             try {
-                Date d = f.parse(value);
+                Date d = formats[i].parse(value);
                 if (d != null) {
-                    return d.getTime();
+                    return d;
                 }
             } catch (ParseException ignored) {
             }
         }
-        return 0;
+        return null;
+    }
+
+    /** 解析 ISO-8601 字符串为 epoch 毫秒；null/空/非法返回 0。 */
+    public static long parseOrZero(String value) {
+        Date d = tryParse(value);
+        return d == null ? 0 : d.getTime();
     }
 
     /** 解析为 Date；失败返回 null（供 SimpleXML Transform 用）。 */
     public static Date parseOrNull(String value) {
-        long t = parseOrZero(value);
-        return t == 0 ? null : new Date(t);
+        return tryParse(value);
     }
 
     /** 按 feed 格式（无 Z、无毫秒）格式化，固定 UTC。 */

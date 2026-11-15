@@ -28,7 +28,6 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
     private EditTextPreference mKeyPref;
     private EditTextPreference mSecretPref;
     // 0.2.4（149）：明文回落警告同一 Fragment 实例内只弹一次。
-    private boolean mPlainFallbackWarned;
 
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
@@ -41,10 +40,10 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
         mKeyPref = findPreference(TranslationManager.KEY_API_KEY);
         // password field with eye toggle (PasswordEditTextPreference)
         mSecretPref = findPreference(TranslationManager.KEY_API_SECRET);
-        // S-H2：凭据不走 Preference 框架的默认 prefs 明文持久化。
-        // 输入框只负责显示（解密后的值）与收集输入，保存时由下面的
-        // listener 加密后写进加密存储；setPersistent(false) 保证框架
-        // 本身绝不把明文写进默认 prefs。
+        // 凭据按用户决定（2026-11-15）明文存默认 prefs，不加密。
+        // 输入框只负责显示与收集输入，保存时由下面的 listener 经
+        // TranslationManager 写进默认 prefs；setPersistent(false)
+        // 保证框架本身不自动持久化输入框的值。
         if (mKeyPref != null) {
             mKeyPref.setPersistent(false);
             mKeyPref.setOnPreferenceChangeListener((preference, newValue) -> {
@@ -60,8 +59,6 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
                             R.string.translation_credential_save_failed, Toast.LENGTH_LONG).show();
                     return false;
                 }
-                // 0.2.4（149）：保存成功后若凭据落入明文回落文件，弹提示。
-                warnIfPlainFallback();
                 return true;
             });
         }
@@ -79,8 +76,6 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
                             R.string.translation_credential_save_failed, Toast.LENGTH_LONG).show();
                     return false;
                 }
-                // 0.2.4（149）：同 key 逻辑，保存成功后若落入明文回落文件，弹提示。
-                warnIfPlainFallback();
                 return true;
             });
         }
@@ -94,10 +89,6 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
         migrateCredentials();
         migrateRemovedProvider();
         updateVisibility();
-        // 0.2.4（149）：打开翻译设置页时检查——凭据若已落入明文回落文件，
-        // 弹与登录同款的提示（对照 Github4AndroidActivity.onLoginFinished
-        // 的 SEC-5 弹窗），不再静默存明文。
-        warnIfPlainFallback();
     }
 
     /**
@@ -114,45 +105,17 @@ public class TranslationSettingsFragment extends PreferenceFragmentCompat
     }
 
     /**
-     * One-time migration: old versions stored credentials in the default
-     * prefs as plaintext. Move them into the encrypted store (S-H2);
+     * One-time migration: old versions stored credentials encrypted in
+     * the secure store. Move decryptable leftovers into the default
+     * prefs as plaintext (user decision 2026-11-15: no encryption);
      * TranslationManager's migration is idempotent, so this is safe to
-     * run on every open (a user upgrading from a version that already
-     * set the old flag still gets migrated).
+     * run on every open.
      */
     private void migrateCredentials() {
         if (getContext() == null) {
             return;
         }
-        TranslationManager.migrateCredentialsFromDefaultPrefs(getContext());
-    }
-
-    /**
-     * 0.2.4（149）：翻译凭据落入明文回落文件时弹提示。登录路径有同款弹窗
-     * （Github4AndroidActivity.onLoginFinished，SEC-5），翻译路径原来全程
-     * 不检查 isSecurePrefsPlainFallback()，用户填的 key/secret 会静默存进
-     * 明文文件。这里用同一 flag、同一措辞风格：标题点明是翻译凭据未加密，
-     * 正文说明换一台加密存储正常的设备后明文文件会自动迁移并删除（与
-     * Gh4Application.migratePlaintextTokensFromFallbackFile 的行为一致，
-     * 101 已把翻译凭据键纳入迁移范围）。同一 Fragment 实例内只弹一次，
-     * 旋转重建会再弹一次（状态未变，本就是持续有效的警告）。
-     */
-    private void warnIfPlainFallback() {
-        if (mPlainFallbackWarned || getContext() == null) {
-            return;
-        }
-        Gh4Application app = Gh4Application.get();
-        if (app == null || !app.isSecurePrefsPlainFallback()) {
-            return;
-        }
-        mPlainFallbackWarned = true;
-        new AlertDialog.Builder(getContext())
-                .setTitle("注意：翻译凭据未加密存储")
-                .setMessage("本设备加密存储不可用，翻译服务的 API 凭据已存入未加密文件。"
-                        + "换一台加密存储正常的设备后，该明文文件会自动迁移并删除。")
-                .setPositiveButton("知道了", null)
-                .setCancelable(false)
-                .show();
+        TranslationManager.migrateCredentialsFromSecurePrefs(getContext());
     }
 
     private String currentProvider() {

@@ -2,6 +2,7 @@ package com.gh4a.utils;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.res.Resources;
 import android.os.Looper;
 
 import androidx.test.core.app.ApplicationProvider;
@@ -9,20 +10,46 @@ import androidx.test.core.app.ApplicationProvider;
 import com.gh4a.R;
 import com.gh4a.fragment.SettingsFragment;
 
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Shadows;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.lang.reflect.Method;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+
+import okhttp3.Interceptor;
+import okhttp3.Request;
+import okhttp3.Response;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * 56：镜像 URL 校验的非规范回环形必须被拦截（isValidMirrorUrl 经
@@ -508,5 +535,638 @@ public class MirrorHelperTest {
                 .apply();
         assertEquals("https://gh-proxy.com", MirrorHelper.getMirrorBase(context()));
         assertFalse(prefs().contains("mirror_custom_url"));
+    }
+
+    // ---------- 补缺批（2026-11-15）：逐行缺口对照 JaCoCo ----------
+
+    @Before
+    public void clearMirrorPrefs() {
+        prefs().edit()
+                .remove(MirrorHelper.PREF_MIRROR_ENABLED)
+                .remove(MirrorHelper.PREF_MIRROR_PRESET)
+                .remove(MirrorHelper.PREF_MIRROR_LIST)
+                .remove(MirrorHelper.PREF_MIRROR_CUSTOM_URL)
+                .remove("mirror_speed_cache")
+                .remove("mirror_speed_cache_time")
+                .apply();
+    }
+
+    private void seedMirrorList(String... urls) {
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < urls.length; i++) {
+            if (i > 0) {
+                json.append(",");
+            }
+            json.append("\"").append(urls[i]).append("\"");
+        }
+        json.append("]");
+        prefs().edit().putString(MirrorHelper.PREF_MIRROR_LIST, json.toString()).apply();
+    }
+
+    private void seedSpeedCache(String... entries) {
+        prefs().edit().putStringSet("mirror_speed_cache",
+                new HashSet<>(Arrays.asList(entries))).apply();
+    }
+
+    private static Object invokePrivate(String name, Class<?>[] types, Object... args)
+            throws Exception {
+        Method m = MirrorHelper.class.getDeclaredMethod(name, types);
+        m.setAccessible(true);
+        return m.invoke(null, args);
+    }
+
+    private static Long parseNumericIPv4(String host) throws Exception {
+        return (Long) invokePrivate("parseNumericIPv4",
+                new Class<?>[]{String.class}, host);
+    }
+
+    private static Long embeddedIPv4(byte[] b) throws Exception {
+        return (Long) invokePrivate("embeddedIPv4",
+                new Class<?>[]{byte[].class}, (Object) b);
+    }
+
+    private static boolean isUniqueLocalIPv6(byte[] b) throws Exception {
+        return (Boolean) invokePrivate("isUniqueLocalIPv6",
+                new Class<?>[]{byte[].class}, (Object) b);
+    }
+
+    private static boolean isLoopbackOrPrivateHost(String host) throws Exception {
+        return (Boolean) invokePrivate("isLoopbackOrPrivateHost",
+                new Class<?>[]{String.class}, host);
+    }
+
+    private static byte[] ipv6Bytes(String literal) throws Exception {
+        return InetAddress.getByName(literal).getAddress();
+    }
+
+    private static int freePort() throws IOException {
+        try (ServerSocket s = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))) {
+            return s.getLocalPort();
+        }
+    }
+
+    private static boolean waitForLatch(CountDownLatch latch, long timeoutMs)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (latch.getCount() == 0) {
+                return true;
+            }
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            Thread.sleep(50);
+        }
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        return latch.getCount() == 0;
+    }
+
+    /** 本地 HTTP 服务器：测速探针的确定性目标，不走外网。 */
+    private static class LocalHttpServer implements AutoCloseable {
+        private final ServerSocket serverSocket;
+        private final Thread acceptThread;
+        private final boolean hang;
+        private final int status;
+        private final byte[] body;
+
+        LocalHttpServer(boolean hang, int status, byte[] body) throws IOException {
+            serverSocket = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
+            this.hang = hang;
+            this.status = status;
+            this.body = body;
+            acceptThread = new Thread(() -> {
+                while (!serverSocket.isClosed()) {
+                    try {
+                        Socket socket = serverSocket.accept();
+                        Thread handler = new Thread(() -> handle(socket));
+                        handler.setDaemon(true);
+                        handler.start();
+                    } catch (IOException ignored) {
+                        // closed
+                    }
+                }
+            });
+            acceptThread.setDaemon(true);
+            acceptThread.start();
+        }
+
+        private void handle(Socket socket) {
+            try (Socket s = socket) {
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
+                String line;
+                while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                    // consume request headers
+                }
+                if (hang) {
+                    Thread.sleep(10_000);
+                    return;
+                }
+                OutputStream out = s.getOutputStream();
+                String reason = status == 200 ? "OK" : "Error";
+                String headers = "HTTP/1.1 " + status + " " + reason
+                        + "\r\nContent-Length: " + body.length
+                        + "\r\nConnection: close\r\n\r\n";
+                out.write(headers.getBytes(StandardCharsets.UTF_8));
+                out.write(body);
+                out.flush();
+            } catch (Exception ignored) {
+            }
+        }
+
+        String url() {
+            return "http://127.0.0.1:" + serverSocket.getLocalPort();
+        }
+
+        @Override
+        public void close() throws IOException {
+            serverSocket.close();
+        }
+    }
+
+    @Test
+    public void defaultConstructor_instantiates() {
+        assertNotNull(new MirrorHelper());
+    }
+
+    @Test
+    public void isValidMirrorUrl_emptyHostForms() {
+        // OkHttp 把 https:///x 解析成 host "x"（合法域名），故放行
+        assertTrue(MirrorHelper.isValidMirrorUrl("https:///x"));
+        assertFalse(MirrorHelper.isValidMirrorUrl("https://./x"));
+        assertFalse(MirrorHelper.isValidMirrorUrl("https://.../x"));
+        assertFalse(MirrorHelper.isValidMirrorUrl("https://?x=1"));
+    }
+
+    @Test
+    public void isValidMirrorUrl_privateRangeEdges() {
+        // 172.16/12、192.168/16、169.254/16 的边界外 → 放行
+        assertTrue(MirrorHelper.isValidMirrorUrl("https://172.15.0.1/x"));
+        assertTrue(MirrorHelper.isValidMirrorUrl("https://172.32.0.1/x"));
+        assertTrue(MirrorHelper.isValidMirrorUrl("https://192.169.1.1/x"));
+        assertTrue(MirrorHelper.isValidMirrorUrl("https://169.253.1.1/x"));
+        // 边界内 → 拦截
+        assertFalse(MirrorHelper.isValidMirrorUrl("https://172.31.255.255/x"));
+        assertFalse(MirrorHelper.isValidMirrorUrl("https://192.168.0.1/x"));
+    }
+
+    @Test
+    public void isValidMirrorUrl_ipv6Forms() {
+        assertFalse(MirrorHelper.isValidMirrorUrl("https://[fec0::1]/x"));
+        assertFalse(MirrorHelper.isValidMirrorUrl("https://[::127.0.0.1]/x"));
+        assertTrue(MirrorHelper.isValidMirrorUrl("https://[::8.8.8.8]/x"));
+        assertTrue(MirrorHelper.isValidMirrorUrl("https://[::1:8.8.8.8]/x"));
+    }
+
+    @Test
+    public void isValidMirrorUrl_threePartIpv4() {
+        assertFalse(MirrorHelper.isValidMirrorUrl("https://127.0.1/x"));
+        assertTrue(MirrorHelper.isValidMirrorUrl("https://8.8.1/x"));
+    }
+
+    @Test
+    public void parseNumericIPv4_edges() throws Exception {
+        assertNull(parseNumericIPv4("1.2.3.4.5"));
+        assertNull(parseNumericIPv4("1..2.3"));
+        assertNull(parseNumericIPv4("99999999999999999999"));
+        assertNull(parseNumericIPv4("4294967296"));
+        assertNull(parseNumericIPv4("256.1"));
+        assertNull(parseNumericIPv4("1.16777216"));
+        assertNull(parseNumericIPv4("1.2.65536"));
+        assertNull(parseNumericIPv4("1.2.3.256"));
+        assertNull(parseNumericIPv4("256.1.1"));
+        assertNull(parseNumericIPv4("1.256.1"));
+        assertNull(parseNumericIPv4("0x"));
+        assertNull(parseNumericIPv4("abc"));
+        assertEquals(Long.valueOf(0x7F000001L), parseNumericIPv4("0X7F.0.0.1"));
+        assertEquals(Long.valueOf(0x7F000001L), parseNumericIPv4("127.0.1"));
+        assertEquals(Long.valueOf(0x08080808L), parseNumericIPv4("8.8.8.8"));
+    }
+
+    @Test
+    public void embeddedIPv4_andUniqueLocal_edges() throws Exception {
+        assertFalse(isUniqueLocalIPv6(new byte[4]));
+        assertTrue(isUniqueLocalIPv6(ipv6Bytes("fc00::1")));
+        assertFalse(isUniqueLocalIPv6(ipv6Bytes("2001:db8::1")));
+        assertNull(embeddedIPv4(new byte[4]));
+        assertNull(embeddedIPv4(ipv6Bytes("2001:db8::1")));
+        // getByName 会把 ::ffff:a.b.c.d / ::a.b.c.d 映射成 Inet4Address（4 字节），
+        // 故 16 字节的映射形/兼容形直接手写字节数组
+        assertNull(embeddedIPv4(new byte[]{
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 8, 8, 8, 8}));
+        // b[10]==0xFF 但 b[11]!=0xFF：mapped 与 compatible 皆否 → null
+        assertNull(embeddedIPv4(new byte[]{
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xFF, 0, 8, 8, 8, 8}));
+        assertEquals(Long.valueOf(0x08080808L), embeddedIPv4(new byte[]{
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xFF, (byte) 0xFF, 8, 8, 8, 8}));
+        assertEquals(Long.valueOf(0x08080808L), embeddedIPv4(new byte[]{
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8}));
+    }
+
+    @Test
+    public void isLoopbackOrPrivateHost_edges() throws Exception {
+        // 兼容形内嵌私网 IPv4：OkHttp 会把映射形归一成 IPv4，故直测本方法
+        assertTrue(isLoopbackOrPrivateHost("0:0:0:0:0:0:127.0.0.1"));
+        assertFalse(isLoopbackOrPrivateHost("0:0:0:0:0:0:8.8.8.8"));
+        assertFalse(isLoopbackOrPrivateHost("::ffff:8.8.8.8"));
+        assertFalse(isLoopbackOrPrivateHost("::1:8.8.8.8"));
+        assertTrue(isLoopbackOrPrivateHost("fec0::1"));
+        assertFalse(isLoopbackOrPrivateHost("2001:db8::1"));
+        // 非法 IPv6 字面量 → UnknownHostException → false
+        assertFalse(isLoopbackOrPrivateHost("::ffff:999.1.1.1"));
+        assertFalse(isLoopbackOrPrivateHost("::zzzz"));
+    }
+
+    @Test
+    public void displayHost_queryAndFragmentEdges() {
+        assertEquals("host.com", MirrorHelper.displayHost("https://host.com/path?x=1"));
+        assertEquals("host.com", MirrorHelper.displayHost("https://host.com#frag"));
+        assertEquals("host.com", MirrorHelper.displayHost("https://host.com/path#frag"));
+        assertEquals("https://[::1/x", MirrorHelper.displayHost("https://[::1/x"));
+        assertEquals("https:///x", MirrorHelper.displayHost("https:///x"));
+    }
+
+    @Test
+    public void migrateLegacyCustomUrl_alreadyInListSkipsAdd() {
+        prefs().edit()
+                .putString(MirrorHelper.PREF_MIRROR_LIST, "[\"https://legacy.example.com\"]")
+                .putString(MirrorHelper.PREF_MIRROR_CUSTOM_URL, "https://legacy.example.com/")
+                .putString(MirrorHelper.PREF_MIRROR_PRESET, "https://gh-proxy.com")
+                .apply();
+        assertEquals("https://gh-proxy.com", MirrorHelper.getMirrorBase(context()));
+        assertFalse(prefs().contains(MirrorHelper.PREF_MIRROR_CUSTOM_URL));
+        assertEquals(1, MirrorHelper.getMirrorUrls(context()).size());
+    }
+
+    @Test
+    public void migrateLegacyCustomUrl_emptyCustomKeepsPreset() {
+        prefs().edit()
+                .putString(MirrorHelper.PREF_MIRROR_CUSTOM_URL, "")
+                .putString(MirrorHelper.PREF_MIRROR_PRESET, "https://mirror.example.com")
+                .apply();
+        assertEquals("https://mirror.example.com", MirrorHelper.getMirrorBase(context()));
+        assertFalse(prefs().contains(MirrorHelper.PREF_MIRROR_CUSTOM_URL));
+    }
+
+    @Test
+    public void getMirrorUrls_skipsEmptyEntries() {
+        prefs().edit().putString(MirrorHelper.PREF_MIRROR_LIST,
+                "[\"https://good.example.com\", \"\", \"   \"]").apply();
+        List<String> urls = MirrorHelper.getMirrorUrls(context());
+        assertEquals(1, urls.size());
+        assertEquals("https://good.example.com", urls.get(0));
+    }
+
+    @Test
+    public void getMirrorUrls_mockPresetArrayDedupsAndSkipsInvalid() {
+        Context mockCtx = mock(Context.class);
+        Resources mockRes = mock(Resources.class);
+        when(mockCtx.getResources()).thenReturn(mockRes);
+        when(mockRes.getStringArray(R.array.mirror_preset_values)).thenReturn(new String[]{
+                "", "http://bad.example.com", "https://a.example.com",
+                "https://a.example.com", "custom"});
+        when(mockCtx.getSharedPreferences(any(String.class), any(Integer.class)))
+                .thenReturn(prefs());
+        List<String> urls = MirrorHelper.getMirrorUrls(mockCtx);
+        assertEquals(1, urls.size());
+        assertEquals("https://a.example.com", urls.get(0));
+    }
+
+    @Test
+    public void getMirrorUrls_presetArrayNotFoundReturnsEmpty() {
+        Context mockCtx = mock(Context.class);
+        Resources mockRes = mock(Resources.class);
+        when(mockCtx.getResources()).thenReturn(mockRes);
+        when(mockRes.getStringArray(any(Integer.class)))
+                .thenThrow(new Resources.NotFoundException("nf"));
+        when(mockCtx.getSharedPreferences(any(String.class), any(Integer.class)))
+                .thenReturn(prefs());
+        assertTrue(MirrorHelper.getMirrorUrls(mockCtx).isEmpty());
+    }
+
+    @Test
+    public void removeSpeedTestResult_noCacheIsNoop() {
+        MirrorHelper.removeSpeedTestResult(context(), "https://a.example.com");
+        assertTrue(MirrorHelper.getCachedSpeedResults(context()).isEmpty());
+    }
+
+    @Test
+    public void removeSpeedTestResult_emptyCacheIsNoop() {
+        MirrorHelper.saveSpeedTestResults(context(), new ArrayList<>());
+        MirrorHelper.removeSpeedTestResult(context(), "https://a.example.com");
+        assertTrue(MirrorHelper.getCachedSpeedResults(context()).isEmpty());
+    }
+
+    @Test
+    public void removeSpeedTestResult_keepsEntryWithoutEquals() {
+        seedSpeedCache("noequals", "https://a.example.com=5");
+        MirrorHelper.removeSpeedTestResult(context(), "https://a.example.com");
+        Set<String> raw = prefs().getStringSet("mirror_speed_cache", null);
+        assertNotNull(raw);
+        assertEquals(1, raw.size());
+        assertTrue(raw.contains("noequals"));
+    }
+
+    @Test
+    public void getCachedSpeedResults_skipsBadEntries() {
+        seedSpeedCache("https://a.example.com=120", "noequals", "https://b.example.com=abc");
+        Map<String, Long> cached = MirrorHelper.getCachedSpeedResults(context());
+        assertEquals(1, cached.size());
+        assertEquals(Long.valueOf(120), cached.get("https://a.example.com"));
+    }
+
+    @Test
+    public void buildFallbackChain_blindEnabledEmptyBase() {
+        prefs().edit()
+                .putBoolean(MirrorHelper.PREF_MIRROR_ENABLED, true)
+                .putString(MirrorHelper.PREF_MIRROR_PRESET, "http://bad")
+                .apply();
+        String url = "https://api.github.com/repos/o/r";
+        List<String> chain = MirrorHelper.buildFallbackChain(context(), url, true);
+        assertEquals(2, chain.size());
+        assertEquals("https://gh-proxy.com/" + url, chain.get(0));
+        assertEquals(url, chain.get(1));
+    }
+
+    @Test
+    public void rewriteUrlWithBase_githubNoPath() {
+        String base = "https://gh-proxy.com";
+        assertEquals("https://github.com",
+                MirrorHelper.rewriteUrlWithBase(base, "https://github.com"));
+        assertEquals("https://github.com/",
+                MirrorHelper.rewriteUrlWithBase(base, "https://github.com/"));
+    }
+
+    // ---------- mirrorInterceptor ----------
+
+    private static final String RAW_URL =
+            "https://raw.githubusercontent.com/o/r/main/f.txt";
+
+    private Interceptor.Chain mockChain(Request request) {
+        Interceptor.Chain chain = mock(Interceptor.Chain.class);
+        when(chain.request()).thenReturn(request);
+        return chain;
+    }
+
+    private Response mockResponse(int code) {
+        Response r = mock(Response.class);
+        when(r.code()).thenReturn(code);
+        return r;
+    }
+
+    private void enableMirrorWithList(String preset, String... list) {
+        prefs().edit()
+                .putBoolean(MirrorHelper.PREF_MIRROR_ENABLED, true)
+                .putString(MirrorHelper.PREF_MIRROR_PRESET, preset)
+                .apply();
+        seedMirrorList(list);
+    }
+
+    @Test
+    public void mirrorInterceptor_authorizationSkipsRewrite() throws Exception {
+        enableMirrorWithList("https://a.example.com", "https://a.example.com");
+        Request request = new Request.Builder().url(RAW_URL)
+                .header("Authorization", "token x").build();
+        Interceptor.Chain chain = mockChain(request);
+        Response ok = mockResponse(200);
+        when(chain.proceed(any(Request.class))).thenReturn(ok);
+        assertEquals(ok, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        ArgumentCaptor<Request> captor = ArgumentCaptor.forClass(Request.class);
+        verify(chain, times(1)).proceed(captor.capture());
+        assertEquals(RAW_URL, captor.getValue().url().toString());
+        assertEquals("token x", captor.getValue().header("Authorization"));
+    }
+
+    @Test
+    public void mirrorInterceptor_noRewritePassesThrough() throws Exception {
+        Request request = new Request.Builder().url(RAW_URL).build();
+        Interceptor.Chain chain = mockChain(request);
+        Response ok = mockResponse(200);
+        when(chain.proceed(any(Request.class))).thenReturn(ok);
+        assertEquals(ok, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        verify(chain, times(1)).proceed(request);
+    }
+
+    @Test
+    public void mirrorInterceptor_successReturnsResponse() throws Exception {
+        enableMirrorWithList("https://a.example.com", "https://a.example.com");
+        Request request = new Request.Builder().url(RAW_URL).build();
+        Interceptor.Chain chain = mockChain(request);
+        Response ok = mockResponse(200);
+        when(chain.proceed(any(Request.class))).thenReturn(ok);
+        assertEquals(ok, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        verify(chain, times(1)).proceed(any(Request.class));
+    }
+
+    @Test
+    public void mirrorInterceptor_5xxFailover() throws Exception {
+        enableMirrorWithList("https://a.example.com",
+                "https://a.example.com", "https://b.example.com");
+        Request request = new Request.Builder().url(RAW_URL).build();
+        Interceptor.Chain chain = mockChain(request);
+        Response r500 = mockResponse(500);
+        Response r200 = mockResponse(200);
+        when(chain.proceed(any(Request.class))).thenReturn(r500, r200);
+        assertEquals(r200, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        ArgumentCaptor<Request> captor = ArgumentCaptor.forClass(Request.class);
+        verify(chain, times(2)).proceed(captor.capture());
+        assertEquals("https://a.example.com/" + RAW_URL,
+                captor.getAllValues().get(0).url().toString());
+        assertEquals("https://b.example.com/" + RAW_URL,
+                captor.getAllValues().get(1).url().toString());
+    }
+
+    @Test
+    public void mirrorInterceptor_5xxNoFailoverReturnsResponse() throws Exception {
+        enableMirrorWithList("https://gh-proxy.com", "https://gh-proxy.com");
+        Request request = new Request.Builder().url(RAW_URL).build();
+        Interceptor.Chain chain = mockChain(request);
+        Response r500 = mockResponse(500);
+        when(chain.proceed(any(Request.class))).thenReturn(r500);
+        assertEquals(r500, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        verify(chain, times(1)).proceed(any(Request.class));
+    }
+
+    @Test
+    public void mirrorInterceptor_5xxNonIdempotentReturnsResponse() throws Exception {
+        enableMirrorWithList("https://a.example.com",
+                "https://a.example.com", "https://b.example.com");
+        Request request = new Request.Builder().url(RAW_URL).delete().build();
+        Interceptor.Chain chain = mockChain(request);
+        Response r500 = mockResponse(500);
+        when(chain.proceed(any(Request.class))).thenReturn(r500);
+        assertEquals(r500, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        verify(chain, times(1)).proceed(any(Request.class));
+    }
+
+    @Test
+    public void mirrorInterceptor_headIsIdempotent() throws Exception {
+        enableMirrorWithList("https://a.example.com",
+                "https://a.example.com", "https://b.example.com");
+        Request request = new Request.Builder().url(RAW_URL).head().build();
+        Interceptor.Chain chain = mockChain(request);
+        Response r500 = mockResponse(500);
+        Response r200 = mockResponse(200);
+        when(chain.proceed(any(Request.class))).thenReturn(r500, r200);
+        assertEquals(r200, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        verify(chain, times(2)).proceed(any(Request.class));
+    }
+
+    @Test
+    public void mirrorInterceptor_ioFailover() throws Exception {
+        enableMirrorWithList("https://a.example.com",
+                "https://a.example.com", "https://b.example.com");
+        Request request = new Request.Builder().url(RAW_URL).build();
+        Interceptor.Chain chain = mockChain(request);
+        Response r200 = mockResponse(200);
+        when(chain.proceed(any(Request.class)))
+                .thenThrow(new IOException("boom")).thenReturn(r200);
+        assertEquals(r200, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        ArgumentCaptor<Request> captor = ArgumentCaptor.forClass(Request.class);
+        verify(chain, times(2)).proceed(captor.capture());
+        assertEquals("https://b.example.com/" + RAW_URL,
+                captor.getAllValues().get(1).url().toString());
+    }
+
+    @Test
+    public void mirrorInterceptor_ioNoFailoverRethrows() throws Exception {
+        enableMirrorWithList("https://gh-proxy.com", "https://gh-proxy.com");
+        Request request = new Request.Builder().url(RAW_URL).build();
+        Interceptor.Chain chain = mockChain(request);
+        when(chain.proceed(any(Request.class))).thenThrow(new IOException("boom"));
+        assertThrows(IOException.class,
+                () -> MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        verify(chain, times(1)).proceed(any(Request.class));
+    }
+
+    @Test
+    public void mirrorInterceptor_ioNonIdempotentRethrows() throws Exception {
+        enableMirrorWithList("https://a.example.com",
+                "https://a.example.com", "https://b.example.com");
+        Request request = new Request.Builder().url(RAW_URL).delete().build();
+        Interceptor.Chain chain = mockChain(request);
+        when(chain.proceed(any(Request.class))).thenThrow(new IOException("boom"));
+        assertThrows(IOException.class,
+                () -> MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        verify(chain, times(1)).proceed(any(Request.class));
+    }
+
+    @Test
+    public void nextMirrorBase_cacheAndListOrdering() throws Exception {
+        enableMirrorWithList("https://a.example.com",
+                "https://a.example.com", "https://b.example.com",
+                "https://c.example.com", "https://gh-proxy.com");
+        seedSpeedCache("https://b.example.com=-1", "https://a.example.com=5",
+                "https://c.example.com=50",
+                "https://gone.example.com=5", "https://C.example.com=60");
+        Request request = new Request.Builder().url(RAW_URL).build();
+        Interceptor.Chain chain = mockChain(request);
+        Response r500 = mockResponse(500);
+        Response r200 = mockResponse(200);
+        when(chain.proceed(any(Request.class))).thenReturn(r500, r200);
+        assertEquals(r200, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        ArgumentCaptor<Request> captor = ArgumentCaptor.forClass(Request.class);
+        verify(chain, times(2)).proceed(captor.capture());
+        // 缓存：b 不可用跳过、gone 不在列表跳过、c 先入选、大小写重复跳过；
+        // 列表再补 b 与默认镜像；延迟最低的 c 排第一
+        assertEquals("https://c.example.com/" + RAW_URL,
+                captor.getAllValues().get(1).url().toString());
+    }
+
+    // ---------- testAllMirrorsSpeed ----------
+
+    @Test
+    public void testAllMirrorsSpeed_twoArgOverload() throws Exception {
+        seedMirrorList("https://nonexistent.invalid");
+        List<MirrorHelper.MirrorSpeedResult> probes =
+                Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch done = new CountDownLatch(1);
+        MirrorHelper.testAllMirrorsSpeed(context(), new MirrorHelper.SpeedTestCallback() {
+            @Override
+            public void onProbeComplete(MirrorHelper.MirrorSpeedResult result) {
+                probes.add(result);
+            }
+
+            @Override
+            public void onAllComplete() {
+                done.countDown();
+            }
+        });
+        assertTrue(waitForLatch(done, 30_000));
+        assertEquals(1, probes.size());
+        assertEquals(-1L, probes.get(0).latencyMs);
+    }
+
+    @Test
+    public void testAllMirrorsSpeed_nonEmptyTargets() throws Exception {
+        try (LocalHttpServer server = new LocalHttpServer(false, 200, new byte[2048]);
+                LocalHttpServer errorServer = new LocalHttpServer(false, 500, new byte[0])) {
+            int closedPort = freePort();
+            List<MirrorHelper.MirrorSpeedResult> targets = new ArrayList<>();
+            targets.add(new MirrorHelper.MirrorSpeedResult("ok", server.url(), -1));
+            targets.add(new MirrorHelper.MirrorSpeedResult("servererror",
+                    errorServer.url(), -1));
+            targets.add(new MirrorHelper.MirrorSpeedResult("refused",
+                    "http://127.0.0.1:" + closedPort, -1));
+            targets.add(new MirrorHelper.MirrorSpeedResult("badurl", "", -1));
+            List<MirrorHelper.MirrorSpeedResult> probes =
+                    Collections.synchronizedList(new ArrayList<>());
+            CountDownLatch done = new CountDownLatch(1);
+            MirrorHelper.testAllMirrorsSpeed(context(), targets,
+                    new MirrorHelper.SpeedTestCallback() {
+                        @Override
+                        public void onProbeComplete(MirrorHelper.MirrorSpeedResult result) {
+                            probes.add(result);
+                        }
+
+                        @Override
+                        public void onAllComplete() {
+                            done.countDown();
+                        }
+                    });
+            assertTrue(waitForLatch(done, 30_000));
+            assertEquals(4, probes.size());
+            Map<String, Long> byName = new java.util.HashMap<>();
+            for (MirrorHelper.MirrorSpeedResult r : probes) {
+                byName.put(r.name, r.latencyMs);
+            }
+            assertTrue(byName.get("ok") >= 0);
+            assertEquals(Long.valueOf(-1), byName.get("servererror"));
+            assertEquals(Long.valueOf(-1), byName.get("refused"));
+            assertEquals(Long.valueOf(-1), byName.get("badurl"));
+        }
+    }
+
+    @Test
+    public void testAllMirrorsSpeed_cancelSuppressesCallbacks() throws Exception {
+        try (LocalHttpServer fast = new LocalHttpServer(false, 200, new byte[2048]);
+                LocalHttpServer hang = new LocalHttpServer(true, 200, new byte[0])) {
+            List<MirrorHelper.MirrorSpeedResult> targets = new ArrayList<>();
+            targets.add(new MirrorHelper.MirrorSpeedResult("fast", fast.url(), -1));
+            targets.add(new MirrorHelper.MirrorSpeedResult("hang1", hang.url(), -1));
+            targets.add(new MirrorHelper.MirrorSpeedResult("hang2", hang.url(), -1));
+            List<MirrorHelper.MirrorSpeedResult> probes =
+                    Collections.synchronizedList(new ArrayList<>());
+            boolean[] allComplete = {false};
+            MirrorHelper.SpeedTestHandle handle = MirrorHelper.testAllMirrorsSpeed(
+                    context(), targets, new MirrorHelper.SpeedTestCallback() {
+                        @Override
+                        public void onProbeComplete(MirrorHelper.MirrorSpeedResult result) {
+                            probes.add(result);
+                        }
+
+                        @Override
+                        public void onAllComplete() {
+                            allComplete[0] = true;
+                        }
+                    });
+            Thread.sleep(500);
+            handle.cancel();
+            assertTrue(handle.isCancelled());
+            // 等后台排空循环退出并投递 final 回调，再 idle 主线程，
+            // 使 final 回调以 cb==null 跑到（否则该半边量不到）
+            Thread.sleep(1000);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertTrue(probes.isEmpty());
+            assertFalse(allComplete[0]);
+        }
     }
 }

@@ -185,11 +185,11 @@ public class PullRequestConversationFragment extends IssueFragmentBase {
 
     @Override
     protected void assignHighlightColor() {
-        if (mPullRequest.merged()) {
+        if (Boolean.TRUE.equals(mPullRequest.merged())) {
             setHighlightColors(R.attr.colorPullRequestMerged, R.attr.colorPullRequestMergedDark);
         } else if (mPullRequest.state() == IssueState.Closed) {
             setHighlightColors(R.attr.colorIssueClosed, R.attr.colorIssueClosedDark);
-        } else if (mPullRequest.draft()) {
+        } else if (Boolean.TRUE.equals(mPullRequest.draft())) {
             setHighlightColors(R.attr.colorPullRequestDraft, R.attr.colorPullRequestDraftDark);
         } else {
             setHighlightColors(R.attr.colorIssueOpen, R.attr.colorIssueOpenDark);

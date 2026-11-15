@@ -302,7 +302,7 @@ public class IssueLabelListActivity extends BaseActivity implements
         String errorMessage = getString(R.string.issue_error_delete_label, label.base().name());
         IssueLabelService service = ServiceFactory.get(IssueLabelService.class, false);
         service.deleteLabel(mRepoOwner, mRepoName, label.base().name())
-                .map(ApiHelpers::throwOnFailure)
+                .map(ApiHelpers::mapToTrueOnSuccess)
                 .compose(RxUtils.wrapForBackgroundTask(this, R.string.deleting_msg, errorMessage))
                 .subscribe(result -> {
                     loadLabels(true);

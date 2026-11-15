@@ -146,6 +146,17 @@ public abstract class PagedDataBaseFragment<T> extends LoadingListFragmentBase i
         return true;
     }
 
+    /** 当前 adapter 内容的拷贝：失败重试重启 loader 时作为 scan 种子（T-113），陈旧第 1 页重放变无害 diff。 */
+    private List<T> copyCurrentItems() {
+        List<T> items = new ArrayList<>();
+        if (mAdapter != null) {
+            for (int i = 0; i < mAdapter.getCount(); i++) {
+                items.add(mAdapter.getItem(i));
+            }
+        }
+        return items;
+    }
+
     private void load(boolean force) {
         mSubscription = mPageSubject
                 .flatMap(page -> loadPage(page, force)
@@ -158,7 +169,7 @@ public abstract class PagedDataBaseFragment<T> extends LoadingListFragmentBase i
                         .map(ApiHelpers::throwOnFailure)
                         .compose(RxUtils::doInBackground)
                         .toObservable())
-                .scan(Pair.create(new ArrayList<T>(), 0), (pair, page) -> {
+                .scan(Pair.create(copyCurrentItems(), 0), (pair, page) -> {
                     // 169：page.items() 可空（缺字段的分页响应），addAll(null) 即 NPE；
                     // 缺失按空页处理（204 已由 DummyPage 兜底为空列表）。
                     if (page.items() != null) {

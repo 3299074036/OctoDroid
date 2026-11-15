@@ -96,25 +96,19 @@ public class Feed implements Parcelable {
     }
 
     private static int determineUserId(String url, String userName) {
-        if (url == null) {
-            return -1;
-        }
+        if (url != null) {
+            Uri uri = Uri.parse(url);
+            String host = uri.getHost();
 
-        Uri uri = Uri.parse(url);
-        String host = uri.getHost();
-
-        // 119：相对路径/畸形 thumbnail URL 时 getHost() 为 null，
-        // 直接 startsWith 即 NPE，且异常发生在 @Commit 里会 abort 整篇 feed 解析
-        if (host == null) {
-            return -1;
-        }
-        if (host.startsWith("avatars") && host.contains("githubusercontent.com")) {
-            if (uri.getPathSegments().size() == 2) {
-                try {
-                    return Integer.valueOf(uri.getLastPathSegment());
-                } catch (NumberFormatException e) {
-                    // 119：末段非数字（如用户名路径）时不抛，返回 -1
-                    return -1;
+            // 119：相对路径/畸形 thumbnail URL 时 getHost() 为 null，
+            // 直接 startsWith 即 NPE，且异常发生在 @Commit 里会 abort 整篇 feed 解析
+            if (host != null && host.startsWith("avatars") && host.contains("githubusercontent.com")) {
+                if (uri.getPathSegments().size() == 2) {
+                    try {
+                        return Integer.valueOf(uri.getLastPathSegment());
+                    } catch (NumberFormatException e) {
+                        // 119：末段非数字（如用户名路径）时不抛，落到下面的 fake id
+                    }
                 }
             }
         }

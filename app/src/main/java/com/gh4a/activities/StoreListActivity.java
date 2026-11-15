@@ -45,6 +45,11 @@ public class StoreListActivity extends BaseActivity {
         if (mMode == null) {
             mMode = MODE_RECENT;
         }
+        // T-011：标题在 super.onCreate 里按 mMode == null 定死一次，
+        // mMode 赋值后刷新一次标题。
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setTitle(getActionBarTitle());
+        }
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         mContent = new LinearLayout(this);

@@ -179,6 +179,11 @@ public class ReviewFragment extends ListDataBaseFragment<TimelineItem> implement
 
     @Override
     protected Single<List<TimelineItem>> onCreateDataSingle(boolean bypassCache) {
+        // T-010：mReview 可能为 null（ReviewActivity.makeIntent 允许）、
+        // mReview.id() 可能为 null；无 id 时直接走错误页，不再拆箱 NPE。
+        if (mReview == null || mReview.id() == null) {
+            return Single.error(new IllegalStateException("Review has no id"));
+        }
         var prService = ServiceFactory.getForFullPagedLists(PullRequestService.class, bypassCache);
         var reviewService = ServiceFactory.getForFullPagedLists(PullRequestReviewService.class, bypassCache);
         var commentService = ServiceFactory.getForFullPagedLists(PullRequestReviewCommentService.class, bypassCache);

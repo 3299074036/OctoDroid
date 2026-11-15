@@ -74,18 +74,18 @@ public class ApiRequestExceptionTest {
 
     @Test
     public void getMessage_nullReasonSkipped() {
-        // T-MOD-01: a field error without "code" makes Moshi's generated
+        // T-019 (fixed): a field error without "code" makes Moshi's generated
         // adapter throw NullPointerException ("Null reason") inside the
-        // constructor, which only catches IOException | JsonDataException —
-        // the NPE escapes instead of degrading to a null response.
+        // constructor; the constructor now catches it and degrades to a null
+        // response instead of letting the NPE escape.
         String json = "{\"message\":\"Validation Failed\",\"errors\":["
                 + "{\"resource\":\"R\",\"field\":\"f\"}]}";
-        try {
-            ex(422, json);
-            org.junit.Assert.fail("expected NullPointerException from constructor");
-        } catch (NullPointerException expected) {
-            assertEquals("Null reason", expected.getMessage());
-        }
+        ApiRequestException e = ex(422, json);
+        assertEquals(422, e.getStatus());
+        assertNull(e.getResponse());
+        // mResponse == null -> getMessage() returns super.getMessage(),
+        // which is null: the exception carries no message, only the status.
+        assertNull(e.getMessage());
     }
 
     @Test

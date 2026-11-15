@@ -51,6 +51,10 @@ public class FollowerFollowingListActivity extends FragmentContainerActivity {
         super.onInitExtras(extras);
         mShowFollowers = extras.getBoolean("show_followers");
         mUserLogin = extras.getString("user");
+        // 与 T-011 同款防御：字段赋值后刷新一次标题，避免标题按旧值定死。
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setTitle(getActionBarTitle());
+        }
     }
 
     @Override

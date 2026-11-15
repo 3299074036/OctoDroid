@@ -230,6 +230,9 @@ public class StringUtils {
     }
 
     public static String toBase64(String data) {
+        if (data == null) {
+            return "";
+        }
         return Base64.encodeToString(data.getBytes(), Base64.NO_WRAP);
     }
 
@@ -243,6 +246,9 @@ public class StringUtils {
     }
 
     public static String unescapeCommonHtmlEntities(String sourceText) {
+        if (sourceText == null) {
+            return null;
+        }
         return sourceText.replace("&lt;", "<")
                 .replace("&gt;", ">")
                 .replace("&amp;", "&")

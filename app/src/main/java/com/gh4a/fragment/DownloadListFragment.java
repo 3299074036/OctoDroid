@@ -80,10 +80,16 @@ public class DownloadListFragment extends ListDataBaseFragment<DownloadListFragm
     @Override
     protected Single<List<Item>> onCreateDataSingle(boolean bypassCache) {
         return Single.fromCallable(() -> {
+            // 顺手修（未立项）：RxLoader 回调在后台线程跑，fragment 已 detach 时
+            // getActivity() 为 null，直接返回空列表而不是 NPE。
+            Activity activity = getActivity();
+            if (activity == null) {
+                return new ArrayList<>();
+            }
             List<Item> items = new ArrayList<>();
             for (DownloadRecordManager.Record record
-                    : DownloadRecordManager.getRecords(getActivity())) {
-                int status = DownloadListAdapter.queryStatus(getActivity(), record.downloadId);
+                    : DownloadRecordManager.getRecords(activity)) {
+                int status = DownloadListAdapter.queryStatus(activity, record.downloadId);
                 items.add(new Item(record, status));
             }
             return items;

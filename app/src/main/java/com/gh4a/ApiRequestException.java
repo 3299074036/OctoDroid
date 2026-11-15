@@ -27,7 +27,7 @@ public class ApiRequestException extends RuntimeException {
             error = ServiceGenerator.moshi
                     .adapter(ClientErrorResponse.class)
                     .fromJson(response.errorBody().source());
-        } catch (IOException | JsonDataException e) {
+        } catch (IOException | JsonDataException | NullPointerException e) {
             // 225：JsonDataException 是 RuntimeException（moshi 1.15.2
             // javap 核实），不是 IOException 子类；错误体为合法 JSON 但
             // 类型错配时（如 message 为数字）此前会直接逃逸，status 码、

@@ -61,12 +61,6 @@
             android:summary="%s"
             android:title="@string/dark_mode" />
 
-        <Preference
-            app:iconSpaceReserved="false"
-            android:key="dark_mode_schedule_time"
-            android:title="@string/dark_mode_schedule_time"
-            android:summary="@string/dark_mode_schedule_summary" />
-
     </PreferenceCategory>
 
     <PreferenceCategory

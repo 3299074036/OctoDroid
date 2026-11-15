@@ -13,7 +13,6 @@ import com.gh4a.fragment.SettingsFragment;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -21,12 +20,8 @@ import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
-
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
 
 import okhttp3.OkHttpClient;
 
@@ -86,15 +81,14 @@ public class TranslationManager {
         return KEY_URL + "_" + provider;
     }
 
-    // ---------- 翻译凭据的加密存储（S-H2） ----------
+    // ---------- 翻译凭据的明文存储（用户决定 2026-11-15） ----------
     //
-    // API key/secret 不再存默认 SharedPreferences 明文，改存加密存储
-    //（Gh4Application.getSecurePrefs()，与 GitHub token 同款）；
-    // 且存入前先用本类的 AES-GCM 再包一层，存的值本身就是密文
-    //（"v1:" + Base64(IV || 密文)）。这样备份导出时直接取存的值即是
-    // 密文，不必解密再导出，备份文件里永不出现明文凭据。
-    // 密钥存在 AndroidKeyStore（别名 translation-cred-key），卸载应用
-    // 后密钥丢失、已导出的密文无法解密，属预期行为（与 token 永不备份一致）。
+    // API key/secret 直接存默认 SharedPreferences 明文，不再走
+    // AndroidKeyStore 加密：真机上 KeyStore 密钥失效/生成失败导致保存
+    // 永远失败（T-024），用户决定不用加密、就是明文。
+    // 加密存储里若有旧密文残留，读时能解开的迁成明文照常用，解不开的丢弃
+    //（迁移见 migrateCredentialsFromSecurePrefs；decryptCredential 仅供
+    // 一次性迁移旧残留之用，不再加密任何新值）。
 
     private static final String CRED_CIPHER_PREFIX = "v1:";
     private static final String CRED_KEY_ALIAS = "translation-cred-key";
@@ -103,46 +97,17 @@ public class TranslationManager {
         return Gh4Application.securePrefs(context);
     }
 
-    // 66：同步——两线程同时在密钥不存在时进入会各 generateKey() 写同一别名，
-    // 后者覆盖前者，先拿到旧密钥的线程加密出的密文用新密钥解不开。
-    private static synchronized SecretKey getOrCreateCredKey() throws Exception {
-        KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
-        ks.load(null);
-        if (ks.containsAlias(CRED_KEY_ALIAS)) {
-            java.security.Key key = ks.getKey(CRED_KEY_ALIAS, null);
-            if (key instanceof SecretKey) {
-                return (SecretKey) key;
-            }
-        }
-        KeyGenerator kg = KeyGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
-        kg.init(new KeyGenParameterSpec.Builder(CRED_KEY_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .build());
-        return kg.generateKey();
-    }
-
-    /** 明文 → 密文（失败返回 null，调用方不删旧值）。 */
-    private static String encryptCredential(String plaintext) {
-        if (plaintext == null || plaintext.isEmpty()) {
-            return "";
-        }
+    /** 仅读：取已有的凭据密钥（不存在或不可用返回 null；不生成新密钥）。 */
+    private static SecretKey getExistingCredKey() {
         try {
-            SecretKey key = getOrCreateCredKey();
-            byte[] iv = new byte[12];
-            new SecureRandom().nextBytes(iv);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
-            byte[] ct = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
-            byte[] out = new byte[iv.length + ct.length];
-            System.arraycopy(iv, 0, out, 0, iv.length);
-            System.arraycopy(ct, 0, out, iv.length, ct.length);
-            return CRED_CIPHER_PREFIX + Base64.encodeToString(out, Base64.NO_WRAP);
+            KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+            ks.load(null);
+            if (!ks.containsAlias(CRED_KEY_ALIAS)) {
+                return null;
+            }
+            java.security.Key key = ks.getKey(CRED_KEY_ALIAS, null);
+            return key instanceof SecretKey ? (SecretKey) key : null;
         } catch (Exception e) {
-            // 52：加密失败必须记日志，否则调用方静默丢凭据、无从排查。
-            Log.w(TAG, "Failed to encrypt credential", e);
             return null;
         }
     }
@@ -151,7 +116,7 @@ public class TranslationManager {
         return stored != null && stored.startsWith(CRED_CIPHER_PREFIX);
     }
 
-    /** 密文 → 明文（非密文或解密失败返回 null）。 */
+    /** 密文 → 明文（仅供一次性迁移旧残留；非密文、密钥缺失或解密失败返回 null）。 */
     private static String decryptCredential(String stored) {
         if (!isCiphertext(stored)) {
             return null;
@@ -162,9 +127,12 @@ public class TranslationManager {
             if (raw.length <= 12) {
                 return null;
             }
+            SecretKey key = getExistingCredKey();
+            if (key == null) {
+                return null;
+            }
             byte[] iv = Arrays.copyOf(raw, 12);
             byte[] ct = Arrays.copyOfRange(raw, 12, raw.length);
-            SecretKey key = getOrCreateCredKey();
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, iv));
             return new String(cipher.doFinal(ct), StandardCharsets.UTF_8);
@@ -182,54 +150,44 @@ public class TranslationManager {
         }
     }
 
-    /** 读一条凭据（解密后返回明文；无凭据或解密失败返回 ""）。 */
+    /** 读一条凭据（明文；无凭据返回 ""）。 */
     private static String getCredential(Context context, String key) {
-        migrateCredentialsFromDefaultPrefs(context);
-        String stored = getStringSafe(securePrefs(context), key, "");
-        if (stored.isEmpty()) {
-            // 52：加密存储为空时，回落读默认 prefs 里的明文残留——迁移失败
-            // （KeyStore 不可用）时明文还留在那里；与 GitHub token 的
-            // Gh4a-secure-plain 回落同款思路。加密恢复后下次迁移再加密存回。
-            String plain = getStringSafe(prefs(context), key, "");
-            if (!plain.isEmpty()) {
-                Log.w(TAG, "Credential read from default prefs fallback (encryption unavailable)");
+        migrateCredentialsFromSecurePrefs(context);
+        String plain = getStringSafe(prefs(context), key, "");
+        if (isCiphertext(plain)) {
+            // 旧版备份恢复的密文躺在默认 prefs 里：能解开就地转明文，
+            // 解不开丢弃（不把 "v1:..." 当 API key 用）。
+            String decrypted = decryptCredential(plain);
+            if (decrypted != null && !decrypted.isEmpty()) {
+                prefs(context).edit().putString(key, decrypted).apply();
+                return decrypted;
             }
-            return plain;
+            prefs(context).edit().remove(key).apply();
+            return "";
         }
-        if (isCiphertext(stored)) {
-            String plain = decryptCredential(stored);
-            return plain != null ? plain : "";
-        }
-        // 旧版备份恢复的明文：就地加密存回，解密失败也不丢值。
-        String cipher = encryptCredential(stored);
-        if (cipher != null) {
-            securePrefs(context).edit().putString(key, cipher).apply();
-        }
-        return stored;
+        return plain;
     }
 
     /**
-     * 写一条凭据（加密后存；空值则删除）。
-     * @return true=已保存/已删除；false=加密失败，什么都没写（旧值保留，
-     *         调用方应提示用户）。
+     * 写一条凭据（明文存默认 prefs；空值则删除）。恒返回 true——默认
+     * prefs 写入不走 KeyStore，不会失败。
      */
     private static boolean setCredential(Context context, String key, String value) {
-        migrateCredentialsFromDefaultPrefs(context);
-        SharedPreferences.Editor editor = securePrefs(context).edit();
+        migrateCredentialsFromSecurePrefs(context);
+        SharedPreferences.Editor editor = prefs(context).edit();
         if (value == null || value.isEmpty()) {
             editor.remove(key);
         } else {
-            String cipher = encryptCredential(value);
-            if (cipher == null) {
-                // 52：加密失败不再静默 return，调用方凭返回值提示用户。
-                Log.w(TAG, "Failed to save credential: encryption unavailable");
-                return false;
-            }
-            editor.putString(key, cipher);
+            editor.putString(key, value);
         }
         editor.apply();
-        // 旧版明文残留（若有）一并清掉。
-        prefs(context).edit().remove(key).apply();
+        // 删掉加密存储里同 key 的旧密文残留（不删它，旧密文躺在那里无意义；
+        // 尽力而为，删不掉也不影响明文读写）。
+        try {
+            securePrefs(context).edit().remove(key).apply();
+        } catch (Exception ignored) {
+            // secure prefs 不可用时不影响明文读写。
+        }
         return true;
     }
 
@@ -252,61 +210,49 @@ public class TranslationManager {
     }
 
     /**
-     * 存着的密文本身（供备份导出：直接取存的值即是密文，不解密）。
-     * 空表示该 provider 未配凭据。
+     * 一次性迁移：加密存储里的旧凭据 → 默认 prefs 明文（用户决定
+     * 2026-11-15：翻译凭据不再加密）。能解开的密文迁成明文；解不开的
+     * 丢弃；默认 prefs 里已有明文时旧密文直接删。幂等，可反复调。
      */
-    public static String getStoredApiKeyCiphertext(Context context, String provider) {
-        // 65：先走一次 getCredential——它会把加密存储里的明文残留（旧版备份
-        // 恢复后躺在这里）就地加密存回；否则"恢复旧备份 → 未翻译过 → 立即
-        // 再导出"会静默丢掉该凭据。加密不可用时仍返回 ""，不明文进备份。
-        getCredential(context, apiKeyPrefKey(provider));
-        String stored = getStringSafe(securePrefs(context), apiKeyPrefKey(provider), "");
-        return isCiphertext(stored) ? stored : "";
-    }
-
-    public static String getStoredApiSecretCiphertext(Context context, String provider) {
-        // 65：同 getStoredApiKeyCiphertext。
-        getCredential(context, apiSecretPrefKey(provider));
-        String stored = getStringSafe(securePrefs(context), apiSecretPrefKey(provider), "");
-        return isCiphertext(stored) ? stored : "";
-    }
-
-    /**
-     * 一次性迁移：默认 prefs 里的明文凭据 → 加密存储（密文），成功后
-     * 删默认 prefs 里的明文。加密失败（KeyStore 不可用）时不动明文，
-     * 下次再试，不丢用户已填的凭据。幂等，可反复调。
-     */
-    public static void migrateCredentialsFromDefaultPrefs(Context context) {
-        SharedPreferences def = prefs(context);
+    public static void migrateCredentialsFromSecurePrefs(Context context) {
         SharedPreferences secure = securePrefs(context);
+        SharedPreferences def = prefs(context);
         // 先迁各 provider 的独立键（优先于共享键，与旧版迁移逻辑一致）。
         for (String provider : new String[]{PROVIDER_YOUDAO, PROVIDER_BAIDU, PROVIDER_DEEPL}) {
-            migrateOneCredential(def, secure, apiKeyPrefKey(provider), apiKeyPrefKey(provider));
-            migrateOneCredential(def, secure, apiSecretPrefKey(provider), apiSecretPrefKey(provider));
+            migrateOneCredentialFromSecure(secure, def,
+                    apiKeyPrefKey(provider), apiKeyPrefKey(provider));
+            migrateOneCredentialFromSecure(secure, def,
+                    apiSecretPrefKey(provider), apiSecretPrefKey(provider));
         }
         // 再迁旧版共享键（无 provider 后缀），归入当前 provider。
         String provider = getProvider(context);
-        migrateOneCredential(def, secure, KEY_API_KEY, apiKeyPrefKey(provider));
-        migrateOneCredential(def, secure, KEY_API_SECRET, apiSecretPrefKey(provider));
+        migrateOneCredentialFromSecure(secure, def, KEY_API_KEY, apiKeyPrefKey(provider));
+        migrateOneCredentialFromSecure(secure, def, KEY_API_SECRET, apiSecretPrefKey(provider));
     }
 
-    private static void migrateOneCredential(SharedPreferences def, SharedPreferences secure,
-            String fromKey, String toKey) {
-        String value = getStringSafe(def, fromKey, "");
-        if (value.isEmpty()) {
+    private static void migrateOneCredentialFromSecure(SharedPreferences secure,
+            SharedPreferences def, String fromKey, String toKey) {
+        String stored = getStringSafe(secure, fromKey, "");
+        if (stored.isEmpty()) {
             return;
         }
-        if (!getStringSafe(secure, toKey, "").isEmpty()) {
-            // 加密存储里已有值，明文副本直接删。
-            def.edit().remove(fromKey).apply();
+        if (!getStringSafe(def, toKey, "").isEmpty()) {
+            // 默认 prefs 里已有明文，旧密文直接删。
+            secure.edit().remove(fromKey).apply();
             return;
         }
-        String cipher = encryptCredential(value);
-        if (cipher == null) {
-            return;
+        String plain = stored;
+        if (isCiphertext(stored)) {
+            plain = decryptCredential(stored);
+            if (plain == null || plain.isEmpty()) {
+                // 解不开，丢弃（记一条日志，否则无从排查）。
+                Log.w(TAG, "Discarding undecryptable legacy credential for " + fromKey);
+                secure.edit().remove(fromKey).apply();
+                return;
+            }
         }
-        secure.edit().putString(toKey, cipher).apply();
-        def.edit().remove(fromKey).apply();
+        def.edit().putString(toKey, plain).apply();
+        secure.edit().remove(fromKey).apply();
     }
 
     /** Build the translator selected in settings. Never returns null. */
@@ -365,6 +311,10 @@ public class TranslationManager {
 
     /** Build the translator for the given provider. Never returns null. */
     public static Translator createTranslator(Context context, String provider) {
+        if (provider == null) {
+            // T-108：null provider 时 switch 直接 NPE；按 default 分支走 Google（无需凭据）。
+            provider = PROVIDER_GOOGLE;
+        }
         SharedPreferences prefs = prefs(context);
         String url = prefs.getString(urlPrefKey(provider), "");
         String apiKey = getApiKey(context, provider);

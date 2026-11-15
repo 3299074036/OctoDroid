@@ -207,7 +207,6 @@
         <activity android:name=".activities.SearchActivity" android:exported="false" />
         <activity android:name=".activities.StoreListActivity" android:exported="false" />
         <activity android:name=".activities.StoreRemovedActivity" android:exported="false" />
-        <activity android:name=".activities.StoreSubmitActivity" android:exported="false" />
         <activity android:name=".activities.StargazerListActivity" android:exported="false" />
         <activity android:name=".activities.TimelineActivity" android:exported="false" />
         <activity android:name=".activities.TrendingActivity" android:exported="false" />
@@ -319,14 +318,5 @@
             android:exported="false" />
 
         <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
-        <!-- SEC-10: exported=false — only the system (BOOT_COMPLETED) and
-             the app's own FLAG_IMMUTABLE alarm PendingIntents can reach it. -->
-        <receiver
-            android:name="com.gh4a.utils.DarkModeAlarmReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>

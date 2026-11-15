@@ -588,6 +588,10 @@ public class PagedDataBaseFragmentTest {
         settleMainLooper();
         assertEquals(callsBefore + 1, f.loadCalls.get());
         assertEquals(null, field(f, PagedDataBaseFragment.class, "mFailedPage"));
+        // T-113：重试后两路投递收敛，第 1 页不丢、第 2 页追加（上游走后台线程，需等）。
+        waitForCount(f, 2);
+        assertEquals("a", f.adapter.getItem(0));
+        assertEquals("b", f.adapter.getItem(1));
     }
 
     @Test
@@ -616,6 +620,10 @@ public class PagedDataBaseFragmentTest {
         settleMainLooper();
         assertEquals(callsBefore + 1, f.loadCalls.get());
         assertEquals(null, field(f, PagedDataBaseFragment.class, "mFailedPage"));
+        // T-113：同上，滚动重试同样收敛到 [a, b]（上游走后台线程，需等）。
+        waitForCount(f, 2);
+        assertEquals("a", f.adapter.getItem(0));
+        assertEquals("b", f.adapter.getItem(1));
     }
 
     @Test

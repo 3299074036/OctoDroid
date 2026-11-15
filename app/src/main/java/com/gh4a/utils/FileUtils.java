@@ -45,6 +45,9 @@ public class FileUtils {
     }
 
     public static String getFileExtension(String filename) {
+        if (filename == null) {
+            return "";
+        }
         int mid = filename.lastIndexOf(".");
         if (mid == -1) {
             return "";
@@ -65,6 +68,9 @@ public class FileUtils {
     }
 
     public static String getFolderPath(String filePath) {
+        if (StringUtils.isBlank(filePath)) {
+            return "";
+        }
         List<String> pathSegments = new ArrayList<>(Uri.parse(filePath).getPathSegments());
         pathSegments.remove(pathSegments.size() - 1);
         return TextUtils.join("/", pathSegments);

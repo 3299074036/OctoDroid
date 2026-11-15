@@ -54,12 +54,9 @@ public class StarGroupManagerTest {
     }
 
     @Test
-    public void createGroup_nullNameThrows() {
-        try {
-            StarGroupManager.createGroup(mContext, "alice", null);
-            fail("expected NullPointerException");
-        } catch (NullPointerException expected) {
-        }
+    public void createGroup_nullNameReturnsFalse() {
+        // T-104：null name 不再 NPE，直接返回 false。
+        assertFalse(StarGroupManager.createGroup(mContext, "alice", null));
     }
 
     @Test
@@ -72,13 +69,10 @@ public class StarGroupManagerTest {
     }
 
     @Test
-    public void createGroup_nullContextOrLoginReportsSuccessButSavesNothing() {
-        // 注意：context/login 为空时 saveGroups 静默跳过，但 createGroup
-        // 仍返回 true（与 groupsCacheFor 注释"调用方按空结果/不写处理"
-        // 不一致：调用方以为建组成功，实际什么都没存）。此处锁定现状，
-        // 是否改为返回 false 待定（见 B 组汇报疑似问题清单）。
-        assertTrue(StarGroupManager.createGroup(null, "alice", "G"));
-        assertTrue(StarGroupManager.createGroup(mContext, null, "G"));
+    public void createGroup_nullContextOrLoginReturnsFalse() {
+        // T-104：context/login 为空不再谎报成功，直接返回 false，什么都不存。
+        assertFalse(StarGroupManager.createGroup(null, "alice", "G"));
+        assertFalse(StarGroupManager.createGroup(mContext, null, "G"));
         assertTrue(StarGroupManager.getGroups(mContext, "alice").isEmpty());
     }
 
@@ -173,11 +167,9 @@ public class StarGroupManagerTest {
         mContext.getSharedPreferences("star_groups_alice", Context.MODE_PRIVATE)
                 .edit().putString("groups", "[\"Good\", 123, \"AlsoGood\"]").apply();
         List<String> groups = StarGroupManager.getGroups(mContext, "alice");
-        // org.json 的 JSONArray.getString 会把数字 123 强制转成 "123"，
-        // 不是跳过：三条全收。损坏条目只在 getString 抛异常时才跳过。
-        assertEquals(3, groups.size());
+        // T-107：非字符串条目（数字 123）跳过，只收两个好条目。
+        assertEquals(2, groups.size());
         assertEquals("Good", groups.get(0));
-        assertEquals("123", groups.get(1));
-        assertEquals("AlsoGood", groups.get(2));
+        assertEquals("AlsoGood", groups.get(1));
     }
 }

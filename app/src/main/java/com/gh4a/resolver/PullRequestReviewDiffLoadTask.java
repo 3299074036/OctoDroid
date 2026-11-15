@@ -11,6 +11,7 @@ import com.gh4a.activities.ReviewActivity;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.IntentUtils;
 import com.gh4a.utils.RxUtils;
+import com.meisolsson.githubsdk.model.Review;
 import com.meisolsson.githubsdk.service.pull_request.PullRequestReviewCommentService;
 import com.meisolsson.githubsdk.service.pull_request.PullRequestReviewService;
 
@@ -46,12 +47,19 @@ public class PullRequestReviewDiffLoadTask extends UrlLoadTask {
 
         return ApiHelpers.PageIterator
                 .first(page -> service.getPullRequestComments(mRepoOwner, mRepoName, mPullRequestNumber, page),
-                        c -> c.id() == diffCommentId)
-                .flatMap(commentOpt -> RxUtils.mapToSingle(commentOpt, comment -> {
-                    long reviewId = comment.pullRequestReviewId();
-                    return reviewService.getReview(mRepoOwner, mRepoName, mPullRequestNumber, reviewId)
-                            .map(ApiHelpers::throwOnFailure);
-                }))
+                        c -> c.id() != null && c.id() == diffCommentId)
+                .flatMap(commentOpt -> {
+                    // T-014：匹配到的 comment 若 pullRequestReviewId 为 null，
+                    // 无 review 可跳，直接返回空结果（不是错误页）。
+                    if (!commentOpt.isPresent() || commentOpt.get().pullRequestReviewId() == null) {
+                        return Single.<Optional<Review>>just(Optional.empty());
+                    }
+                    return RxUtils.mapToSingle(commentOpt, comment -> {
+                        long reviewId = comment.pullRequestReviewId();
+                        return reviewService.getReview(mRepoOwner, mRepoName, mPullRequestNumber, reviewId)
+                                .map(ApiHelpers::throwOnFailure);
+                    });
+                })
                 .map(reviewOpt -> reviewOpt.map(review -> ReviewActivity.makeIntent(
                         mActivity, mRepoOwner, mRepoName, mPullRequestNumber, review,
                             new IntentUtils.InitialCommentMarker(diffCommentId)))

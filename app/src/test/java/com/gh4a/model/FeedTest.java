@@ -86,10 +86,9 @@ public class FeedTest {
         assertNull(feed.getContent());
         assertNull(feed.getPreview());
         assertEquals("my cool issue", feed.getTitle());
-        // No thumbnail URL at all: determineUserId returns -1 before ever
-        // consulting the author name (author-hash fallback only runs when
-        // a thumbnail URL exists but is not an avatar URL).
-        assertEquals(-1, feed.getUserId());
+        // No thumbnail URL at all: determineUserId falls through to the
+        // author-hash fallback (T-122 fixed) instead of returning -1.
+        assertEquals("octocat".hashCode(), feed.getUserId());
         assertNull(feed.getPublished());
         assertNull(feed.getUpdated());
     }
@@ -118,8 +117,9 @@ public class FeedTest {
                 + "<author><name>octocat</name></author>"
                 + "<content>c</content>"));
         // Last path segment is not numeric: the NumberFormatException catch
-        // returns -1 directly instead of falling back to the author hash.
-        assertEquals(-1, feed.getUserId());
+        // no longer returns -1 directly (T-122 fixed); it falls through to
+        // the author-hash fallback.
+        assertEquals("octocat".hashCode(), feed.getUserId());
     }
 
     @Test
@@ -144,12 +144,14 @@ public class FeedTest {
     }
 
     @Test
-    public void parse_avatarRelativeUrl_returnsMinusOne() throws Exception {
+    public void parse_avatarRelativeUrl_fallsBackToAuthorHash() throws Exception {
         Feed feed = parse(entry(
                 "<thumbnail url=\"/u/123\"/>"
                 + "<author><name>alice</name></author>"
                 + "<content>c</content>"));
-        assertEquals(-1, feed.getUserId());
+        // Relative URL has no host (T-122 fixed): falls through to the
+        // author-hash fallback instead of returning -1.
+        assertEquals("alice".hashCode(), feed.getUserId());
     }
 
     @Test

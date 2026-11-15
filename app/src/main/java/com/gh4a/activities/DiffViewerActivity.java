@@ -265,6 +265,10 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
 
     private void replaceOutdatedComment(PositionalCommentBase updatedComment) {
         List<PositionalCommentBase> comments = mCommentsByPosition.get(updatedComment.position());
+        if (comments == null) {
+            // 该 position 已无评论可替换（refresh 后评论集已变），直接返回。
+            return;
+        }
         int outdatedCommentIndex = -1;
         for (int i = 0; i < comments.size(); i++) {
             if (comments.get(i).id().equals(updatedComment.id())) {
@@ -350,7 +354,7 @@ public abstract class DiffViewerActivity<C extends PositionalCommentBase> extend
             List<PositionalCommentBase> comments = mCommentsByPosition.get(i);
             if (comments != null) {
                 for (PositionalCommentBase comment : comments) {
-                    long id = comment.id();
+                    long id = ApiHelpers.orZero(comment.id());
                     mWrappedComments.put(id, new CommentWrapper(comment));
                     content.append("<div ").append("id=\"comment").append(id).append("\"");
                     content.append(" class=\"comment");

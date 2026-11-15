@@ -93,7 +93,7 @@ public class SettingsBackupManager {
         if (lower.contains("token")) {
             return true;
         }
-        if (key.startsWith("user_id_")) {
+        if (lower.startsWith("user_id_")) {
             return true;
         }
         for (String excluded : EXACT_EXCLUDED_KEYS) {
@@ -231,15 +231,15 @@ public class SettingsBackupManager {
                 || key.startsWith("translation_api_secret");
     }
 
-    /** 凭据密文写入备份 JSON（值本身就是密文，不解密；空表示未配置）。 */
-    private static void putCredentialCiphertext(JSONObject translation, String key,
-            String ciphertext) throws JSONException {
-        if (ciphertext == null || ciphertext.isEmpty()) {
+    /** 凭据明文写入备份 JSON（空表示未配置）。 */
+    private static void putCredentialPlaintext(JSONObject translation, String key,
+            String plaintext) throws JSONException {
+        if (plaintext == null || plaintext.isEmpty()) {
             return;
         }
         JSONObject single = new JSONObject();
         single.put("t", "s");
-        single.put("v", ciphertext);
+        single.put("v", plaintext);
         translation.put(key, single);
     }
 
@@ -316,9 +316,9 @@ public class SettingsBackupManager {
         // Translation provider settings live in the default shared
         // preferences; all translation_* keys are exported, including
         // API keys/secrets/endpoints (用户要求手动备份携带翻译凭据)。
-        // S-H2：凭据先迁进加密存储（若还有明文残留），再以密文形式导出；
-        // 默认 prefs 里的凭据键一律不直接导出，防止明文落盘。
-        TranslationManager.migrateCredentialsFromDefaultPrefs(context);
+        // 2026-11-15 用户决定凭据不再加密、就是明文：导出前先把加密
+        // 存储里的旧密文残留迁成明文，再以明文形式导出。
+        TranslationManager.migrateCredentialsFromSecurePrefs(context);
         SharedPreferences def = PreferenceManager.getDefaultSharedPreferences(context);
         JSONObject translation = new JSONObject();
         for (Map.Entry<String, ?> entry : def.getAll().entrySet()) {
@@ -330,15 +330,15 @@ public class SettingsBackupManager {
                 }
             }
         }
-        // 凭据以密文形式导出（存的值本身就是密文，不解密）。
+        // 凭据以明文形式导出。
         for (String provider : new String[]{TranslationManager.PROVIDER_YOUDAO,
                 TranslationManager.PROVIDER_BAIDU, TranslationManager.PROVIDER_DEEPL}) {
-            putCredentialCiphertext(translation,
+            putCredentialPlaintext(translation,
                     TranslationManager.apiKeyPrefKey(provider),
-                    TranslationManager.getStoredApiKeyCiphertext(context, provider));
-            putCredentialCiphertext(translation,
+                    TranslationManager.getApiKey(context, provider));
+            putCredentialPlaintext(translation,
                     TranslationManager.apiSecretPrefKey(provider),
-                    TranslationManager.getStoredApiSecretCiphertext(context, provider));
+                    TranslationManager.getApiSecret(context, provider));
         }
         prefs.put("default", translation);
 
@@ -508,9 +508,9 @@ public class SettingsBackupManager {
                 // 用户要求手动备份携带翻译凭据；translation_url_* 已移出白名单，
                 // 见 SEC-9）；未知形状的键拒绝，防止恶意备份
                 // 注入翻译 endpoint 劫持翻译流量 (N-4)。
-                // S-H2：凭据键写进加密存储（值本身是密文，不解密），
-                // 其他翻译键写默认 prefs；旧版备份的明文凭据照常写入
-                // 加密存储，读取时就地加密迁移。
+                // 2026-11-15 用户决定凭据不再加密：凭据键与其他翻译键
+                // 一样写默认 prefs 明文；旧版备份的密文凭据照常写入默认
+                // prefs，读时能解开的就地转明文、解不开的丢弃。
                 JSONObject defJson = prefs.getJSONObject("default");
                 JSONObject credJson = new JSONObject();
                 JSONObject plainJson = new JSONObject();
@@ -527,7 +527,7 @@ public class SettingsBackupManager {
                 }
                 jsonToPrefs(plainJson, defaultPrefs,
                         SettingsBackupManager::isTranslationKeyAllowed);
-                jsonToPrefs(credJson, securePrefs,
+                jsonToPrefs(credJson, defaultPrefs,
                         SettingsBackupManager::isTranslationCredentialKey);
             }
             // 104：恢复成功后立即让新间隔/开关生效并建好通知渠道，

@@ -124,11 +124,13 @@ public class PullRequestActivityTest {
         assertEquals(3, intent.getIntExtra("number", -1));
     }
 
-    @Test(expected = NullPointerException.class)
-    public void makeIntent_nullIssue_throwsNpe_A1_4() {
-        // Unlike IssueActivity.makeIntent, the (Issue) overload dereferences
-        // issue.number() with no null guard on the Issue itself.
-        PullRequestActivity.makeIntent(appContext(), (Issue) null);
+    @Test
+    public void makeIntent_nullIssue_defaultsToZero() {
+        // T-115：与 IssueActivity.makeIntent 对齐，issue 为 null 时 number 默认为 0。
+        Intent intent = PullRequestActivity.makeIntent(appContext(), (Issue) null);
+        assertNull(intent.getStringExtra("owner"));
+        assertNull(intent.getStringExtra("repo"));
+        assertEquals(0, intent.getIntExtra("number", -1));
     }
 
     @Test

@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import io.reactivex.Single;
 
@@ -20,7 +21,16 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import org.mockito.MockedStatic;
 
 /** StarBatchMoveViewModel：批量移组状态机（Robolectric 供 LiveData/主线程）。 */
 @RunWith(RobolectricTestRunner.class)
@@ -212,5 +222,315 @@ public class StarBatchMoveViewModelTest {
         m.setAccessible(true);
         m.invoke(vm);
         m.invoke(vm); // 二次调用同样安全
+    }
+
+    // ---- 缺口补齐：start / retryFailed / fetchStarLists /
+    // createListAndAssign / createListAndStartMove / moveNext ----
+
+    /** 等待 finished 状态（每步需 IO 发射＋主线程排空，轮询）。 */
+    private static StarBatchMoveViewModel.State awaitFinishedState(
+            StarBatchMoveViewModel vm) {
+        for (int i = 0; i < 250; i++) {
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            StarBatchMoveViewModel.State s = vm.getState().getValue();
+            if (s != null && s.finished) {
+                return s;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException ignored) {
+            }
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+        }
+        return vm.getState().getValue();
+    }
+
+    private static StarBatchMoveViewModel.StarListsResult awaitStarLists(
+            StarBatchMoveViewModel vm) {
+        for (int i = 0; i < 100; i++) {
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            StarBatchMoveViewModel.StarListsResult r = vm.getStarLists().getValue();
+            if (r != null) {
+                return r;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException ignored) {
+            }
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+        }
+        return vm.getStarLists().getValue();
+    }
+
+    private static void stubAssignRepoSuccess(MockedStatic<UserListsGraphQL> mocked) {
+        mocked.when(() -> UserListsGraphQL.assignRepo(anyString(), any()))
+                .thenReturn(Single.just(true));
+    }
+
+    @Test
+    public void start_withReposRunsToFinished() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            stubAssignRepoSuccess(mocked);
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.start(Arrays.asList("a/b", "c/d"), Collections.singletonList("L1"));
+            // 初始状态同步发出
+            StarBatchMoveViewModel.State initial = vm.getState().getValue();
+            assertNotNull(initial);
+            assertEquals(2, initial.total);
+            assertEquals(0, initial.done);
+            assertFalse(initial.finished);
+            assertEquals(Collections.singletonList("L1"), initial.targetIds);
+            assertEquals(1L, initial.runId);
+            StarBatchMoveViewModel.State done = awaitFinishedState(vm);
+            assertNotNull(done);
+            assertEquals(2, done.total);
+            assertEquals(2, done.done);
+            assertTrue(done.finished);
+            assertTrue(done.failed.isEmpty());
+            assertEquals(1L, done.runId);
+        }
+    }
+
+    @Test
+    public void start_nullTargetIdsBecomesEmptyList() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            stubAssignRepoSuccess(mocked);
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.start(Collections.singletonList("a/b"), null);
+            StarBatchMoveViewModel.State initial = vm.getState().getValue();
+            assertNotNull(initial);
+            assertTrue(initial.targetIds.isEmpty());
+            StarBatchMoveViewModel.State done = awaitFinishedState(vm);
+            assertNotNull(done);
+            assertTrue(done.finished);
+            assertTrue(done.targetIds.isEmpty());
+        }
+    }
+
+    @Test
+    public void start_withFailingRepoRecordsFailed() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            mocked.when(() -> UserListsGraphQL.assignRepo(eq("a/b"), any()))
+                    .thenReturn(Single.error(new RuntimeException("boom")));
+            mocked.when(() -> UserListsGraphQL.assignRepo(eq("c/d"), any()))
+                    .thenReturn(Single.just(true));
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.start(Arrays.asList("a/b", "c/d"), Collections.singletonList("L1"));
+            StarBatchMoveViewModel.State done = awaitFinishedState(vm);
+            assertNotNull(done);
+            assertEquals(2, done.total);
+            assertEquals(2, done.done);
+            assertTrue(done.finished);
+            assertEquals(Collections.singletonList("a/b"), done.failed);
+        }
+    }
+
+    @Test
+    public void start_newRunSupersedesPrevious() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            mocked.when(() -> UserListsGraphQL.assignRepo(eq("a/b"), any()))
+                    .thenReturn(Single.never());
+            mocked.when(() -> UserListsGraphQL.assignRepo(eq("x/y"), any()))
+                    .thenReturn(Single.just(true));
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.start(Collections.singletonList("a/b"), Collections.singletonList("L1"));
+            assertEquals(1L, vm.getState().getValue().runId);
+            vm.start(Collections.singletonList("x/y"), Collections.singletonList("L2"));
+            StarBatchMoveViewModel.State done = awaitFinishedState(vm);
+            assertNotNull(done);
+            assertEquals(2L, done.runId);
+            assertEquals(1, done.total);
+            assertTrue(done.finished);
+        }
+    }
+
+    @Test
+    public void retryFailed_notFinishedIsNoop() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            mocked.when(() -> UserListsGraphQL.assignRepo(anyString(), any()))
+                    .thenReturn(Single.never());
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.start(Collections.singletonList("a/b"), Collections.singletonList("L1"));
+            StarBatchMoveViewModel.State initial = vm.getState().getValue();
+            assertNotNull(initial);
+            assertFalse(initial.finished);
+            vm.retryFailed();
+            assertSame(initial, vm.getState().getValue());
+        }
+    }
+
+    @Test
+    public void retryFailed_finishedWithNoFailuresIsNoop() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            stubAssignRepoSuccess(mocked);
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.start(Collections.singletonList("a/b"), Collections.singletonList("L1"));
+            StarBatchMoveViewModel.State done = awaitFinishedState(vm);
+            assertNotNull(done);
+            assertTrue(done.failed.isEmpty());
+            vm.retryFailed();
+            assertSame(done, vm.getState().getValue());
+        }
+    }
+
+    @Test
+    public void retryFailed_retriesOnlyFailedRepos() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            AtomicInteger aCalls = new AtomicInteger();
+            mocked.when(() -> UserListsGraphQL.assignRepo(eq("a/b"), any()))
+                    .thenAnswer(inv -> aCalls.getAndIncrement() == 0
+                            ? Single.error(new RuntimeException("boom"))
+                            : Single.just(true));
+            mocked.when(() -> UserListsGraphQL.assignRepo(eq("c/d"), any()))
+                    .thenReturn(Single.just(true));
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.start(Arrays.asList("a/b", "c/d"), Collections.singletonList("L1"));
+            StarBatchMoveViewModel.State done = awaitFinishedState(vm);
+            assertNotNull(done);
+            assertEquals(Collections.singletonList("a/b"), done.failed);
+            vm.retryFailed();
+            StarBatchMoveViewModel.State retried = awaitFinishedState(vm);
+            assertNotNull(retried);
+            assertEquals(2L, retried.runId);
+            assertEquals(1, retried.total);
+            assertEquals(1, retried.done);
+            assertTrue(retried.finished);
+            assertTrue(retried.failed.isEmpty());
+            assertEquals(Collections.singletonList("L1"), retried.targetIds);
+        }
+    }
+
+    @Test
+    public void fetchStarLists_successPostsResult() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            List<UserListsGraphQL.UserList> lists = Collections.singletonList(
+                    new UserListsGraphQL.UserList("L1", "My List", "",
+                            Collections.emptyList()));
+            mocked.when(() -> UserListsGraphQL.fetchLists(eq("alice")))
+                    .thenReturn(Single.just(lists));
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.fetchStarLists("alice");
+            StarBatchMoveViewModel.StarListsResult r = awaitStarLists(vm);
+            assertNotNull(r);
+            assertEquals(1L, r.runId);
+            assertEquals(lists, r.lists);
+            assertFalse(r.failed);
+        }
+    }
+
+    @Test
+    public void fetchStarLists_errorPostsFailedResult() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            mocked.when(() -> UserListsGraphQL.fetchLists(eq("alice")))
+                    .thenReturn(Single.error(new RuntimeException("boom")));
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.fetchStarLists("alice");
+            StarBatchMoveViewModel.StarListsResult r = awaitStarLists(vm);
+            assertNotNull(r);
+            assertEquals(1L, r.runId);
+            assertNull(r.lists);
+            assertTrue(r.failed);
+        }
+    }
+
+    @Test
+    public void createListAndAssign_successPostsSingleOp() {
+        // flatMap 内的 assignRepo 跑在 IO 线程，mockStatic 在该线程不生效：
+        // 把 IO 调度器换成 trampoline，让整条链在当前（主）线程跑
+        io.reactivex.plugins.RxJavaPlugins.setIoSchedulerHandler(
+                s -> io.reactivex.schedulers.Schedulers.trampoline());
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            mocked.when(() -> UserListsGraphQL.createList("g", false))
+                    .thenReturn(Single.just(new UserListsGraphQL.UserList(
+                            "L1", "g", "", Collections.emptyList())));
+            mocked.when(() -> UserListsGraphQL.assignRepo("o/r",
+                            Collections.singletonList("L1")))
+                    .thenReturn(Single.just(true));
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.createListAndAssign("o/r", "g", false);
+            StarBatchMoveViewModel.SingleOp op = awaitSingleOp(vm);
+            assertNotNull(op);
+            assertTrue(op.success);
+            assertEquals(R.string.assign_official_success, op.messageRes);
+            assertNull(op.clearExpandedId);
+            mocked.verify(() -> UserListsGraphQL.createList("g", false));
+            mocked.verify(() -> UserListsGraphQL.assignRepo("o/r",
+                    Collections.singletonList("L1")));
+        } finally {
+            io.reactivex.plugins.RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void createListAndAssign_createFailurePostsFailureOp() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            mocked.when(() -> UserListsGraphQL.createList(eq("g"), eq(false)))
+                    .thenReturn(Single.error(new RuntimeException("boom")));
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.createListAndAssign("o/r", "g", false);
+            StarBatchMoveViewModel.SingleOp op = awaitSingleOp(vm);
+            assertNotNull(op);
+            assertFalse(op.success);
+            assertEquals(R.string.assign_official_failed, op.messageRes);
+        }
+    }
+
+    @Test
+    public void createListAndStartMove_successStartsMove() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            mocked.when(() -> UserListsGraphQL.createList(eq("g"), eq(false)))
+                    .thenReturn(Single.just(new UserListsGraphQL.UserList(
+                            "L1", "g", "", Collections.emptyList())));
+            stubAssignRepoSuccess(mocked);
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.createListAndStartMove(Arrays.asList("a/b", "c/d"), "g", false);
+            StarBatchMoveViewModel.State done = awaitFinishedState(vm);
+            assertNotNull(done);
+            assertEquals(2, done.total);
+            assertTrue(done.finished);
+            assertTrue(done.failed.isEmpty());
+            assertEquals(Collections.singletonList("L1"), done.targetIds);
+            assertNull(vm.getSingleOp().getValue());
+        }
+    }
+
+    @Test
+    public void createListAndStartMove_createFailurePostsFailureOp() {
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockStatic(UserListsGraphQL.class)) {
+            mocked.when(() -> UserListsGraphQL.createList(eq("g"), eq(false)))
+                    .thenReturn(Single.error(new RuntimeException("boom")));
+            StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+            vm.createListAndStartMove(Arrays.asList("a/b"), "g", false);
+            StarBatchMoveViewModel.SingleOp op = awaitSingleOp(vm);
+            assertNotNull(op);
+            assertFalse(op.success);
+            assertEquals(R.string.star_list_create_failed, op.messageRes);
+            assertNull(vm.getState().getValue());
+        }
+    }
+
+    @Test
+    public void moveNext_staleRunIdIsNoop() throws Exception {
+        StarBatchMoveViewModel vm = new StarBatchMoveViewModel();
+        java.lang.reflect.Method m = StarBatchMoveViewModel.class.getDeclaredMethod(
+                "moveNext", List.class, int.class, List.class, List.class, long.class);
+        m.setAccessible(true);
+        // 尚未跑过任何一轮：mRunId 为 0，传 999 即过期轮次
+        m.invoke(vm, Collections.singletonList("a/b"), 0,
+                Collections.singletonList("L1"), new ArrayList<>(), 999L);
+        assertNull(vm.getState().getValue());
     }
 }

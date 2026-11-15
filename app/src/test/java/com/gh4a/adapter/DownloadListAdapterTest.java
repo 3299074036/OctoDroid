@@ -159,9 +159,8 @@ public class DownloadListAdapterTest {
 
     @Test
     public void queryStatus_exception_returnsFailed() {
-        // only exceptions from dm.query() are swallowed; getSystemService
-        // throwing is outside the try and propagates (see
-        // queryStatus_systemServiceThrows_propagates).
+        // T-120：所有异常都被吞掉，返回 STATUS_FAILED（getSystemService
+        // 抛异常同样返回失败状态，不再传播）。
         Context mockContext = mock(Context.class);
         DownloadManager dm = mock(DownloadManager.class);
         when(mockContext.getSystemService(Context.DOWNLOAD_SERVICE)).thenReturn(dm);
@@ -172,12 +171,13 @@ public class DownloadListAdapterTest {
     }
 
     @Test
-    public void queryStatus_systemServiceThrows_propagates() {
+    public void queryStatus_systemServiceThrows_returnsFailed() {
+        // T-120：getSystemService 抛异常不再传播，返回 STATUS_FAILED。
         Context mockContext = mock(Context.class);
         when(mockContext.getSystemService(Context.DOWNLOAD_SERVICE))
                 .thenThrow(new RuntimeException("boom"));
-        assertThrows(RuntimeException.class,
-                () -> DownloadListAdapter.queryStatus(mockContext, 42L));
+        assertEquals(DownloadManager.STATUS_FAILED,
+                DownloadListAdapter.queryStatus(mockContext, 42L));
     }
 
     @Test

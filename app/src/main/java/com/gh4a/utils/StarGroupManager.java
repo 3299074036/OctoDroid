@@ -42,7 +42,10 @@ public class StarGroupManager {
         JSONArray array = new JSONArray(json);
         for (int i = 0; i < array.length(); i++) {
             try {
-                groups.add(array.getString(i));
+                Object o = array.opt(i);
+                if (o instanceof String) {
+                    groups.add((String) o);
+                }
             } catch (Exception ignored) {
                 // 单条损坏跳过，其余照收（与原先一致）。
             }
@@ -98,6 +101,9 @@ public class StarGroupManager {
     }
 
     public static boolean createGroup(Context context, String login, String name) {
+        if (context == null || login == null || name == null) {
+            return false;
+        }
         name = name.trim();
         if (name.isEmpty()) {
             return false;

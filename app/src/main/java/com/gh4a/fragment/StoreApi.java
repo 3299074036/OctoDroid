@@ -378,7 +378,10 @@ public class StoreApi {
     public static Single<StoreRepo> latestStoreRepo(Repository repo) {
         RepositoryReleaseService service =
                 ServiceFactory.get(RepositoryReleaseService.class, false);
-        return service.getReleases(repo.owner().login(), repo.name(), 1)
+        // T-111/T-131：defer 到订阅时再求值 repo.owner().login()，null owner
+        // 的 NPE 变成订阅时 onError，由 enrich 的 onErrorReturnItem 哨兵接住、
+        // 只丢该仓，不让整组垮掉。
+        return Single.defer(() -> service.getReleases(repo.owner().login(), repo.name(), 1))
                 .map(response -> {
                     Release latest = null;
                     if (response.isSuccessful() && response.body() != null

@@ -27,6 +27,7 @@ import com.meisolsson.githubsdk.model.User;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 
 import androidx.annotation.Nullable;
 import io.reactivex.Single;
@@ -127,7 +128,7 @@ class CommentViewHolder
         ivGravatar.setTag(user);
 
         tvTimestamp.setText(StringUtils.formatRelativeTime(mContext, createdAt, true));
-        if (createdAt.equals(updatedAt) || item.getReviewComment() != null) {
+        if (Objects.equals(createdAt, updatedAt) || item.getReviewComment() != null) {
             // Unlike issue comments, the update timestamp for commit comments also changes
             // when e.g. the line number changes due to the diff the comment was made on
             // becoming outdated. As we can't distinguish those updates from comment body

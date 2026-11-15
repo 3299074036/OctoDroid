@@ -577,12 +577,12 @@ public class IssueLabelListActivityTest {
     }
 
     @Test
-    public void deleteLabel_emptyBody_showsError_A1_5() throws Exception {
-        // A1-5: GitHub's DELETE label endpoint answers 204 No Content, so a
-        // real success has a null body; map(ApiHelpers::throwOnFailure) then
-        // returns null and RxJava's map rejects it with an NPE, so the
-        // success callback (reload + RESULT_OK) never runs and the user sees
-        // a failure snackbar even though the label was deleted server-side.
+    public void deleteLabel_emptyBody_succeedsWithResultOk_A1_5() throws Exception {
+        // A1-5 (fixed): GitHub's DELETE label endpoint answers 204 No Content,
+        // so a real success has a null body; map(ApiHelpers::throwOnFailure)
+        // used to return null and RxJava's map rejected it with an NPE, so the
+        // success callback (reload + RESULT_OK) never ran. Mapped with
+        // mapToTrueOnSuccess, the 204 is now treated as success.
         IssueLabelService svc = mock(IssueLabelService.class);
         stubLabels(svc, Label.builder().name("bug").color("d73a4a").build());
         when(svc.deleteLabel(eq("o"), eq("r"), eq("bug")))
@@ -596,12 +596,11 @@ public class IssueLabelListActivityTest {
             Label base = Label.builder().name("bug").color("d73a4a").build();
             IssueLabelAdapter.EditableLabel label = new IssueLabelAdapter.EditableLabel(base);
             activity.onConfirmed("deleteconfirm", label);
-            waitFor(() -> activity.findViewById(
-                    com.google.android.material.R.id.snackbar_text) != null, 10000);
-            assertNotNull(activity.findViewById(
-                    com.google.android.material.R.id.snackbar_text));
-            assertEquals(Activity.RESULT_CANCELED,
+            waitFor(() -> Shadows.shadowOf(activity).getResultCode() == Activity.RESULT_OK, 10000);
+            assertEquals(Activity.RESULT_OK,
                     Shadows.shadowOf(activity).getResultCode());
+            assertNull(activity.findViewById(
+                    com.google.android.material.R.id.snackbar_text));
         }
     }
 

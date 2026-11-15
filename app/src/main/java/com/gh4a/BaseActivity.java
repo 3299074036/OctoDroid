@@ -360,6 +360,9 @@ public abstract class BaseActivity extends AppCompatActivity implements
      * Insets 监听保留作补充，取两者较大值，且不再叠加 padding（避免双倍下移）。
      */
     protected void configureLeftDrawerHeader(View header) {
+        if (header == null) {
+            return;
+        }
         applyDrawerHeaderTopMargin(header, getSystemStatusBarHeight());
         ViewCompat.setOnApplyWindowInsetsListener(header, (view, insets) -> {
             int statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top;

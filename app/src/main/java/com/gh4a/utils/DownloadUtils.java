@@ -1,4 +1,7 @@
 package com.gh4a.utils;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import androidx.core.content.ContextCompat;
 
 import android.app.Activity;
 import android.app.NotificationChannel;
@@ -74,9 +77,9 @@ public class DownloadUtils {
             final String description, final boolean resolveAuthRedirect) {
         handleDownloadPermissionCheck(activity, () -> {
             if (resolveAuthRedirect) {
-                enqueueDownloadResolvingRedirect(activity, url, fileName, description, mimeType, null);
+                enqueueDownloadResolvingRedirect(activity, url, fileName, description, mimeType, null, false);
             } else {
-                enqueueDownload(activity, url, fileName, description, mimeType, null);
+                enqueueDownload(activity, url, fileName, description, mimeType, null, false);
             }
         });
     }
@@ -116,7 +119,7 @@ public class DownloadUtils {
         //  provide an Authorization header here since the required authorization is already a
         //  part of the URL."
         enqueueDownloadResolvingRedirect(context, asset.url(), asset.name(), asset.label(),
-                asset.contentType(), "application/octet-stream");
+                asset.contentType(), "application/octet-stream", true);
     }
 
     // Same two-step approach as above, but for plain API URLs (e.g. the zipball/tarball
@@ -124,7 +127,7 @@ public class DownloadUtils {
     // the auth token is only sent to api.github.com, never to the redirect target.
     private static void enqueueDownloadResolvingRedirect(final Context context, final String apiUrl,
             final String fileName, final String description, final String mimeType,
-            final String acceptHeader) {
+            final String acceptHeader, final boolean usePublicDir) {
         final OkHttpClient client = getRedirectClient();
         final Request.Builder requestBuilder = new Request.Builder()
                 .url(apiUrl);
@@ -152,7 +155,7 @@ public class DownloadUtils {
                         }
                     }
                     enqueueDownload(context, url, fileName, description,
-                            mimeType, acceptHeader);
+                            mimeType, acceptHeader, usePublicDir);
                 });
             }
             private void notifyDownloadFailed() {
@@ -197,7 +200,7 @@ public class DownloadUtils {
 
     private static void enqueueDownload(final Context context, String url, final String fileName,
             final String description, final String mimeType,
-            final String mediaType) {
+            final String mediaType, final boolean usePublicDir) {
         if (url == null) {
             return;
         }
@@ -207,14 +210,14 @@ public class DownloadUtils {
         // 之前只是单镜像改写，镜像一挂就只能失败
         if (!downloadNeedsWarning(context)) {
             enqueueChainDownload(context, url, fileName, description,
-                    mimeType, mediaType, false);
+                    mimeType, mediaType, false, usePublicDir);
             return;
         }
 
         DialogInterface.OnClickListener buttonListener = (dialog, which) -> {
             boolean wifiOnly = which == DialogInterface.BUTTON_NEUTRAL;
             enqueueChainDownload(context, url, fileName, description,
-                    mimeType, mediaType, wifiOnly);
+                    mimeType, mediaType, wifiOnly, usePublicDir);
         };
 
         new AlertDialog.Builder(context)
@@ -228,7 +231,8 @@ public class DownloadUtils {
 
     /** 附件下载走 ChainDownloadHelper：链路失败自动换线，全失败才 toast。 */
     private static void enqueueChainDownload(Context context, String url, String fileName,
-            String description, String mimeType, String mediaType, boolean wifiOnly) {
+            String description, String mimeType, String mediaType, boolean wifiOnly,
+            boolean usePublicDir) {
         ChainDownloadHelper.enqueueChain(context, url, fileName, description,
                 request -> {
                     request.setDescription(description);
@@ -253,7 +257,7 @@ public class DownloadUtils {
                         // 下载中显示，见 ChainDownloadHelper）。
                         verifyDownloadedFile(ctx, file, downloadId, true);
                     }
-                });
+                }, usePublicDir);
     }
 
     /**
@@ -362,11 +366,15 @@ public class DownloadUtils {
      * 57：校验通过后由应用自己发下载完成通知（点开即用 FileProvider 打开文件）。
      * 无通知权限时静默跳过（下载列表里仍有记录）。
      */
-    // 22 同款：MissingPermission 压制附理由——开头已由
-    // NotificationPermission.canPostNotifications() 检查，lint 不认间接检查。
-    @android.annotation.SuppressLint("MissingPermission")
+    // 22：MissingPermission 改内联检查——检查抽进
+    // NotificationPermission.canPostNotifications() 后 lint 认不出间接检查；
+    // 此处直接调 checkSelfPermission（与 helper 同款守卫），让 lint 在本方法内
+    // 看到检查。行为不变：无权限静默跳过。
     private static void notifyDownloadComplete(Context context, File file, long downloadId) {
-        if (!NotificationPermission.canPostNotifications(context)) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && ContextCompat.checkSelfPermission(context,
+                        Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
             return;
         }
         createDownloadChannel(context);

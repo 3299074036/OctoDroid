@@ -70,15 +70,12 @@ public class Iso8601Test {
     }
 
     @Test
-    public void parseOrZero_offsetSuffixIsSilentlyIgnored() {
-        // 注意：SimpleDateFormat.parse 只要求前缀匹配，不要求消费整个
-        // 字符串——带时区偏移的形不会返回 0，而是被无时区 pattern 按
-        // 前缀解析、偏移部分直接丢弃（按 UTC 计）。+00:00 时结果碰巧
-        // 正确，+08:00 则会静默偏差 8 小时（GitHub 只返回 Z 形，实
-        // 际无影响；此处锁定现状，是否收紧为返回 0 待定，见 B 组汇报）。
-        assertEquals(1793872117000L,
+    public void parseOrZero_numericOffsetIsParsedCorrectly() {
+        // T-101：带数字时区的形按时区正确解析，不再静默按 UTC 计。
+        // 09:48:37+08:00 = 01:48:37Z；+00:00 与 Z 等价。
+        assertEquals(1793843317000L,
                 Iso8601.parseOrZero("2026-11-05T09:48:37+08:00"));
-        assertEquals(1793872117000L,
+        assertEquals(1793872117123L,
                 Iso8601.parseOrZero("2026-11-05T09:48:37.123+00:00"));
         assertEquals(1793872117000L, Iso8601.parseOrZero("2026-11-05T09:48:37Z "));
         // 前导空白同样被 SimpleDateFormat 容忍
@@ -93,12 +90,10 @@ public class Iso8601Test {
     }
 
     @Test
-    public void parseOrNull_epochZeroSentinelCollision() {
-        // 注意：epoch 0（1970-01-01T00:00:00Z）与解析失败共用 0 哨兵，
-        // parseOrNull 无法区分，返回 null——这是哨兵设计的已知代价
-        //（GitHub 日期不可能为 epoch 0，实际无影响），此处锁定现状。
-        assertNull(Iso8601.parseOrNull("1970-01-01T00:00:00Z"));
-        assertNull(Iso8601.parseOrNull("1970-01-01"));
+    public void parseOrNull_epochZeroReturnsDate() {
+        // T-102：epoch 0 是合法时刻，不再与解析失败共用 0 哨兵返回 null。
+        assertEquals(new Date(0), Iso8601.parseOrNull("1970-01-01T00:00:00Z"));
+        assertEquals(new Date(0), Iso8601.parseOrNull("1970-01-01"));
     }
 
     @Test

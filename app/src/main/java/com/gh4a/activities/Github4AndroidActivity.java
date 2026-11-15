@@ -101,14 +101,18 @@ public class Github4AndroidActivity extends BaseActivity implements
         }
 
         Gh4Application app = Gh4Application.get();
+        // A1-6：授权分支也要先 inflate 布局，否则 mContent/mProgress 为 null，
+        // OAuth 回调走到 onLoginCanceled() → setProgressShown() 即 NPE。
+        // 授权分支随后 finish()，多 inflate 一次布局无可见影响。
+        setContentView(R.layout.main);
+        mContent = findViewById(R.id.welcome_container);
+        mProgress = findViewById(R.id.login_progress_container);
         if (app.isAuthorized()) {
             if (!handleIntent(getIntent())) {
                 goToToplevelActivity();
             }
             finish();
         } else {
-            setContentView(R.layout.main);
-
             AppBarLayout abl = findViewById(R.id.header);
             abl.setEnabled(false);
 
@@ -116,8 +120,6 @@ public class Github4AndroidActivity extends BaseActivity implements
             contentContainer.setForeground(null);
 
             findViewById(R.id.login_button).setOnClickListener(this);
-            mContent = findViewById(R.id.welcome_container);
-            mProgress = findViewById(R.id.login_progress_container);
 
             handleIntent(getIntent());
         }
