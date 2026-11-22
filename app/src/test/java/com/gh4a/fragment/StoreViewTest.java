@@ -690,6 +690,11 @@ public class StoreViewTest {
         return new StoreApi.StoreData(items, false, "2026-11-14");
     }
 
+    private static StoreApi.StoreData feedOfWithBoards(java.util.List<StoreRepo> items,
+            java.util.List<StoreRankGroups.Group> boards) {
+        return new StoreApi.StoreData(items, false, "2026-11-14", boards);
+    }
+
     private static android.widget.LinearLayout tabList(StoreView v, int tab)
             throws Exception {
         android.widget.LinearLayout[] lists =
@@ -1521,10 +1526,16 @@ public class StoreViewTest {
     @Test
     public void renderRankOverview_onlyNonEmptyWithRankedRepo_showsCards() throws Exception {
         StoreView view = new StoreView(mContext);
+        // 动态化后：仅 topic 不再归属，须由后端 ranks + feed 的 boards 结构定位。
         StoreRepo docker = repoFull(EnumSet.of(StoreClassifier.Platform.ANDROID),
-                5000, "Go", 0L, "v1", 100L, null, null, null,
+                5000, "Go", 0L, "v1", 100L, null, null,
+                java.util.Arrays.asList("容器/镜像"),
                 java.util.Arrays.asList("docker"));
-        setField(view, "mFeedData", feedOf(java.util.Arrays.asList(docker)));
+        StoreRankGroups.Group tools = new StoreRankGroups.Group("工具");
+        tools.lists.add(new StoreRankGroups.RankList("容器/镜像"));
+        setField(view, "mFeedData", feedOfWithBoards(
+                java.util.Arrays.asList(docker),
+                java.util.Arrays.asList(tools)));
         setField(view, "mRankOnlyNonEmpty", true);
         android.widget.LinearLayout container = rankContainer(view);
         call(view, "renderRankOverview",

@@ -11,9 +11,14 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * StoreRankGroups (F1, added 2026-11-10): pure-JVM tests, no Android needed.
- * build() only touches Context inside backendCells (DiagTrace.log), and
- * DiagTrace.log(null, ...) returns early, so a null Context is safe here.
+ * StoreRankGroups (F1, added 2026-11-10; 2026-11-22 动态化重写):
+ * pure-JVM tests, no Android needed. build() only touches Context inside
+ * backendCells (DiagTrace.log), and DiagTrace.log(null, ...) returns early,
+ * so a null Context is safe here.
+ *
+ * 榜单结构不再是代码里的静态表：测试自带一个小结构（2 组 4 榜，含新榜
+ * 「AI音视频工具」）传给 build()，验证动态结构能原样建榜、新榜无需
+ * 改代码即可流通（96→98 的回归）。
  */
 public class StoreRankGroupsTest {
 
@@ -41,12 +46,19 @@ public class StoreRankGroupsTest {
         return repo(fullName, stars, null, null, null);
     }
 
-    private static StoreRepo repo(String fullName, int stars, List<String> topics) {
-        return repo(fullName, stars, topics, null, null);
-    }
-
     private static StoreRepo repoWithRanks(String fullName, int stars, List<String> ranks) {
         return repo(fullName, stars, null, ranks, null);
+    }
+
+    /** 测试用小结构：2 组 4 榜（AI 2、工具 2），含新榜「AI音视频工具」。 */
+    private static List<StoreRankGroups.Group> structure() {
+        StoreRankGroups.Group ai = new StoreRankGroups.Group("AI");
+        ai.lists.add(new StoreRankGroups.RankList("AI Agent框架"));
+        ai.lists.add(new StoreRankGroups.RankList("AI音视频工具"));
+        StoreRankGroups.Group tools = new StoreRankGroups.Group("工具");
+        tools.lists.add(new StoreRankGroups.RankList("代理/VPN客户端"));
+        tools.lists.add(new StoreRankGroups.RankList("浏览器"));
+        return Arrays.asList(ai, tools);
     }
 
     private static StoreRankGroups.RankList listAt(
@@ -75,8 +87,19 @@ public class StoreRankGroupsTest {
     }
 
     @Test
-    public void totalListCount_is96() {
-        assertEquals(96, StoreRankGroups.totalListCount());
+    public void totalListCount_structure_countsLists() {
+        assertEquals(4, StoreRankGroups.totalListCount(structure(), null));
+    }
+
+    @Test
+    public void totalListCount_nullStructure_fallsBackToDistinctRanks() {
+        List<StoreRepo> pool = Arrays.asList(
+                repoWithRanks("a/x", 10, Arrays.asList("榜一", "榜二")),
+                repoWithRanks("b/x", 10, Arrays.asList("榜一")),
+                repo("c/x", 10));
+        assertEquals(2, StoreRankGroups.totalListCount(null, pool));
+        assertEquals(0, StoreRankGroups.totalListCount(null, new ArrayList<>()));
+        assertEquals(0, StoreRankGroups.totalListCount(null, null));
     }
 
     @Test
@@ -94,143 +117,57 @@ public class StoreRankGroupsTest {
     }
 
     @Test
-    public void build_nullPool_returnsSevenEmptyGroups() {
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null, null);
-        assertEquals(7, groups.size());
-        assertEquals("AI", groups.get(0).name);
-        assertEquals("媒体", groups.get(1).name);
-        assertEquals("网络", groups.get(2).name);
-        assertEquals("工具", groups.get(3).name);
-        assertEquals("效率", groups.get(4).name);
-        assertEquals("开发", groups.get(5).name);
-        assertEquals("游戏", groups.get(6).name);
-        // Per-group list counts pin the 96-list structure.
-        assertEquals(7, groups.get(0).lists.size());
-        assertEquals(8, groups.get(1).lists.size());
-        assertEquals(7, groups.get(2).lists.size());
-        assertEquals(44, groups.get(3).lists.size());
-        assertEquals(7, groups.get(4).lists.size());
-        assertEquals(17, groups.get(5).lists.size());
-        assertEquals(6, groups.get(6).lists.size());
-        assertEquals("AI Agent框架", groups.get(0).lists.get(0).name);
-        assertEquals("游戏引擎", groups.get(6).lists.get(5).name);
-        assertEquals(0, totalItems(groups));
-    }
-
-    @Test
-    public void build_emptyPool_returnsEmptyGroups() {
-        List<StoreRankGroups.Group> groups =
-                StoreRankGroups.build(null, new ArrayList<>());
-        assertEquals(7, groups.size());
-        assertEquals(0, totalItems(groups));
-    }
-
-    @Test
-    public void build_staticAssignment_singleCell() {
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
-                Collections.singletonList(repo("2dust/v2rayN", 5000)));
-        assertEquals(1, totalItems(groups));
-        assertTrue(contains(groups, 2, 0, "2dust/v2rayN"));
-        assertEquals("代理/VPN客户端", listAt(groups, 2, 0).name);
-    }
-
-    @Test
-    public void build_staticAssignment_multiCell() {
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
-                Collections.singletonList(repo("langchain-ai/langchain", 100000)));
-        assertEquals(3, totalItems(groups));
-        assertTrue(contains(groups, 0, 0, "langchain-ai/langchain"));
-        assertTrue(contains(groups, 0, 2, "langchain-ai/langchain"));
-        assertTrue(contains(groups, 5, 6, "langchain-ai/langchain"));
-    }
-
-    @Test
-    public void build_staticAssignment_beatsMatchingRule() {
-        // immich-app/immich is statically assigned to 1:5, but its topic
-        // "music" would also match the 1:1 rule: the static table wins.
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
-                Collections.singletonList(
-                        repo("immich-app/immich", 80000, Arrays.asList("music"))));
-        assertEquals(1, totalItems(groups));
-        assertTrue(contains(groups, 1, 5, "immich-app/immich"));
-        assertEquals(false, contains(groups, 1, 1, "immich-app/immich"));
-    }
-
-    @Test
-    public void build_rule_topicHit() {
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
-                Collections.singletonList(
-                        repo("someone/my-server", 10, Arrays.asList("mcp"))));
-        assertEquals(1, totalItems(groups));
-        assertTrue(contains(groups, 0, 6, "someone/my-server"));
-    }
-
-    @Test
-    public void build_rule_topicHit_caseInsensitiveAndNullTopicSkipped() {
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
-                Collections.singletonList(
-                        repo("someone/my-vpn", 10, Arrays.asList(null, "VPN"))));
-        assertEquals(1, totalItems(groups));
-        assertTrue(contains(groups, 2, 0, "someone/my-vpn"));
-    }
-
-    @Test
-    public void build_rule_nameSubstringHit() {
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
-                Collections.singletonList(repo("someone/awesome-chatbot", 10)));
-        assertEquals(1, totalItems(groups));
-        assertTrue(contains(groups, 0, 1, "someone/awesome-chatbot"));
-    }
-
-    @Test
-    public void build_rule_multiCell() {
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
-                Collections.singletonList(
-                        repo("someone/kb", 10, Arrays.asList("knowledge-base"))));
-        assertEquals(2, totalItems(groups));
-        assertTrue(contains(groups, 0, 3, "someone/kb"));
-        assertTrue(contains(groups, 4, 6, "someone/kb"));
-    }
-
-    @Test
-    public void build_rule_noMatch_goesNowhere() {
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
-                Collections.singletonList(
-                        repo("someone/boring-lib", 10, Arrays.asList("unrelated"))));
-        assertEquals(0, totalItems(groups));
-    }
-
-    @Test
-    public void build_rule_descriptionIsNotMatched() {
-        // The description mentions "vpn" but name and topics do not:
-        // descriptions no longer participate in matching.
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
-                Collections.singletonList(
-                        repo("someone/plain-lib", 10, null, null,
-                                "best vpn client ever")));
-        assertEquals(0, totalItems(groups));
-    }
-
-    @Test
-    public void build_backendRanks_useBackendNames() {
-        // Backend ranks override the static table: v2rayN is statically
-        // 2:0, but the backend says it belongs to "游戏" (6:2).
+    public void build_nullStructure_returnsEmpty() {
         List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
                 Collections.singletonList(
                         repoWithRanks("2dust/v2rayN", 5000,
-                                Arrays.asList("游戏"))));
+                                Arrays.asList("代理/VPN客户端"))),
+                null);
+        assertTrue(groups.isEmpty());
+    }
+
+    @Test
+    public void build_nullPool_returnsStructureSkeleton() {
+        List<StoreRankGroups.Group> groups =
+                StoreRankGroups.build(null, null, structure());
+        assertEquals(2, groups.size());
+        assertEquals("AI", groups.get(0).name);
+        assertEquals("工具", groups.get(1).name);
+        assertEquals(2, groups.get(0).lists.size());
+        assertEquals(2, groups.get(1).lists.size());
+        assertEquals("AI Agent框架", groups.get(0).lists.get(0).name);
+        assertEquals("浏览器", groups.get(1).lists.get(1).name);
+        assertEquals(0, totalItems(groups));
+    }
+
+    @Test
+    public void build_emptyPool_returnsStructureSkeleton() {
+        List<StoreRankGroups.Group> groups =
+                StoreRankGroups.build(null, new ArrayList<>(), structure());
+        assertEquals(2, groups.size());
+        assertEquals(0, totalItems(groups));
+    }
+
+    @Test
+    public void build_backendRanks_placesItem() {
+        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
+                Collections.singletonList(
+                        repoWithRanks("2dust/v2rayN", 5000,
+                                Arrays.asList("代理/VPN客户端"))),
+                structure());
         assertEquals(1, totalItems(groups));
-        assertTrue(contains(groups, 6, 2, "2dust/v2rayN"));
-        assertEquals(false, contains(groups, 2, 0, "2dust/v2rayN"));
+        assertTrue(contains(groups, 1, 0, "2dust/v2rayN"));
+        assertEquals("代理/VPN客户端", listAt(groups, 1, 0).name);
     }
 
     @Test
     public void build_backendRanks_emptyList_meansNoLists() {
         // An empty ranks list is the backend confirming "no list",
-        // not "unknown": the static assignment must not apply.
+        // not "unknown": the item goes nowhere.
         List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
                 Collections.singletonList(
-                        repoWithRanks("2dust/v2rayN", 5000, new ArrayList<>())));
+                        repoWithRanks("2dust/v2rayN", 5000, new ArrayList<>())),
+                structure());
         assertEquals(0, totalItems(groups));
     }
 
@@ -239,7 +176,8 @@ public class StoreRankGroupsTest {
         List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
                 Collections.singletonList(
                         repoWithRanks("someone/x", 10,
-                                Arrays.asList("不存在的榜", "AI Agent框架"))));
+                                Arrays.asList("不存在的榜", "AI Agent框架"))),
+                structure());
         assertEquals(1, totalItems(groups));
         assertTrue(contains(groups, 0, 0, "someone/x"));
     }
@@ -249,20 +187,46 @@ public class StoreRankGroupsTest {
         List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
                 Collections.singletonList(
                         repoWithRanks("someone/x", 10,
-                                Arrays.asList("视频播放器", "AI Agent框架"))));
+                                Arrays.asList("浏览器", "AI Agent框架"))),
+                structure());
         assertEquals(2, totalItems(groups));
-        assertTrue(contains(groups, 1, 0, "someone/x"));
+        assertTrue(contains(groups, 1, 1, "someone/x"));
         assertTrue(contains(groups, 0, 0, "someone/x"));
+    }
+
+    @Test
+    public void build_ranksNull_skipped_noLocalFallback() {
+        // ranks 缺失（旧数据）无法归属：不再回落本地静态表与关键词规则。
+        // 该仓库的 topic 与名字就算命中旧规则也不进任何榜。
+        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
+                Collections.singletonList(
+                        repo("someone/my-vpn", 10, Arrays.asList("vpn"), null, null)),
+                structure());
+        assertEquals(0, totalItems(groups));
+    }
+
+    @Test
+    public void build_newBoard_flowsThroughWithoutCodeChange() {
+        // 96→98 的回归：结构里多一个新榜名，后端 ranks 指向它即流通，
+        // 不需要改 StoreRankGroups 的代码。
+        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null,
+                Collections.singletonList(
+                        repoWithRanks("Zackriya-Solutions/meetily", 10,
+                                Arrays.asList("AI音视频工具"))),
+                structure());
+        assertEquals(1, totalItems(groups));
+        assertTrue(contains(groups, 0, 1, "Zackriya-Solutions/meetily"));
     }
 
     @Test
     public void build_sorting_starsDescTieBreakByName() {
         List<StoreRepo> pool = Arrays.asList(
-                repo("zzz/x", 100, Arrays.asList("vpn")),
-                repo("aaa/x", 100, Arrays.asList("vpn")),
-                repo("mmm/x", 300, Arrays.asList("vpn")));
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null, pool);
-        List<StoreRepo> items = listAt(groups, 2, 0).items;
+                repoWithRanks("zzz/x", 100, Arrays.asList("代理/VPN客户端")),
+                repoWithRanks("aaa/x", 100, Arrays.asList("代理/VPN客户端")),
+                repoWithRanks("mmm/x", 300, Arrays.asList("代理/VPN客户端")));
+        List<StoreRankGroups.Group> groups =
+                StoreRankGroups.build(null, pool, structure());
+        List<StoreRepo> items = listAt(groups, 1, 0).items;
         assertEquals(3, items.size());
         assertEquals("mmm/x", items.get(0).fullName());
         assertEquals("aaa/x", items.get(1).fullName());
@@ -274,10 +238,11 @@ public class StoreRankGroupsTest {
         // StoreRepo coerces a null fullName to "": on a stars tie it sorts
         // before any non-empty name.
         List<StoreRepo> pool = Arrays.asList(
-                repo("b/x", 100, Arrays.asList("vpn")),
-                repo(null, 100, Arrays.asList("vpn")));
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null, pool);
-        List<StoreRepo> items = listAt(groups, 2, 0).items;
+                repoWithRanks("b/x", 100, Arrays.asList("代理/VPN客户端")),
+                repoWithRanks(null, 100, Arrays.asList("代理/VPN客户端")));
+        List<StoreRankGroups.Group> groups =
+                StoreRankGroups.build(null, pool, structure());
+        List<StoreRepo> items = listAt(groups, 1, 0).items;
         assertEquals(2, items.size());
         assertEquals("", items.get(0).fullName());
         assertEquals("b/x", items.get(1).fullName());
@@ -286,10 +251,11 @@ public class StoreRankGroupsTest {
     @Test
     public void build_sorting_tieBreakIsCaseInsensitive() {
         List<StoreRepo> pool = Arrays.asList(
-                repo("Zebra/x", 50, Arrays.asList("vpn")),
-                repo("apple/x", 50, Arrays.asList("vpn")));
-        List<StoreRankGroups.Group> groups = StoreRankGroups.build(null, pool);
-        List<StoreRepo> items = listAt(groups, 2, 0).items;
+                repoWithRanks("Zebra/x", 50, Arrays.asList("代理/VPN客户端")),
+                repoWithRanks("apple/x", 50, Arrays.asList("代理/VPN客户端")));
+        List<StoreRankGroups.Group> groups =
+                StoreRankGroups.build(null, pool, structure());
+        List<StoreRepo> items = listAt(groups, 1, 0).items;
         assertEquals("apple/x", items.get(0).fullName());
         assertEquals("Zebra/x", items.get(1).fullName());
     }

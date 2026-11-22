@@ -194,6 +194,26 @@ public class StoreApiTest {
         assertEquals(1, d.items.size());
         assertEquals("octo/cat", d.items.get(0).fullName);
         assertEquals(42, d.items.get(0).stars);
+        assertNull(d.boards);
+    }
+
+    @Test
+    public void parseBackend_boardsFieldParsedIntoSkeleton() throws Exception {
+        String json = "{\"generatedAt\":\"2026-01-01T00:00:00Z\",\"items\":["
+                + "{\"fullName\":\"octo/cat\",\"stars\":42}],"
+                + "\"boards\":["
+                + "{\"name\":\"AI\",\"lists\":[\"AI Agent框架\",\"AI音视频工具\"]},"
+                + "{\"name\":\"游戏\",\"lists\":[\"游戏服务器工具\"]}]}";
+        StoreApi.StoreData d = parseBackend(json, false);
+        assertNotNull(d);
+        assertNotNull(d.boards);
+        assertEquals(2, d.boards.size());
+        assertEquals("AI", d.boards.get(0).name);
+        assertEquals(2, d.boards.get(0).lists.size());
+        assertEquals("AI音视频工具", d.boards.get(0).lists.get(1).name);
+        assertTrue(d.boards.get(0).lists.get(1).items.isEmpty());
+        assertEquals("游戏", d.boards.get(1).name);
+        assertEquals("游戏服务器工具", d.boards.get(1).lists.get(0).name);
     }
 
     @Test
