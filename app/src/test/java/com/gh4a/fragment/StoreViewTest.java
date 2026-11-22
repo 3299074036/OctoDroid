@@ -268,7 +268,7 @@ public class StoreViewTest {
     }
 
     @Test
-    public void selectTab_exploreAndRankRenderFromCache() throws Exception {
+    public void selectTab_rankAndTagsRenderFromCache() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
@@ -330,6 +330,9 @@ public class StoreViewTest {
         setField(view, "mRankList", 1);
         setField(view, "mRankShown", 60);
         setField(view, "mExploreShown", 60);
+        setField(view, "mTagDetail", "windows");
+        setField(view, "mTagQuery", "win");
+        setField(view, "mTagShown", 60);
         boolean[] loaded = (boolean[]) field(view, "mTabLoaded");
         loaded[0] = true;
         call(view, "resetFeed", new Class<?>[]{});
@@ -341,6 +344,9 @@ public class StoreViewTest {
         assertEquals(-1, field(view, "mRankList"));
         assertEquals(20, field(view, "mRankShown"));
         assertEquals(20, field(view, "mExploreShown"));
+        assertNull(field(view, "mTagDetail"));
+        assertEquals("", field(view, "mTagQuery"));
+        assertEquals(20, field(view, "mTagShown"));
         assertFalse(((boolean[]) field(view, "mTabLoaded"))[0]);
     }
 
@@ -605,7 +611,7 @@ public class StoreViewTest {
     }
 
     @Test
-    public void applyCategory_exploreTabResetsShown() throws Exception {
+    public void applyCategory_fromRankTabResetsShown() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
@@ -713,7 +719,7 @@ public class StoreViewTest {
             throws Exception {
         android.widget.LinearLayout[] containers =
                 (android.widget.LinearLayout[]) field(v, "mTabContainers");
-        return containers[2];
+        return containers[1];
     }
 
     private static android.view.View.OnScrollChangeListener scrollListener(
@@ -802,36 +808,36 @@ public class StoreViewTest {
     // ---- 滚动监听（235-266） ----
 
     @Test
-    public void exploreScrollListener_scrollUpOrNoFeed_returns() throws Exception {
+    public void homeScrollListener_scrollUpOrNoFeed_returns() throws Exception {
         StoreView view = new StoreView(mContext);
         android.view.View.OnScrollChangeListener l =
-                scrollListener(tabScroll(view, 1));
+                scrollListener(tabScroll(view, 0));
         l.onScrollChange(null, 0, 0, 0, 10); // 未下滑
         l.onScrollChange(null, 0, 100, 0, 0); // 无 feed
         assertEquals(20, field(view, "mExploreShown"));
     }
 
     @Test
-    public void exploreScrollListener_shownReachedVisible_returns() throws Exception {
+    public void homeScrollListener_shownReachedVisible_returns() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
             setField(view, "mExploreShown", 60);
             setField(view, "mExploreVisibleSize", 3);
-            scrollListener(tabScroll(view, 1))
+            scrollListener(tabScroll(view, 0))
                     .onScrollChange(null, 0, 100, 0, 0);
             assertEquals(60, field(view, "mExploreShown"));
         }
     }
 
     @Test
-    public void exploreScrollListener_atBottom_appendsPage() throws Exception {
+    public void homeScrollListener_atBottom_appendsPage() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             setField(view, "mFeedData", feedOf(manyRepos(25)));
-            call(view, "selectTab", new Class<?>[]{int.class}, 1);
+            call(view, "selectTab", new Class<?>[]{int.class}, 0);
             assertEquals(25, field(view, "mExploreVisibleSize"));
-            scrollListener(tabScroll(view, 1))
+            scrollListener(tabScroll(view, 0))
                     .onScrollChange(null, 0, 100, 0, 0);
             assertEquals(40, field(view, "mExploreShown"));
         }
@@ -841,7 +847,7 @@ public class StoreViewTest {
     public void rankScrollListener_guardsReturn() throws Exception {
         StoreView view = new StoreView(mContext);
         android.view.View.OnScrollChangeListener l =
-                scrollListener(tabScroll(view, 2));
+                scrollListener(tabScroll(view, 1));
         l.onScrollChange(null, 0, 0, 0, 10); // 未下滑
         l.onScrollChange(null, 0, 100, 0, 0); // 无 feed
         assertEquals(20, field(view, "mRankShown"));
@@ -869,7 +875,7 @@ public class StoreViewTest {
             // 当前榜，否则追加后 renderRank 会把 40 重置回 20。
             setField(view, "mRankShownGroup", 0);
             setField(view, "mRankShownList", 0);
-            scrollListener(tabScroll(view, 2))
+            scrollListener(tabScroll(view, 1))
                     .onScrollChange(null, 0, 100, 0, 0);
             assertEquals(40, field(view, "mRankShown"));
         }
@@ -930,7 +936,7 @@ public class StoreViewTest {
     }
 
     @Test
-    public void resetToHome_fromExplore_selectsHome() throws Exception {
+    public void resetToHome_fromRank_selectsHome() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
@@ -971,17 +977,6 @@ public class StoreViewTest {
             call(view, "applyExploreSort", new Class<?>[]{int.class}, 1);
             assertEquals(1, field(view, "mSort"));
             assertNotNull(field(view, "mFeedData"));
-        }
-    }
-
-    @Test
-    public void jumpToExploreWithSort_jumpsToExplore() throws Exception {
-        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
-            StoreView view = new StoreView(mContext);
-            view.onShown();
-            call(view, "jumpToExploreWithSort", new Class<?>[]{int.class}, 2);
-            assertEquals(2, field(view, "mSort"));
-            assertEquals(1, (int) field(view, "mCurrentTab"));
         }
     }
 
@@ -1035,7 +1030,16 @@ public class StoreViewTest {
         StoreView view = new StoreView(mContext);
         android.widget.LinearLayout[] containers =
                 (android.widget.LinearLayout[]) field(view, "mTabContainers");
-        assertEquals(containers[2],
+        assertEquals(containers[1],
+                call(view, "listTarget", new Class<?>[]{int.class}, 1));
+    }
+
+    @Test
+    public void listTarget_tags_returnsListContainer() throws Exception {
+        StoreView view = new StoreView(mContext);
+        android.widget.LinearLayout[] lists =
+                (android.widget.LinearLayout[]) field(view, "mTabListContainers");
+        assertEquals(lists[2],
                 call(view, "listTarget", new Class<?>[]{int.class}, 2));
     }
 
@@ -1195,44 +1199,22 @@ public class StoreViewTest {
     }
 
     @Test
-    public void viewAllRow_hotClick_jumpsWithStarsSort() throws Exception {
-        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
-            StoreView view = new StoreView(mContext);
-            view.onShown();
-            tabList(view, 0).getChildAt(7).performClick();
-            assertEquals(1, (int) field(view, "mCurrentTab"));
-            assertEquals(0, field(view, "mSort"));
-        }
-    }
-
-    @Test
-    public void viewAllRow_recentClick_jumpsWithUpdatedSort() throws Exception {
-        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
-            StoreView view = new StoreView(mContext);
-            view.onShown();
-            tabList(view, 0).getChildAt(15).performClick();
-            assertEquals(1, (int) field(view, "mCurrentTab"));
-            assertEquals(1, field(view, "mSort"));
-        }
-    }
-
-    @Test
-    public void statCell_reposClick_selectsExplore() throws Exception {
+    public void statCell_reposClick_staysOnHome() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
             statCell(view, 0, 0).performClick();
-            assertEquals(1, (int) field(view, "mCurrentTab"));
+            assertEquals(0, (int) field(view, "mCurrentTab"));
         }
     }
 
     @Test
-    public void statCell_assetsClick_selectsExplore() throws Exception {
+    public void statCell_assetsClick_staysOnHome() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
             statCell(view, 0, 1).performClick();
-            assertEquals(1, (int) field(view, "mCurrentTab"));
+            assertEquals(0, (int) field(view, "mCurrentTab"));
         }
     }
 
@@ -1252,7 +1234,7 @@ public class StoreViewTest {
             StoreView view = new StoreView(mContext);
             view.onShown();
             statCell(view, 1, 1).performClick();
-            assertEquals(2, (int) field(view, "mCurrentTab"));
+            assertEquals(1, (int) field(view, "mCurrentTab"));
         }
     }
 
@@ -1301,52 +1283,31 @@ public class StoreViewTest {
         }
     }
 
-    // ---- 探索头/填充 ----
+    // ---- 首页头/填充 ----
 
     @Test
-    public void exploreInfoClick_showsSortNoteToast() throws Exception {
+    public void homeInfoClick_showsSortNoteToast() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
-            call(view, "selectTab", new Class<?>[]{int.class}, 1);
-            android.widget.LinearLayout titleRow =
-                    (android.widget.LinearLayout) tabHeader(view, 1).getChildAt(0);
-            titleRow.getChildAt(1).performClick();
+            // 首页头：0 统计块、1 排序 chips 行（4 chips＋行末 ⓘ）。
+            android.widget.LinearLayout sortChips =
+                    (android.widget.LinearLayout) tabHeader(view, 0).getChildAt(1);
+            sortChips.getChildAt(sortChips.getChildCount() - 1).performClick();
             assertNotNull(org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
         }
     }
 
     @Test
-    public void exploreSortChipClick_appliesSort() throws Exception {
+    public void homeSortChipClick_appliesSort() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
-            call(view, "selectTab", new Class<?>[]{int.class}, 1);
             android.widget.LinearLayout sortChips =
-                    (android.widget.LinearLayout) tabHeader(view, 1).getChildAt(1);
+                    (android.widget.LinearLayout) tabHeader(view, 0).getChildAt(1);
             sortChips.getChildAt(1).performClick(); // 最近更新
             assertEquals(1, field(view, "mSort"));
         }
-    }
-
-    @Test
-    public void renderExploreHeader_mirrorStripShown() throws Exception {
-        StoreView view = new StoreView(mContext);
-        setField(view, "mFeedData", cannedFeed());
-        setField(view, "mFeedMirror", true);
-        call(view, "renderExploreHeader", new Class<?>[]{});
-        assertNotNull(findText(tabHeader(view, 1),
-                mContext.getString(com.gh4a.R.string.store_mirror_data)));
-    }
-
-    @Test
-    public void renderExploreHeader_offlineStripShown() throws Exception {
-        StoreView view = new StoreView(mContext);
-        setField(view, "mFeedData", cannedFeed());
-        setField(view, "mFeedOffline", true);
-        call(view, "renderExploreHeader", new Class<?>[]{});
-        assertNotNull(findText(tabHeader(view, 1),
-                mContext.getString(com.gh4a.R.string.store_offline_data)));
     }
 
     @Test
@@ -1360,30 +1321,31 @@ public class StoreViewTest {
     }
 
     @Test
-    public void ensureExploreFillViewport_nullScroll_returns() throws Exception {
+    public void ensureHomeFillViewport_nullScroll_returns() throws Exception {
         StoreView view = new StoreView(mContext);
         android.widget.ScrollView[] scrolls =
                 (android.widget.ScrollView[]) field(view, "mTabScrolls");
-        java.lang.reflect.Array.set(scrolls, 1, null);
-        call(view, "ensureExploreFillViewport", new Class<?>[]{});
+        java.lang.reflect.Array.set(scrolls, 0, null);
+        call(view, "ensureHomeFillViewport", new Class<?>[]{});
     }
 
     @Test
-    public void ensureExploreFillViewport_noFeed_returns() throws Exception {
+    public void ensureHomeFillViewport_noFeed_returns() throws Exception {
         StoreView view = new StoreView(mContext);
         attachView(view);
-        call(view, "ensureExploreFillViewport", new Class<?>[]{});
+        call(view, "ensureHomeFillViewport", new Class<?>[]{});
         idleMain();
         assertEquals(20, field(view, "mExploreShown"));
     }
 
     @Test
-    public void ensureExploreFillViewport_wrongTab_returns() throws Exception {
+    public void ensureHomeFillViewport_wrongTab_returns() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             attachView(view);
             view.onShown();
-            call(view, "ensureExploreFillViewport", new Class<?>[]{});
+            call(view, "selectTab", new Class<?>[]{int.class}, 1);
+            call(view, "ensureHomeFillViewport", new Class<?>[]{});
             idleMain();
             assertEquals(20, field(view, "mExploreShown"));
         }
@@ -1406,14 +1368,14 @@ public class StoreViewTest {
     }
 
     @Test
-    public void ensureExploreFillViewport_notScrollable_appendsPage() throws Exception {
+    public void ensureHomeFillViewport_notScrollable_appendsPage() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             attachView(view);
             setField(view, "mFeedData", feedOf(manyRepos(25)));
-            call(view, "selectTab", new Class<?>[]{int.class}, 1);
+            call(view, "selectTab", new Class<?>[]{int.class}, 0);
             assertEquals(20, field(view, "mExploreShown"));
-            makeUnscrollable(tabScroll(view, 1));
+            makeUnscrollable(tabScroll(view, 0));
             idleMain();
             assertEquals(40, field(view, "mExploreShown"));
         }
@@ -1424,7 +1386,7 @@ public class StoreViewTest {
         StoreView view = new StoreView(mContext);
         android.widget.ScrollView[] scrolls =
                 (android.widget.ScrollView[]) field(view, "mTabScrolls");
-        java.lang.reflect.Array.set(scrolls, 2, null);
+        java.lang.reflect.Array.set(scrolls, 1, null);
         call(view, "ensureRankFillViewport", new Class<?>[]{});
     }
 
@@ -1443,7 +1405,7 @@ public class StoreViewTest {
             StoreView view = new StoreView(mContext);
             attachView(view);
             view.onShown();
-            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            call(view, "selectTab", new Class<?>[]{int.class}, 1);
             call(view, "ensureRankFillViewport", new Class<?>[]{});
             idleMain();
             assertEquals(20, field(view, "mRankShown"));
@@ -1460,9 +1422,9 @@ public class StoreViewTest {
                     rankGroupWithList("Hot", manyRepos(25))));
             setField(view, "mRankGroup", 0);
             setField(view, "mRankList", 0);
-            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            call(view, "selectTab", new Class<?>[]{int.class}, 1);
             assertEquals(20, field(view, "mRankShown"));
-            makeUnscrollable(tabScroll(view, 2));
+            makeUnscrollable(tabScroll(view, 1));
             idleMain();
             assertEquals(40, field(view, "mRankShown"));
         }
@@ -1625,13 +1587,13 @@ public class StoreViewTest {
     }
 
     @Test
-    public void canScrollUp_scrolledExplore_returnsTrue() throws Exception {
+    public void canScrollUp_scrolledHome_returnsTrue() throws Exception {
         StoreView view = new StoreView(mContext);
         attachView(view);
         setField(view, "mFeedData", feedOf(manyRepos(25)));
-        call(view, "selectTab", new Class<?>[]{int.class}, 1);
+        call(view, "selectTab", new Class<?>[]{int.class}, 0);
         idleMain();
-        tabScroll(view, 1).scrollTo(0, 100);
+        tabScroll(view, 0).scrollTo(0, 100);
         assertTrue(view.canScrollUp());
     }
 
@@ -2033,7 +1995,7 @@ public class StoreViewTest {
         setField(view, "mFeedData", cannedFeed());
         setField(view, "mRankGroup", 0);
         setField(view, "mRankList", -1);
-        scrollListener(tabScroll(view, 2)).onScrollChange(null, 0, 100, 0, 0);
+        scrollListener(tabScroll(view, 1)).onScrollChange(null, 0, 100, 0, 0);
         assertEquals(20, field(view, "mRankShown"));
     }
 
@@ -2050,15 +2012,15 @@ public class StoreViewTest {
             setField(view, "mRankList", 0);
             setField(view, "mRankShownGroup", 0);
             setField(view, "mRankShownList", 0);
-            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            call(view, "selectTab", new Class<?>[]{int.class}, 1);
             // selectTab 把 mRankShown 复位成 20；改回 25 再重绘，凑满 25 行
             // 才可滚动（只展 20 行时滚动性不确定）。
             setField(view, "mRankShown", 25);
             call(view, "renderRank", new Class<?>[]{});
             setField(view, "mRankFullTotal", 40);
             idleMain();
-            assertTrue(tabScroll(view, 2).canScrollVertically(1));
-            scrollListener(tabScroll(view, 2)).onScrollChange(null, 0, 100, 0, 0);
+            assertTrue(tabScroll(view, 1).canScrollVertically(1));
+            scrollListener(tabScroll(view, 1)).onScrollChange(null, 0, 100, 0, 0);
             assertEquals(25, field(view, "mRankShown"));
         }
     }
@@ -2154,7 +2116,7 @@ public class StoreViewTest {
         setField(view, "mFeedData", cannedFeed());
         setField(view, "mRankGroup", 0);
         setField(view, "mRankList", -1);
-        call(view, "selectTab", new Class<?>[]{int.class}, 2);
+        call(view, "selectTab", new Class<?>[]{int.class}, 1);
         call(view, "ensureRankFillViewport", new Class<?>[]{});
         idleMain();
         assertEquals(20, field(view, "mRankShown"));
@@ -2174,12 +2136,12 @@ public class StoreViewTest {
             setField(view, "mRankList", 0);
             setField(view, "mRankShownGroup", 0);
             setField(view, "mRankShownList", 0);
-            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            call(view, "selectTab", new Class<?>[]{int.class}, 1);
             setField(view, "mRankShown", 25);
             call(view, "renderRank", new Class<?>[]{});
             setField(view, "mRankFullTotal", 40);
             idleMain();
-            assertTrue(tabScroll(view, 2).canScrollVertically(1));
+            assertTrue(tabScroll(view, 1).canScrollVertically(1));
             call(view, "ensureRankFillViewport", new Class<?>[]{});
             idleMain();
             assertEquals(25, field(view, "mRankShown"));
@@ -2198,10 +2160,10 @@ public class StoreViewTest {
                     rankGroupWithList("Hot", manyRepos(25))));
             setField(view, "mRankGroup", 0);
             setField(view, "mRankList", 0);
-            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            call(view, "selectTab", new Class<?>[]{int.class}, 1);
             setField(view, "mRankShown", 25);
             setField(view, "mRankFullTotal", 25);
-            makeUnscrollable(tabScroll(view, 2));
+            makeUnscrollable(tabScroll(view, 1));
             call(view, "ensureRankFillViewport", new Class<?>[]{});
             idleMain();
             assertEquals(25, field(view, "mRankShown"));
@@ -2327,7 +2289,7 @@ public class StoreViewTest {
     }
 
     @Test
-    public void loadNewest_exploreTabSkipsCountView() throws Exception {
+    public void loadNewest_rankTabSkipsCountView() throws Exception {
         // L1628：不在首页时不改统计数字。
         try (MockedStatic<StoreApi> mocked = mockNewest(5)) {
             StoreView view = new StoreView(mContext);
@@ -2482,6 +2444,230 @@ public class StoreViewTest {
             assertEquals("", countView.getText().toString());
         } finally {
             mocked.close();
+        }
+    }
+
+    // ---- 2026-11-22：首页／排行榜／标签云三页签 ----
+
+    private static StoreRepo repoWithTopic(String fullName, int stars, String topic) {
+        return new StoreRepo(fullName, "o", "r", "d", "Java", "", stars, 2, 100L,
+                java.util.Arrays.asList(topic), new java.util.HashSet<>(),
+                "v1", 0L, EnumSet.of(StoreClassifier.Platform.ANDROID), 1,
+                null, null, null, null, "tools");
+    }
+
+    private static java.util.List<StoreRepo> taggedFeed() {
+        java.util.List<StoreRepo> out = new java.util.ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            out.add(repoWithTopic("o/win" + i, 10 + i, "windows"));
+        }
+        for (int i = 0; i < 5; i++) {
+            out.add(repoWithTopic("o/rust" + i, 10 + i, "rust"));
+        }
+        out.add(repoWithTopic("o/rare", 10, "rare-tag"));
+        return out;
+    }
+
+    /** 云里的标签是“名字＋空格＋收录数”的 TextView，按名字前缀找。 */
+    private static android.widget.TextView findTag(android.view.View root, String name) {
+        if (root instanceof android.widget.TextView) {
+            CharSequence t = ((android.widget.TextView) root).getText();
+            if (t != null && t.toString().startsWith(name + " ")) {
+                return (android.widget.TextView) root;
+            }
+        }
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                android.widget.TextView found = findTag(g.getChildAt(i), name);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static android.widget.EditText findEditText(android.view.View root) {
+        if (root instanceof android.widget.EditText) {
+            return (android.widget.EditText) root;
+        }
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                android.widget.EditText found = findEditText(g.getChildAt(i));
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    @Test
+    public void tabBarLabels_homeRankTags() throws Exception {
+        StoreView view = new StoreView(mContext);
+        android.widget.TextView[] labels =
+                (android.widget.TextView[]) field(view, "mTabLabels");
+        assertEquals(mContext.getString(com.gh4a.R.string.store_home),
+                labels[0].getText().toString());
+        assertEquals(mContext.getString(com.gh4a.R.string.store_rank),
+                labels[1].getText().toString());
+        assertEquals(mContext.getString(com.gh4a.R.string.store_tags),
+                labels[2].getText().toString());
+    }
+
+    @Test
+    public void renderHomeHeader_noExploreTitle_hasStatsAndSortChips() throws Exception {
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", cannedFeed());
+        call(view, "renderHomeHeader", new Class<?>[]{});
+        android.widget.LinearLayout header = tabHeader(view, 0);
+        // 标题行已删：旧标题文案不在头里。
+        assertNull(findText(header,
+                mContext.getString(com.gh4a.R.string.store_explore_title)));
+        // 统计块在头顶（第 0 个孩子），排序 chips 在第 1 个孩子里。
+        android.widget.LinearLayout stats =
+                (android.widget.LinearLayout) header.getChildAt(0);
+        assertEquals(2, stats.getChildCount());
+        assertNotNull(findText(stats,
+                mContext.getString(com.gh4a.R.string.store_stat_repos)));
+        assertNotNull(findText(header,
+                mContext.getString(com.gh4a.R.string.store_sort_stars)));
+    }
+
+    @Test
+    public void renderTags_cloudShowsOnlyHotTags() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", feedOf(taggedFeed()));
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            android.widget.LinearLayout header = tabHeader(view, 2);
+            assertNotNull(findTag(header, "windows"));
+            assertNull(findTag(header, "rust"));
+            assertNull(findTag(header, "rare-tag"));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_tags_stats, 1, 3)));
+        }
+    }
+
+    @Test
+    public void renderTags_searchFiltersTags() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", feedOf(taggedFeed()));
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            android.widget.EditText search = findEditText(tabHeader(view, 2));
+            assertNotNull(search);
+            search.setText("rust");
+            android.widget.LinearLayout header = tabHeader(view, 2);
+            assertNull(findTag(header, "windows"));
+            assertNotNull(findTag(header, "rust"));
+            search.setText("zzz-no-match");
+            assertNotNull(findText(tabHeader(view, 2),
+                    mContext.getString(com.gh4a.R.string.store_tags_empty)));
+            search.setText("");
+            assertNotNull(findTag(tabHeader(view, 2), "windows"));
+        }
+    }
+
+    @Test
+    public void ensureTagCounts_countsTopicsSorted() throws Exception {
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", feedOf(taggedFeed()));
+        call(view, "ensureTagCounts", new Class<?>[]{});
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> tags =
+                (java.util.List<Object>) field(view, "mTagCounts");
+        assertEquals(3, tags.size());
+        // TagCount 是私有静态类，用反射读名字与收录数。
+        java.lang.reflect.Field nameField =
+                tags.get(0).getClass().getDeclaredField("name");
+        nameField.setAccessible(true);
+        java.lang.reflect.Field countField =
+                tags.get(0).getClass().getDeclaredField("count");
+        countField.setAccessible(true);
+        assertEquals("windows", nameField.get(tags.get(0)));
+        assertEquals(12, countField.get(tags.get(0)));
+        assertEquals("rust", nameField.get(tags.get(1)));
+        assertEquals(5, countField.get(tags.get(1)));
+        assertEquals("rare-tag", nameField.get(tags.get(2)));
+        assertEquals(1, countField.get(tags.get(2)));
+    }
+
+    @Test
+    public void showTagDetail_listsReposByStarsAndBack() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", feedOf(java.util.Arrays.asList(
+                    repoWithTopic("o/low", 10, "windows"),
+                    repoWithTopic("o/high", 50, "windows"),
+                    repoWithTopic("o/mid", 30, "windows"),
+                    repoWithTopic("o/other", 99, "rust"))));
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            call(view, "showTagDetail", new Class<?>[]{String.class}, "windows");
+            assertEquals("windows", field(view, "mTagDetail"));
+            assertEquals(3, field(view, "mTagVisibleSize"));
+            // 列表里以 o/ 开头的名按出现顺序收：应为星标降序。
+            java.util.List<String> names = new java.util.ArrayList<>();
+            collectRepoNames(tabList(view, 2), names);
+            assertEquals(java.util.Arrays.asList("o/high", "o/mid", "o/low"), names);
+            // 点“‹ 标签云”回云（本组 windows 只有 3 条、不是热门，框内搜才见）。
+            tabList(view, 2).getChildAt(0).performClick();
+            assertNull(field(view, "mTagDetail"));
+            android.widget.EditText search = findEditText(tabHeader(view, 2));
+            assertNotNull(search);
+            search.setText("windows");
+            assertNotNull(findTag(tabHeader(view, 2), "windows"));
+        }
+    }
+
+    private static void collectRepoNames(android.view.View root,
+            java.util.List<String> names) {
+        if (root instanceof android.widget.TextView) {
+            CharSequence t = ((android.widget.TextView) root).getText();
+            if (t != null && t.toString().startsWith("o/")) {
+                names.add(t.toString());
+            }
+            return;
+        }
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                collectRepoNames(g.getChildAt(i), names);
+            }
+        }
+    }
+
+    @Test
+    public void tagDetail_scrollListener_appendsPage() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            java.util.List<StoreRepo> items = new java.util.ArrayList<>();
+            for (int i = 0; i < 25; i++) {
+                items.add(repoWithTopic("o/w" + i, 10 + i, "windows"));
+            }
+            setField(view, "mFeedData", feedOf(items));
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            call(view, "showTagDetail", new Class<?>[]{String.class}, "windows");
+            assertEquals(25, field(view, "mTagVisibleSize"));
+            assertEquals(20, field(view, "mTagShown"));
+            scrollListener(tabScroll(view, 2))
+                    .onScrollChange(null, 0, 100, 0, 0);
+            assertEquals(40, field(view, "mTagShown"));
+        }
+    }
+
+    @Test
+    public void selectTab_leavingTagsExitsDetail() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", feedOf(taggedFeed()));
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            call(view, "showTagDetail", new Class<?>[]{String.class}, "windows");
+            assertEquals("windows", field(view, "mTagDetail"));
+            call(view, "selectTab", new Class<?>[]{int.class}, 0);
+            assertNull(field(view, "mTagDetail"));
         }
     }
 }

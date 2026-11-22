@@ -927,6 +927,13 @@
     <string name="store_home">首页</string>
     <string name="store_explore">探索</string>
     <string name="store_rank">排行榜</string>
+    <string name="store_tags">标签云</string>
+    <string name="store_tags_search_hint">搜索标签…</string>
+    <string name="store_tags_note">默认只展示项目数超过 10 个的热门标签，其余可在搜索查看</string>
+    <string name="store_tags_stats">%1$d 个热门标签 · %2$d 个标签</string>
+    <string name="store_tags_back">‹ 标签云</string>
+    <string name="store_tags_detail_sub">%1$d 个仓库 · 按星标排序</string>
+    <string name="store_tags_empty">没有匹配的标签</string>
     <string name="store_hot">热门软件</string>
     <string name="store_recent_updated">最近更新</string>
     <string name="store_newest">最新入库</string>

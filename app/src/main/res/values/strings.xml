@@ -933,6 +933,13 @@
     <string name="store_home">Home</string>
     <string name="store_explore">Explore</string>
     <string name="store_rank">Ranking</string>
+    <string name="store_tags">Tag cloud</string>
+    <string name="store_tags_search_hint">Search tags…</string>
+    <string name="store_tags_note">Only tags with more than 10 apps are shown by default. Search to find the rest.</string>
+    <string name="store_tags_stats">%1$d hot tags · %2$d tags</string>
+    <string name="store_tags_back">‹ Tag cloud</string>
+    <string name="store_tags_detail_sub">%1$d apps · by stars, highest first</string>
+    <string name="store_tags_empty">No matching tags</string>
     <string name="store_hot">Popular</string>
     <string name="store_recent_updated">Recently updated</string>
     <string name="store_newest">Newly added</string>

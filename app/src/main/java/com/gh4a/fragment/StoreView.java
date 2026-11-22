@@ -3,16 +3,24 @@ package com.gh4a.fragment;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.text.Editable;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.TextWatcher;
+import android.text.style.AbsoluteSizeSpan;
+import android.text.style.ForegroundColorSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -29,24 +37,30 @@ import com.gh4a.utils.UiUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import io.reactivex.disposables.CompositeDisposable;
 
 /**
- * 搜索页签的商店视图：首页／探索／排行榜三页签（hiwiki 结构，0.1.56 起）。
+ * 搜索页签的商店视图：首页／排行榜／标签云三页签（hiwiki 结构，0.1.56 起；
+ * 2026-11-22 起旧首页下架，探索改名首页，新增标签云）。
  * 由 SearchFragment 在空查询 + 仓库类型时挂出；有查询（提交）时由
  * SearchFragment 隐藏，切回正常搜索结果。顶栏标题保持“搜索”。
  *
  * 数据走后端预计算 JSON（StoreApi.loadBackend 的 feed/all.json 整包，不新增后端
  * 文件）：三页签共用同一份已加载 feed，全部派生、排序、筛选都在内存里
- * 算，不发请求。首页统计行、热门、最近更新从 feed 派生；探索取
- * feed/all.json 整包进内存，四种排序＋系统／用途／语言筛选，
- * 20 条一页，滑到底自动加载下一页（0.1.68 起，无“加载更多”按钮）；排行榜 96 榜由 StoreRankGroups 分组（0.1.66 起
+ * 算，不发请求。首页取 feed/all.json 整包进内存，顶部统计块＋四种排序＋
+ * 系统／用途筛选，20 条一页，滑到底自动加载下一页（0.1.68 起，无“加载更多”
+ * 按钮）；排行榜 98 榜由 StoreRankGroups 分组（0.1.66 起
  * 后端给 ranks，旧数据回落本地），空榜默认如实留空，勾选「只看有收录
- * 的榜单」时隐藏空卡片。平台是全局的：首页／探索的系统网格点格切平台，
+ * 的榜单」时隐藏空卡片；标签云取条目 topics 在内存里聚合计数，默认只
+ * 展示项目数超 10 个的热门标签，框内搜全部标签，点标签进该标签的仓库
+ * 列表（按星标排）。平台是全局的：首页的系统网格点格切平台，
  * 三页一起重载（0.1.58 起顶栏右上角不再放平台按钮）；商店区顶部就是
- * 首页／探索／排行榜页签，默认首页。最新入库是独立子屏（不在页签里）：
+ * 首页／排行榜／标签云页签，默认首页。最新入库是独立子屏（不在页签里）：
  * 读 store/feed/newest.json，24h 缓存，与 feed 同款回落链路。
  *
  * 系统网格 0.1.66 起 9 格（全部／Android／iOS／Windows／MacOS／Linux／
@@ -62,9 +76,11 @@ import io.reactivex.disposables.CompositeDisposable;
  * 排序恢复，顶栏按钮由 SearchFragment 的菜单项同步。
  */
 public class StoreView extends LinearLayout {
+    // 2026-11-22：旧首页下架，探索改名首页（内容不变：统计块＋4 排序＋
+    // 系统／用途网格＋列表），排行榜顺移，新增标签云。
     private static final int TAB_HOME = 0;
-    private static final int TAB_EXPLORE = 1;
-    private static final int TAB_RANK = 2;
+    private static final int TAB_RANK = 1;
+    private static final int TAB_TAGS = 2;
     private static final int TAB_COUNT = 3;
     private static final int PAGE_SIZE = 20;
 
@@ -72,9 +88,6 @@ public class StoreView extends LinearLayout {
     private static final int SORT_UPDATED = 1;
     private static final int SORT_DOWNLOADS = 2;
     private static final int SORT_HOT = 3;
-
-    private static final int HOME_HOT_COUNT = 9;
-    private static final int HOME_RECENT_COUNT = 6;
 
     private static final String PLAT_ALL = "all";
     private static final String PLAT_OTHER = "other";
@@ -114,7 +127,7 @@ public class StoreView extends LinearLayout {
     private final LinearLayout[] mTabContainers = new LinearLayout[TAB_COUNT];
     private final boolean[] mTabLoaded = new boolean[TAB_COUNT];
 
-    // 0.1.59：首页／探索的静态头与列表区拆分（排行榜沿用整容器）：
+    // 0.1.59：首页／标签云的静态头与列表区拆分（排行榜沿用整容器）：
     // 筛时只重建列表区，标题、排序、筛选 chips 组成的静态头不动。
     private final LinearLayout[] mTabHeaderContainers = new LinearLayout[TAB_COUNT];
     private final LinearLayout[] mTabListContainers = new LinearLayout[TAB_COUNT];
@@ -152,13 +165,37 @@ public class StoreView extends LinearLayout {
     // 最新入库的系统筛选（StorePrefs 持久化，默认全部；只筛这 60 条，不动全局平台）。
     private String mNewestPlatform = PLAT_ALL;
 
-    // 探索页状态：排序偏好持久化（StorePrefs），分类只筛已加载项。
+    // 首页状态：排序偏好持久化（StorePrefs，键名仍叫 explore sort，值沿用），
+    // 分类只筛已加载项。
     private int mSort;
     private String mCategory = CAT_ALL;
     private int mExploreShown = PAGE_SIZE;
-    // 0.1.68：探索当前可见总数（renderExploreList 时记；滑到底监听直接读，
+    // 0.1.68：首页当前可见总数（renderHomeList 时记；滑到底监听直接读，
     // 避免每次滚动事件都重算筛选＋排序）。
     private int mExploreVisibleSize;
+
+    // 标签云状态（2026-11-22）：标签计数由 feed 条目 topics 聚合，feed 重载
+    // 时失效；mTagQuery 为框内搜索词（空＝只看热门），mTagDetail 非空时为
+    // 该标签的详情列表（按星标排，20 条一页，与首页同款滑到底加载）。
+    private static final int TAG_HOT_MIN = 10;
+    private List<TagCount> mTagCounts;
+    private boolean mTagCountsReady;
+    private String mTagQuery = "";
+    private String mTagDetail;
+    private int mTagShown = PAGE_SIZE;
+    private int mTagVisibleSize;
+    private LinearLayout mTagCloudRows;
+
+    /** 标签云一行的名字与收录数（按收录数降序、名字升序排）。 */
+    private static class TagCount {
+        final String name;
+        final int count;
+
+        TagCount(String name, int count) {
+            this.name = name;
+            this.count = count;
+        }
+    }
 
     // 排行榜子视图：完整榜单展开时记组／榜下标，-1 表示概览。
     private int mRankGroup = -1;
@@ -209,7 +246,7 @@ public class StoreView extends LinearLayout {
             mTabScrolls[i] = scroll;
             mTabContainers[i] = container;
             if (i != TAB_RANK) {
-                // 0.1.59：首页／探索拆静态头＋列表区两个子容器（排行榜不用）。
+                // 0.1.59：首页／标签云拆静态头＋列表区两个子容器（排行榜不用）。
                 LinearLayout header = new LinearLayout(context);
                 header.setOrientation(VERTICAL);
                 container.addView(header, new ViewGroup.LayoutParams(
@@ -225,12 +262,12 @@ public class StoreView extends LinearLayout {
             }
             scroll.setVisibility(GONE);
         }
-        // 0.1.68：探索页滑到底自动加载下一页（取代“加载更多”按钮）。
+        // 0.1.68：首页滑到底自动加载下一页（取代“加载更多”按钮）。
         // 只在真实下滑到底时追加 20 条：scrollY 未增大（重建列表时的位置
         // 调整）不触发；追加后内容变长、canScrollVertically(1) 恢复 true，
         // 同一次滑动不会重复触发；mExploreShown 严格递增且以可见总数为界，
         // 不会循环。minSdk 23，setOnScrollChangeListener 可用。
-        mTabScrolls[TAB_EXPLORE].setOnScrollChangeListener(
+        mTabScrolls[TAB_HOME].setOnScrollChangeListener(
                 (v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
             if (scrollY <= oldScrollY || mFeedData == null) {
                 return;
@@ -238,14 +275,14 @@ public class StoreView extends LinearLayout {
             if (mExploreShown >= mExploreVisibleSize) {
                 return;
             }
-            if (!mTabScrolls[TAB_EXPLORE].canScrollVertically(1)) {
+            if (!mTabScrolls[TAB_HOME].canScrollVertically(1)) {
                 mExploreShown += PAGE_SIZE;
-                // 0.2.2：追加只重建列表区，不重建静态头（之前调 renderExplore()
-                // 连标题＋排序 chips＋筛选网格一起重建，滚动时会抖）。
-                renderExploreList();
+                // 0.2.2：追加只重建列表区，不重建静态头（之前调 renderHome()
+                // 连统计块＋排序 chips＋筛选网格一起重建，滚动时会抖）。
+                renderHomeList();
             }
         });
-        // 0.2.2：完整榜单滑到底自动加载下一页（与探索页同款 20 条/页）。
+        // 0.2.2：完整榜单滑到底自动加载下一页（与首页同款 20 条/页）。
         // 只在完整榜单页追加，概览页不动；mRankShown 严格递增且以当前榜单
         // 总数为界，不会循环。
         mTabScrolls[TAB_RANK].setOnScrollChangeListener(
@@ -262,6 +299,21 @@ public class StoreView extends LinearLayout {
             if (!mTabScrolls[TAB_RANK].canScrollVertically(1)) {
                 mRankShown += PAGE_SIZE;
                 renderRank();
+            }
+        });
+        // 2026-11-22：标签详情页滑到底自动加载下一页（与首页同款 20 条/页）。
+        // 只在详情态追加，云态不动；mTagShown 严格递增且以当前标签总数为界。
+        mTabScrolls[TAB_TAGS].setOnScrollChangeListener(
+                (v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            if (scrollY <= oldScrollY || mFeedData == null || mTagDetail == null) {
+                return;
+            }
+            if (mTagShown >= mTagVisibleSize) {
+                return;
+            }
+            if (!mTabScrolls[TAB_TAGS].canScrollVertically(1)) {
+                mTagShown += PAGE_SIZE;
+                renderTagDetail();
             }
         });
         // 0.1.66：最新入库子屏（独立 ScrollView，与三页签同处一个 FrameLayout）。
@@ -287,7 +339,7 @@ public class StoreView extends LinearLayout {
         tabBar.setOrientation(HORIZONTAL);
         tabBar.setBackgroundColor(StoreViews.backgroundColor(mContext));
         int[] tabTitles = {
-            R.string.store_home, R.string.store_explore, R.string.store_rank
+            R.string.store_home, R.string.store_rank, R.string.store_tags
         };
         for (int i = 0; i < TAB_COUNT; i++) {
             final int tab = i;
@@ -374,6 +426,13 @@ public class StoreView extends LinearLayout {
         mExploreShown = PAGE_SIZE;
         mRankGroup = -1;
         mRankList = -1;
+        // 标签云状态同样复位：计数重算，退出详情态，清掉框内搜索词
+        //（搜索框随头重建，不清会框空词在）。
+        mTagCountsReady = false;
+        mTagCounts = null;
+        mTagDetail = null;
+        mTagQuery = "";
+        mTagShown = PAGE_SIZE;
         // 63：排行榜分页状态同样复位——否则重选页签/下拉刷新后 mRankShown
         // 停在旧页数，再进同一榜单直接展开多页，违背"进榜从第 1 页看"。
         mRankShown = PAGE_SIZE;
@@ -388,14 +447,21 @@ public class StoreView extends LinearLayout {
         boolean reselect = tab == mCurrentTab && mTabLoaded[tab] && !mShowingNewest;
         mCurrentTab = tab;
         mShowingNewest = false;
-        // 0.2.2：切回探索页／排行榜从第 1 页重看（与 applyPlatform/
-        // applyCategory/jumpToExploreWithSort 一致）；否则 mExploreShown/
+        // 0.2.2：切回首页／排行榜从第 1 页重看（与 applyPlatform/
+        // applyCategory 一致）；否则 mExploreShown/
         // mRankShown 停在上次滑到的页数，切回来直接从半截开始。
-        if (tab == TAB_EXPLORE) {
+        if (tab == TAB_HOME) {
             mExploreShown = PAGE_SIZE;
         }
         if (tab == TAB_RANK) {
             mRankShown = PAGE_SIZE;
+        }
+        if (tab == TAB_TAGS) {
+            mTagShown = PAGE_SIZE;
+        }
+        // 离开标签云时退出详情态（回云）；在云内切详情不走这里。
+        if (tab != TAB_TAGS) {
+            mTagDetail = null;
         }
         updateTabStyles();
         for (int i = 0; i < TAB_COUNT; i++) {
@@ -482,7 +548,7 @@ public class StoreView extends LinearLayout {
         return platform != null && item.platforms.contains(platform);
     }
 
-    /** 首页／探索的系统网格：0.1.66 起只改内存筛选，不再重载 feed
+    /** 首页的系统网格：0.1.66 起只改内存筛选，不再重载 feed
      *（feed 固定取 all.json，9 格里鸿蒙／扩展／其他没有分平台文件）。 */
     private void applyPlatform(String key) {
         if (!key.equals(mPlatform)) {
@@ -493,19 +559,15 @@ public class StoreView extends LinearLayout {
         }
     }
 
-    /** 首页／探索的用途网格：只筛已加载项，不发请求，留在当前页重绘。 */
+    /** 首页的用途网格：只筛已加载项，不发请求，留在当前页重绘。 */
     private void applyCategory(String category) {
         mCategory = category;
         StorePrefs.setCategory(mContext, category);
-        if (mCurrentTab == TAB_EXPLORE) {
-            mExploreShown = PAGE_SIZE;
-            renderExplore();
-        } else {
-            renderHome();
-        }
+        mExploreShown = PAGE_SIZE;
+        renderHome();
     }
 
-    /** 探索页内切排序（点当前排序则刷新）；查看全部复用同一路。 */
+    /** 首页内切排序（点当前排序则刷新）。 */
     private void applyExploreSort(int sort) {
         if (sort == mSort && mFeedData != null) {
             reloadCurrentTab();
@@ -515,18 +577,10 @@ public class StoreView extends LinearLayout {
         StorePrefs.setExploreSort(mContext, sort);
         mExploreShown = PAGE_SIZE;
         if (mFeedData != null) {
-            renderExplore();
+            renderHome();
         } else {
             loadFeed();
         }
-    }
-
-    /** 首页“查看全部”／统计卡片：设好排序后跳探索页（不触发刷新语义）。 */
-    private void jumpToExploreWithSort(int sort) {
-        mSort = sort;
-        StorePrefs.setExploreSort(mContext, sort);
-        mExploreShown = PAGE_SIZE;
-        selectTab(TAB_EXPLORE);
     }
 
     // ---------- 取数：三页签共用一份 feed 整包 ----------
@@ -590,8 +644,8 @@ public class StoreView extends LinearLayout {
             case TAB_HOME:
                 renderHome();
                 break;
-            case TAB_EXPLORE:
-                renderExplore();
+            case TAB_TAGS:
+                renderTags();
                 break;
             default:
                 renderRank();
@@ -765,7 +819,9 @@ public class StoreView extends LinearLayout {
         renderHomeList();
     }
 
-    /** 0.1.59：首页静态头（统计行＋系统／用途网格）——全量渲染时建一次，筛时不动。 */
+    /** 2026-11-22：首页静态头（统计块＋排序 chips＋系统／用途网格）——
+     * 原探索页的头，顶部加旧首页的统计块；标题行（“探索开源软件”＋副标题）
+     * 删掉，ⓘ（当前排序说明）挪到 chips 行末。 */
     private void renderHomeHeader() {
         LinearLayout header = mTabHeaderContainers[TAB_HOME];
         header.removeAllViews();
@@ -787,19 +843,50 @@ public class StoreView extends LinearLayout {
             header.addView(offlineStrip());
         }
 
-        // 系统网格（0.1.66 起 9 格：全部／Android／iOS／Windows／MacOS／Linux／
-        // 鸿蒙／浏览器扩展／其他；点格只改内存筛选，见 applyPlatform）。
-        header.addView(StoreViews.sectionHeader(mContext,
-                getString(R.string.store_filter_platform)));
+        // 4 个排序 chips 一行等权（点切排序、点当前排序刷新；切换时保留平台与分类）。
+        // 0.1.61：去图标只留文字——真机上带图标时“最近更新”“近期热门”会被截断。
+        int side = StoreViews.dp(mContext, 16);
+        LinearLayout sortChips = new LinearLayout(mContext);
+        sortChips.setOrientation(LinearLayout.HORIZONTAL);
+        sortChips.setGravity(Gravity.CENTER_VERTICAL);
+        sortChips.setPadding(side, StoreViews.dp(mContext, 4), side, 0);
+        for (int i = 0; i < SORT_TITLES.length; i++) {
+            final int sort = i;
+            View chip = StoreViews.textChip(mContext,
+                    getString(SORT_TITLES[i]), sort == mSort,
+                    v -> applyExploreSort(sort));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            int gap = StoreViews.dp(mContext, 4);
+            lp.setMargins(gap, 0, gap, 0);
+            sortChips.addView(chip, lp);
+        }
+        // 2026-11-22：标题行删掉后，ⓘ（当前排序说明）挪到 chips 行末。
+        // 0.1.61：ⓘ 只显示当前排序的说明（旧小字文案）。之前是收录口径 + "\n" +
+        // 排序说明两行拼进 Toast，真机上 Toast 只显示第一行还带省略号，
+        // 所以点哪个排序看起来都一样，第二行从来出不来。
+        ImageView info = new ImageView(mContext);
+        info.setImageResource(R.drawable.ic_store_info);
+        info.setColorFilter(StoreViews.secondaryText(mContext), PorterDuff.Mode.SRC_IN);
+        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(
+                StoreViews.dp(mContext, 18), StoreViews.dp(mContext, 18));
+        infoLp.setMargins(StoreViews.dp(mContext, 8), 0, 0, 0);
+        info.setLayoutParams(infoLp);
+        info.setOnClickListener(v -> Toast.makeText(mContext,
+                getString(SORT_NOTES[mSort]),
+                Toast.LENGTH_LONG).show());
+        sortChips.addView(info);
+        header.addView(sortChips);
+
+        // 系统／用途两行筛选（图标网格；只筛已加载项，不发请求）。
+        header.addView(filterLabel(getString(R.string.store_filter_platform)));
         header.addView(platformGrid());
 
-        // 用途网格（0.1.66 起 hiwiki 7 类＋其他；点格就地筛，不跳探索页）。
-        header.addView(StoreViews.sectionHeader(mContext,
-                getString(R.string.store_filter_category)));
+        header.addView(filterLabel(getString(R.string.store_filter_category)));
         header.addView(categoryGrid());
     }
 
-    /** 0.1.59：首页列表区（热门＋最近更新）——筛时只重建这里。 */
+    /** 首页列表区（结果数＋行＋底栏）——筛时只重建这里。 */
     private void renderHomeList() {
         renderHomeList(pool());
     }
@@ -807,56 +894,57 @@ public class StoreView extends LinearLayout {
     private void renderHomeList(List<StoreRepo> pool) {
         LinearLayout list = mTabListContainers[TAB_HOME];
         list.removeAllViews();
+        int side = StoreViews.dp(mContext, 16);
 
-        // 热门软件：feed 按星标取前 9；最近更新：按最新 release 取前 6。
-        List<StoreRepo> hot = new ArrayList<>(pool);
-        sortForExplore(hot, SORT_STARS);
-        List<StoreRepo> hotVisible = homeFiltered(hot);
-        List<StoreRepo> recent = new ArrayList<>(pool);
-        sortForExplore(recent, SORT_UPDATED);
-        List<StoreRepo> recentVisible = homeFiltered(recent);
+        List<StoreRepo> visible = exploreFiltered(pool);
+        mExploreVisibleSize = visible.size();
+        TextView count = StoreViews.text(mContext, 13, false);
+        count.setText(getString(R.string.store_result_count, visible.size()));
+        count.setTextColor(StoreViews.secondaryText(mContext));
+        count.setPadding(side, StoreViews.dp(mContext, 8), side, StoreViews.dp(mContext, 4));
+        list.addView(count);
 
-        boolean anySection = false;
-        if (!hotVisible.isEmpty()) {
-            anySection = true;
-            list.addView(StoreViews.sectionHeader(mContext,
-                    getString(R.string.store_hot)));
-            int limit = Math.min(HOME_HOT_COUNT, hotVisible.size());
-            for (int i = 0; i < limit; i++) {
-                list.addView(rowView(hotVisible.get(i)));
-                list.addView(StoreViews.divider(mContext));
-            }
-            list.addView(viewAllRow(v -> jumpToExploreWithSort(SORT_STARS)));
-        }
-        if (!recentVisible.isEmpty()) {
-            anySection = true;
-            list.addView(StoreViews.sectionHeader(mContext,
-                    getString(R.string.store_recent_updated)));
-            int limit = Math.min(HOME_RECENT_COUNT, recentVisible.size());
-            for (int i = 0; i < limit; i++) {
-                list.addView(rowView(recentVisible.get(i)));
-                list.addView(StoreViews.divider(mContext));
-            }
-            list.addView(viewAllRow(v -> jumpToExploreWithSort(SORT_UPDATED)));
-        }
-        if (!anySection) {
+        if (visible.isEmpty()) {
             list.addView(StoreViews.infoText(mContext,
                     getString(R.string.store_empty_result)));
+            return;
         }
+        int limit = Math.min(mExploreShown, visible.size());
+        for (int i = 0; i < limit; i++) {
+            list.addView(rowView(visible.get(i)));
+            list.addView(StoreViews.divider(mContext));
+        }
+        // 0.1.68：“加载更多”按钮已删，滑到底由首页 ScrollView 的
+        // OnScrollChangeListener 自动追加下一页；全部展完才显示底栏。
+        if (mExploreShown >= visible.size()) {
+            TextView end = StoreViews.text(mContext, 13, false);
+            end.setText(R.string.store_all_loaded);
+            end.setTextColor(StoreViews.secondaryText(mContext));
+            end.setGravity(Gravity.CENTER);
+            end.setPadding(side, StoreViews.dp(mContext, 14),
+                    side, StoreViews.dp(mContext, 18));
+            list.addView(end);
+        }
+        // 0.2.2：大屏/横屏下 20 条可能塞不满一屏、滑不到底就触发不了自动
+        // 加载；渲染后若内容仍不可滚动且还有未展示的条目，再追加一页。
+        ensureHomeFillViewport();
     }
 
-    /** 首页列表的筛选：当前平台＋用途分类（只筛已加载项，不发请求）。 */
-    private List<StoreRepo> homeFiltered(List<StoreRepo> items) {
-        List<StoreRepo> out = new ArrayList<>();
-        for (StoreRepo item : items) {
-            if (!matchesPlatform(item, mPlatform)) {
-                continue;
-            }
-            if (CAT_ALL.equals(mCategory) || mCategory.equals(item.categoryOrOther())) {
-                out.add(item);
-            }
+    /** 0.2.2：首页列表塞不满一屏时自动追加，直到能滚动或全部展完。 */
+    private void ensureHomeFillViewport() {
+        ScrollView scroll = mTabScrolls[TAB_HOME];
+        if (scroll == null) {
+            return;
         }
-        return out;
+        scroll.post(() -> {
+            if (mFeedData == null || mCurrentTab != TAB_HOME) {
+                return;
+            }
+            if (!scroll.canScrollVertically(1) && mExploreShown < mExploreVisibleSize) {
+                mExploreShown += PAGE_SIZE;
+                renderHomeList();
+            }
+        });
     }
 
     /** 首页统计块（hiwiki 首页 2x2 居中两行：图标＋粗体数字＋灰字；四个都能点；
@@ -878,11 +966,11 @@ public class StoreView extends LinearLayout {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         first.addView(statCell(R.drawable.ic_stat_package,
                 StoreViews.formatStars(repos), getString(R.string.store_stat_repos),
-                false, false, v -> selectTab(TAB_EXPLORE)));
+                false, false, v -> selectTab(TAB_HOME)));
         first.addView(statGap());
         first.addView(statCell(R.drawable.ic_stat_download,
                 StoreViews.formatStars(assets), getString(R.string.store_stat_assets),
-                false, false, v -> selectTab(TAB_EXPLORE)));
+                false, false, v -> selectTab(TAB_HOME)));
         rows.addView(first);
         LinearLayout second = new LinearLayout(mContext);
         second.setOrientation(HORIZONTAL);
@@ -961,19 +1049,6 @@ public class StoreView extends LinearLayout {
             cell.setOnClickListener(listener);
         }
         return cell;
-    }
-
-    private View viewAllRow(View.OnClickListener listener) {
-        TextView more = StoreViews.text(mContext, 14, true);
-        more.setText(R.string.store_view_all);
-        more.setTextColor(StoreViews.primaryColor(mContext));
-        more.setGravity(Gravity.END);
-        int side = StoreViews.dp(mContext, 16);
-        more.setPadding(side, StoreViews.dp(mContext, 8),
-                side, StoreViews.dp(mContext, 4));
-        UiUtils.setSelectableBackground(more);
-        more.setOnClickListener(listener);
-        return more;
     }
 
     /** 系统／平台图标网格（三列；点格切全局平台，留在当前页重载）。
@@ -1094,70 +1169,25 @@ public class StoreView extends LinearLayout {
 
     // ---------- 探索 ----------
 
-    private void renderExplore() {
-        renderExploreHeader();
-        renderExploreList();
+    // ---------- 标签云 ----------
+
+    /** 标签云页签：详情态进标签列表，云态显示标签云。 */
+    private void renderTags() {
+        if (mTagDetail != null) {
+            renderTagDetail();
+            return;
+        }
+        renderTagCloud();
     }
 
-    /** 0.1.59：探索静态头（标题＋排序 chips＋系统／用途网格）——全量渲染时建一次，筛时不动。 */
-    private void renderExploreHeader() {
-        LinearLayout header = mTabHeaderContainers[TAB_EXPLORE];
+    /** 标签云（默认只展示项目数超 10 个的热门标签；框内搜全部标签）。 */
+    private void renderTagCloud() {
+        LinearLayout header = mTabHeaderContainers[TAB_TAGS];
+        header.setVisibility(VISIBLE);
         header.removeAllViews();
-        ensureCounts();
-
-        // 标题行：与“系统/平台”同款 plain 标题，ⓘ 点开提示当前排序的说明。
+        mTabListContainers[TAB_TAGS].removeAllViews();
+        ensureTagCounts();
         int side = StoreViews.dp(mContext, 16);
-        LinearLayout titleRow = new LinearLayout(mContext);
-        titleRow.setOrientation(LinearLayout.HORIZONTAL);
-        titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        titleRow.setPadding(side, StoreViews.dp(mContext, 16), side, StoreViews.dp(mContext, 8));
-        TextView title = StoreViews.text(mContext, 18, true);
-        title.setText(R.string.store_explore_title);
-        titleRow.addView(title);
-        ImageView info = new ImageView(mContext);
-        info.setImageResource(R.drawable.ic_store_info);
-        info.setColorFilter(StoreViews.secondaryText(mContext), PorterDuff.Mode.SRC_IN);
-        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(
-                StoreViews.dp(mContext, 18), StoreViews.dp(mContext, 18));
-        infoLp.setMargins(StoreViews.dp(mContext, 6), 0, 0, 0);
-        info.setLayoutParams(infoLp);
-        // 0.1.61：ⓘ 只显示当前排序的说明（旧小字文案）。之前是收录口径 + "\n" +
-        // 排序说明两行拼进 Toast，真机上 Toast 只显示第一行还带省略号，
-        // 所以点哪个排序看起来都一样，第二行从来出不来。
-        info.setOnClickListener(v -> Toast.makeText(mContext,
-                getString(SORT_NOTES[mSort]),
-                Toast.LENGTH_LONG).show());
-        titleRow.addView(info);
-        TextView sub = StoreViews.text(mContext, 13, false);
-        // B-L2：副标题用当前筛选下的条数，与下方“共 X 条”同一口径
-        // （之前是全池总数，选 Android 后副标题 2450、结果数 718）。
-        sub.setText(getString(R.string.store_explore_sub,
-                exploreFiltered(pool()).size()));
-        sub.setTextColor(StoreViews.secondaryText(mContext));
-        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        subLp.setMargins(StoreViews.dp(mContext, 8), 0, 0, 0);
-        sub.setLayoutParams(subLp);
-        titleRow.addView(sub);
-        header.addView(titleRow);
-
-        // 4 个排序 chips 一行等权（点切排序、点当前排序刷新；切换时保留平台与分类）。
-        // 0.1.61：去图标只留文字——真机上带图标时“最近更新”“近期热门”会被截断。
-        LinearLayout sortChips = new LinearLayout(mContext);
-        sortChips.setOrientation(LinearLayout.HORIZONTAL);
-        sortChips.setPadding(side, StoreViews.dp(mContext, 4), side, 0);
-        for (int i = 0; i < SORT_TITLES.length; i++) {
-            final int sort = i;
-            View chip = StoreViews.textChip(mContext,
-                    getString(SORT_TITLES[i]), sort == mSort,
-                    v -> applyExploreSort(sort));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            int gap = StoreViews.dp(mContext, 4);
-            lp.setMargins(gap, 0, gap, 0);
-            sortChips.addView(chip, lp);
-        }
-        header.addView(sortChips);
 
         if (mFeedMirror) {
             header.addView(mirrorStrip());
@@ -1165,30 +1195,256 @@ public class StoreView extends LinearLayout {
             header.addView(offlineStrip());
         }
 
-        // 系统／用途两行筛选（图标网格；只筛已加载项，不发请求）。
-        header.addView(filterLabel(getString(R.string.store_filter_platform)));
-        header.addView(platformGrid());
+        int hot = 0;
+        for (TagCount tag : mTagCounts) {
+            if (tag.count > TAG_HOT_MIN) {
+                hot++;
+            }
+        }
+        TextView stats = StoreViews.text(mContext, 14, false);
+        stats.setText(getString(R.string.store_tags_stats, hot, mTagCounts.size()));
+        stats.setTextColor(StoreViews.secondaryText(mContext));
+        stats.setPadding(side, StoreViews.dp(mContext, 14), side, 0);
+        header.addView(stats);
 
-        header.addView(filterLabel(getString(R.string.store_filter_category)));
-        header.addView(categoryGrid());
+        // 搜索框：输入只重建云的行，不重建整个头（否则输入时丢焦点）。
+        EditText search = new EditText(mContext);
+        search.setHint(R.string.store_tags_search_hint);
+        search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        search.setSingleLine(true);
+        search.setText(mTagQuery);
+        search.setPadding(side, StoreViews.dp(mContext, 10),
+                side, StoreViews.dp(mContext, 10));
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        searchLp.setMargins(side, StoreViews.dp(mContext, 8), side, 0);
+        search.setLayoutParams(searchLp);
+        search.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                mTagQuery = s.toString();
+                rebuildTagCloudRows();
+            }
+        });
+        header.addView(search);
+
+        TextView note = StoreViews.text(mContext, 13, false);
+        note.setText(R.string.store_tags_note);
+        note.setTextColor(StoreViews.secondaryText(mContext));
+        note.setPadding(side, StoreViews.dp(mContext, 8), side, 0);
+        header.addView(note);
+
+        mTagCloudRows = new LinearLayout(mContext);
+        mTagCloudRows.setOrientation(LinearLayout.VERTICAL);
+        mTagCloudRows.setPadding(side, StoreViews.dp(mContext, 10), side,
+                StoreViews.dp(mContext, 16));
+        header.addView(mTagCloudRows);
+        rebuildTagCloudRows();
     }
 
-    /** 0.1.59：探索列表区（结果数＋行＋底栏）——筛时只重建这里。 */
-    private void renderExploreList() {
-        renderExploreList(pool());
+    /** 云的行：按收录数取当前要展示的标签（空词只看热门，有词全库搜），
+     * 只重建行容器，搜索框本身不动（保焦点）。 */
+    private void rebuildTagCloudRows() {
+        if (mTagCloudRows == null) {
+            return;
+        }
+        mTagCloudRows.removeAllViews();
+        List<TagCount> tags = tagCloudTags();
+        if (tags.isEmpty()) {
+            mTagCloudRows.addView(StoreViews.infoText(mContext,
+                    getString(R.string.store_tags_empty)));
+            return;
+        }
+        int avail = tagCloudAvailWidth();
+        LinearLayout row = newTagRow();
+        int rowWidth = 0;
+        for (TagCount tag : tags) {
+            int w = measureTagView(tag);
+            if (rowWidth > 0 && rowWidth + w > avail) {
+                mTagCloudRows.addView(row);
+                row = newTagRow();
+                rowWidth = 0;
+            }
+            row.addView(buildTagView(tag));
+            rowWidth += w;
+        }
+        if (row.getChildCount() > 0) {
+            mTagCloudRows.addView(row);
+        }
     }
 
-    private void renderExploreList(List<StoreRepo> pool) {
-        LinearLayout list = mTabListContainers[TAB_EXPLORE];
+    /** 当前要展示的标签：空词只看热门（收录数 > 10），有词在全库里按名字搜，
+     * 都按收录数降序；搜的结果最多 300 个（云是浏览用的，不一次全摊开）。 */
+    private List<TagCount> tagCloudTags() {
+        ensureTagCounts();
+        List<TagCount> out = new ArrayList<>();
+        String query = mTagQuery.trim().toLowerCase(Locale.ROOT);
+        for (TagCount tag : mTagCounts) {
+            if (query.isEmpty()) {
+                if (tag.count > TAG_HOT_MIN) {
+                    out.add(tag);
+                }
+            } else if (tag.name.toLowerCase(Locale.ROOT).contains(query)) {
+                out.add(tag);
+            }
+            if (out.size() >= 300) {
+                break;
+            }
+        }
+        return out;
+    }
+
+    /** 标签计数：feed 条目 topics 聚合，收录数降序、名字升序；feed 未到不缓存。 */
+    private void ensureTagCounts() {
+        if (mTagCountsReady) {
+            return;
+        }
+        if (mFeedData == null) {
+            mTagCounts = new ArrayList<>();
+            return;
+        }
+        Map<String, Integer> counts = new HashMap<>();
+        for (StoreRepo item : pool()) {
+            for (String topic : item.topics) {
+                if (TextUtils.isEmpty(topic)) {
+                    continue;
+                }
+                Integer n = counts.get(topic);
+                counts.put(topic, n == null ? 1 : n + 1);
+            }
+        }
+        List<TagCount> tags = new ArrayList<>();
+        for (Map.Entry<String, Integer> e : counts.entrySet()) {
+            tags.add(new TagCount(e.getKey(), e.getValue()));
+        }
+        Collections.sort(tags, (a, b) -> {
+            int byCount = Integer.compare(b.count, a.count);
+            return byCount != 0 ? byCount : a.name.compareToIgnoreCase(b.name);
+        });
+        mTagCounts = tags;
+        mTagCountsReady = true;
+    }
+
+    /** 云的一行：横向居中，标签按实测宽度贪心换行。 */
+    private LinearLayout newTagRow() {
+        LinearLayout row = new LinearLayout(mContext);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        return row;
+    }
+
+    /** 云一行可用的宽度：头容器实测宽（未布局时回落屏幕宽）减两侧边距。 */
+    private int tagCloudAvailWidth() {
+        int width = mTabHeaderContainers[TAB_TAGS].getWidth();
+        if (width <= 0) {
+            width = mContext.getResources().getDisplayMetrics().widthPixels;
+        }
+        return Math.max(0, width - StoreViews.dp(mContext, 32));
+    }
+
+    /** 标签字号档（收录数越大字越大，与 hiwiki 标签云同款按量分档）。 */
+    private static int tagSizeSp(int count) {
+        if (count >= 200) {
+            return 26;
+        }
+        if (count >= 100) {
+            return 22;
+        }
+        if (count >= 80) {
+            return 19;
+        }
+        if (count >= 60) {
+            return 17;
+        }
+        return 15;
+    }
+
+    /** 云里的一个标签：名字按档放大＋收录数小灰字，点进该标签的详情列表。 */
+    private View buildTagView(final TagCount tag) {
+        int sizeSp = tagSizeSp(tag.count);
+        TextView view = new TextView(mContext);
+        String countText = " " + tag.count;
+        SpannableString text = new SpannableString(tag.name + countText);
+        text.setSpan(new AbsoluteSizeSpan(sizeSp, true), 0, tag.name.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new AbsoluteSizeSpan(12, true), tag.name.length(), text.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new ForegroundColorSpan(StoreViews.secondaryText(mContext)),
+                tag.name.length(), text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        view.setText(text);
+        view.setTextColor(tag.count >= 100
+                ? StoreViews.primaryColor(mContext) : StoreViews.primaryText(mContext));
+        int side = StoreViews.dp(mContext, 10);
+        view.setPadding(side, StoreViews.dp(mContext, 6),
+                side, StoreViews.dp(mContext, 6));
+        UiUtils.setSelectableBackground(view);
+        view.setOnClickListener(v -> showTagDetail(tag.name));
+        return view;
+    }
+
+    /** 云里一个标签占的宽：名字＋收录数字的实测宽＋两侧内边距（与换行同口径）。 */
+    private int measureTagView(TagCount tag) {
+        float density = mContext.getResources().getDisplayMetrics().density;
+        float scaledDensity = mContext.getResources().getDisplayMetrics().scaledDensity;
+        Paint namePaint = new Paint();
+        namePaint.setTextSize(tagSizeSp(tag.count) * scaledDensity);
+        Paint countPaint = new Paint();
+        countPaint.setTextSize(12 * scaledDensity);
+        float w = namePaint.measureText(tag.name)
+                + countPaint.measureText(" " + tag.count)
+                + 20 * density + 4 * density;
+        return (int) Math.ceil(w);
+    }
+
+    /** 点标签进详情：该标签的仓库按星标排，20 条一页。 */
+    private void showTagDetail(String tag) {
+        mTagDetail = tag;
+        mTagShown = PAGE_SIZE;
+        renderTags();
+    }
+
+    /** 标签详情（子屏，不占页签）：回云＋标题＋条数＋仓库行。 */
+    private void renderTagDetail() {
+        LinearLayout header = mTabHeaderContainers[TAB_TAGS];
+        header.setVisibility(GONE);
+        LinearLayout list = mTabListContainers[TAB_TAGS];
         list.removeAllViews();
         int side = StoreViews.dp(mContext, 16);
 
-        List<StoreRepo> visible = exploreFiltered(pool);
-        mExploreVisibleSize = visible.size();
+        TextView back = StoreViews.text(mContext, 14, true);
+        back.setText(R.string.store_tags_back);
+        back.setTextColor(StoreViews.primaryColor(mContext));
+        back.setPadding(side, StoreViews.dp(mContext, 14), side, 0);
+        UiUtils.setSelectableBackground(back);
+        back.setOnClickListener(v -> {
+            mTagDetail = null;
+            renderTags();
+        });
+        list.addView(back);
+
+        List<StoreRepo> visible = tagDetailRepos();
+        mTagVisibleSize = visible.size();
+        TextView title = StoreViews.text(mContext, 18, true);
+        title.setText(mTagDetail);
+        title.setPadding(side, StoreViews.dp(mContext, 8), side, 0);
+        list.addView(title);
+        TextView sub = StoreViews.text(mContext, 13, false);
+        sub.setText(getString(R.string.store_tags_detail_sub, visible.size()));
+        sub.setTextColor(StoreViews.secondaryText(mContext));
+        sub.setPadding(side, StoreViews.dp(mContext, 2), side, StoreViews.dp(mContext, 8));
+        list.addView(sub);
         TextView count = StoreViews.text(mContext, 13, false);
         count.setText(getString(R.string.store_result_count, visible.size()));
         count.setTextColor(StoreViews.secondaryText(mContext));
-        count.setPadding(side, StoreViews.dp(mContext, 8), side, StoreViews.dp(mContext, 4));
+        count.setPadding(side, StoreViews.dp(mContext, 4), side, StoreViews.dp(mContext, 4));
         list.addView(count);
 
         if (visible.isEmpty()) {
@@ -1196,14 +1452,12 @@ public class StoreView extends LinearLayout {
                     getString(R.string.store_empty_result)));
             return;
         }
-        int limit = Math.min(mExploreShown, visible.size());
+        int limit = Math.min(mTagShown, visible.size());
         for (int i = 0; i < limit; i++) {
             list.addView(rowView(visible.get(i)));
             list.addView(StoreViews.divider(mContext));
         }
-        // 0.1.68：“加载更多”按钮已删，滑到底由探索 ScrollView 的
-        // OnScrollChangeListener 自动追加下一页；全部展完才显示底栏。
-        if (mExploreShown >= visible.size()) {
+        if (mTagShown >= visible.size()) {
             TextView end = StoreViews.text(mContext, 13, false);
             end.setText(R.string.store_all_loaded);
             end.setTextColor(StoreViews.secondaryText(mContext));
@@ -1212,24 +1466,37 @@ public class StoreView extends LinearLayout {
                     side, StoreViews.dp(mContext, 18));
             list.addView(end);
         }
-        // 0.2.2：大屏/横屏下 20 条可能塞不满一屏、滑不到底就触发不了自动
-        // 加载；渲染后若内容仍不可滚动且还有未展示的条目，再追加一页。
-        ensureExploreFillViewport();
+        ensureTagFillViewport();
     }
 
-    /** 0.2.2：探索列表塞不满一屏时自动追加，直到能滚动或全部展完。 */
-    private void ensureExploreFillViewport() {
-        ScrollView scroll = mTabScrolls[TAB_EXPLORE];
+    /** 该标签的仓库（topics 含该标签），按星标降序。 */
+    private List<StoreRepo> tagDetailRepos() {
+        List<StoreRepo> out = new ArrayList<>();
+        if (mTagDetail == null) {
+            return out;
+        }
+        for (StoreRepo item : pool()) {
+            if (item.topics.contains(mTagDetail)) {
+                out.add(item);
+            }
+        }
+        sortForExplore(out, SORT_STARS);
+        return out;
+    }
+
+    /** 标签详情塞不满一屏时自动追加，直到能滚动或全部展完。 */
+    private void ensureTagFillViewport() {
+        ScrollView scroll = mTabScrolls[TAB_TAGS];
         if (scroll == null) {
             return;
         }
         scroll.post(() -> {
-            if (mFeedData == null || mCurrentTab != TAB_EXPLORE) {
+            if (mFeedData == null || mCurrentTab != TAB_TAGS || mTagDetail == null) {
                 return;
             }
-            if (!scroll.canScrollVertically(1) && mExploreShown < mExploreVisibleSize) {
-                mExploreShown += PAGE_SIZE;
-                renderExploreList();
+            if (!scroll.canScrollVertically(1) && mTagShown < mTagVisibleSize) {
+                mTagShown += PAGE_SIZE;
+                renderTagDetail();
             }
         });
     }
