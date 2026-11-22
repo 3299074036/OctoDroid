@@ -1738,16 +1738,28 @@ public class EventListFragmentTest {
 
     @Test
     public void enrichSinglePullRequestEvent_errorAfterDetach_noRetry() throws Exception {
-        TestEventFragment f = attach();
+        // 错误回调到达时 fragment 未 attach → !isAdded() 直接返回，不排重试。
+        // 注意：不能用 attach 后 removeFragment 的写法——remove 会走 onDestroyView，
+        // mEnrichmentDisposables.clear() 把 SingleSubject 订阅 dispose 掉，错误
+        // 回调根本跑不到；且 enrich 经 doInBackground 在 IO 线程订阅，订阅落点
+        // 与 remove 的先后是竞态（chunk 里单跑过、合跑失败即由此而来）。这里沿用
+        // successOnDetachedFragment 的做法：从未 attach 的 fragment，订阅保持
+        // 有效（SingleSubject 会把终态重放给晚订阅者），回调确实跑过。
+        TestEventFragment f = new TestEventFragment();
         SingleSubject<Response<PullRequest>> subject = SingleSubject.create();
         PullRequestService service = mockPrService(subject);
         try (MockedStatic<com.gh4a.ServiceFactory> mocked =
                      mockPrServiceStatic(service)) {
             callEnrich(f, prEvent(PullRequest.builder().number(5).build()));
-            removeFragment(f);
+            assertTrue(((java.util.Set<?>) field(f, "mEnrichmentInFlight"))
+                    .contains("evt-1"));
             subject.onError(new RuntimeException("flaky"));
+            waitUntil(() -> !((java.util.Set<?>) fieldUnchecked(f, "mEnrichmentInFlight"))
+                    .contains("evt-1"));
             idleMain();
-            assertFalse(((java.util.Set<?>) field(f, "mEnrichmentInFlight"))
+            // 回调第一行清 inFlight 即证明回调跑过；!isAdded() 提前返回，未把
+            // evt-1 记入 mEnrichmentRetried，即未排 2 秒重试。
+            assertFalse(((java.util.Set<?>) field(f, "mEnrichmentRetried"))
                     .contains("evt-1"));
             Thread.sleep(2500);
             idleMain();
@@ -1802,6 +1814,110 @@ public class EventListFragmentTest {
             return field(target, name);
         } catch (Exception e) {
             throw new AssertionError(e);
+        }
+    }
+
+    // ---- 2026-11-22 缺口补全：空 type 点击 / onAddData 过滤臂 /
+    // enrich 扫描体 / 成功回调 detached 臂 ----
+
+    @Test
+    public void onItemClick_nullType_isNoop() {
+        // type() 为 null 的事件静默无操作（不跳转、不弹 toast）。
+        // 注意：它在 L146 的 hasInvalidPayload 守卫即返回（type 为 null 时
+        // hasInvalidPayload 恒为真，EventAdapter.java:663），到不了 L174；
+        // L174 的 `event.type() != null` 假臂不可达——能走到 L174 的事件
+        // 已通过 L146 守卫，type 恒非空。见报告“仍不可达”第 R2-1 项。
+        TestEventFragment f = attach();
+        f.onItemClick(GitHubEvent.builder()
+                .id("evt-1")
+                .actor(actor("octo"))
+                .repo(id("octo/cat"))
+                .payload(IssuesPayload.builder()
+                        .issue(Issue.builder().number(7).build())
+                        .build())
+                .build());
+        assertNull(Shadows.shadowOf(mActivity).getNextStartedActivity());
+    }
+
+    @Test
+    public void onAddData_emptyData_skipsFilterLoop() throws Exception {
+        // L542：空集合时过滤循环一次也不进；L548：hasBad 为假，不走过滤分支。
+        TestEventFragment f = attach();
+        @SuppressWarnings("unchecked")
+        RootAdapter<GitHubEvent, ?> adapter = mock(RootAdapter.class);
+        f.onAddData(adapter, java.util.Collections.emptyList());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.Collection<GitHubEvent>> captor =
+                ArgumentCaptor.forClass(java.util.Collection.class);
+        verify(adapter).addAll(captor.capture());
+        assertEquals(0, captor.getValue().size());
+    }
+
+    @Test
+    public void onAddData_allGoodData_skipsFilter() throws Exception {
+        // L548：全部事件 type 非空 → hasBad 为假，过滤分支不走，原样透传。
+        TestEventFragment f = attach();
+        @SuppressWarnings("unchecked")
+        RootAdapter<GitHubEvent, ?> adapter = mock(RootAdapter.class);
+        GitHubEvent valid = event(GitHubEventType.IssuesEvent,
+                IssuesPayload.builder()
+                        .issue(Issue.builder().number(7).build())
+                        .build());
+        f.onAddData(adapter, java.util.Collections.singletonList(valid));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.Collection<GitHubEvent>> captor =
+                ArgumentCaptor.forClass(java.util.Collection.class);
+        verify(adapter).addAll(captor.capture());
+        assertEquals(1, captor.getValue().size());
+        assertEquals(valid, captor.getValue().iterator().next());
+    }
+
+    @Test
+    public void enrichPullRequestEvents_attachedWithAdapter_scansNewItems()
+            throws Exception {
+        // L591/L596-601：已 attach 且 mAdapter 非空 → 扫描体跑过；
+        // 非 PR 事件在 enrichSingle 里直接返回，不发网络。
+        TestEventFragment f = attach();
+        com.gh4a.adapter.EventAdapter adapter =
+                mock(com.gh4a.adapter.EventAdapter.class);
+        GitHubEvent e = event(GitHubEventType.IssuesEvent,
+                IssuesPayload.builder()
+                        .issue(Issue.builder().number(7).build())
+                        .build());
+        when(adapter.getCount()).thenReturn(1);
+        when(adapter.getItem(0)).thenReturn(e);
+        setField(f, "mAdapter", adapter);
+        java.lang.reflect.Method m = EventListFragment.class.getDeclaredMethod(
+                "enrichPullRequestEvents");
+        m.setAccessible(true);
+        m.invoke(f);
+        assertEquals(1, field(f, "mEnrichmentScannedCount"));
+        assertTrue(((java.util.Set<?>) field(f, "mEnrichmentInFlight")).isEmpty());
+    }
+
+    @Test
+    public void enrichSinglePullRequestEvent_successOnDetachedFragment_isNoop()
+            throws Exception {
+        // L636：成功响应到达时 fragment 从未 attach → !isAdded() 返回，
+        // 不写缓存、不刷新。注意与已有的 detachedOnResponse 测试不同：
+        // 那个测试先 removeFragment，onDestroyView 会 dispose 掉订阅，
+        // 回调根本跑不到；这里用从未 attach 的 fragment，订阅保持有效，
+        // inFlight 里的 id 被回调第一行清掉即证明回调确实跑过。
+        TestEventFragment f = new TestEventFragment();
+        io.reactivex.subjects.SingleSubject<Response<PullRequest>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        PullRequestService service = mockPrService(subject);
+        try (MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockPrServiceStatic(service)) {
+            callEnrich(f, prEvent(PullRequest.builder().number(5).build()));
+            assertTrue(((java.util.Set<?>) field(f, "mEnrichmentInFlight"))
+                    .contains("evt-1"));
+            subject.onSuccess(Response.success(
+                    PullRequest.builder().number(5).commits(2).build()));
+            waitUntil(() -> !((java.util.Set<?>) fieldUnchecked(f, "mEnrichmentInFlight"))
+                    .contains("evt-1"));
+            assertFalse(((java.util.Map<?, ?>) field(f, "mEnrichedPullRequests"))
+                    .containsKey("evt-1"));
         }
     }
 }

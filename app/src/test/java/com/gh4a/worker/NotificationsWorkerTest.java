@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters;
 import com.gh4a.fragment.SettingsFragment;
 import com.gh4a.model.NotificationHolder;
 import com.gh4a.model.NotificationListLoadResult;
+import com.gh4a.utils.AvatarHandler;
 import com.gh4a.utils.SingleFactory;
 import com.meisolsson.githubsdk.model.NotificationSubject;
 import com.meisolsson.githubsdk.model.NotificationThread;
@@ -31,6 +32,8 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.reactivex.Single;
 import okhttp3.ResponseBody;
@@ -42,6 +45,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -269,6 +273,34 @@ public class NotificationsWorkerTest {
             Set<String> ids = prefs().getStringSet(KEY_LAST_REPO_IDS, null);
             assertNotNull(ids);
             assertTrue(ids.contains("123"));
+        }
+    }
+
+    // 原名 doWork_prefetchAvatarThrows_silentlyContinues；设计假设不成立，
+    // 已改写（见 D2-2）：Mockito 的 mockStatic 是线程局部的，预取线程跑的
+    // 是真实 AvatarHandler（owner id 为 null 时直接返回 null，不抛错、
+    // 不联网），而 stub 的第一个答案（抛错）被主线程显示路径
+    // loadRoundUserAvatar 消费，该处无 try-catch，异常直出 doWork。
+    // 本测试钉住可测行为：预取返回 null 时 doWork 仍成功并发 1 条通知；
+    // L527 catch 分支因上述原因在单测里不可触发，见报告。
+    @Test
+    public void doWork_prefetchAvatarNull_continuesAndShowsNotification() {
+        grantNotifications();
+        Date now = new Date(System.currentTimeMillis());
+        NotificationListLoadResult result = oneGroupResult(now);
+        try (MockedStatic<SingleFactory> mocked = mockStatic(SingleFactory.class);
+             MockedStatic<AvatarHandler> avatars = mockStatic(AvatarHandler.class)) {
+            mocked.when(() -> SingleFactory.getNotifications(false, false, false))
+                    .thenReturn(Single.just(result));
+            // 预取线程跑真实方法（id 为 null 直接返回 null）；显示路径走 mock。
+            avatars.when(() -> AvatarHandler.loadUserAvatarSynchronously(any(), any()))
+                    .thenReturn(null);
+            assertEquals(ListenableWorker.Result.success(), worker().doWork());
+            assertTrue(prefs().getLong(KEY_LAST_CHECK, 0) > 0);
+            // 2 条：汇总通知（id 0）+ 仓库通知（id 123）。第 1 轮写的是 1，
+            // 但该断言从未跑到（测试在 doWork() 处即抛错），同文件另一测试
+            // （L443）对单组 doWork 断言的也是 2。
+            assertEquals(2, postedNotificationCount());
         }
     }
 
@@ -603,6 +635,86 @@ public class NotificationsWorkerTest {
             assertEquals(ListenableWorker.Result.success(), worker().doWork());
             assertEquals(2, postedNotificationCount());
         }
+    }
+
+
+    // L537-538（第 3 轮再试，确定性写法）：latch.await 的 InterruptedException。
+    // 思路——预取线程跑真实 AvatarHandler.loadUserAvatarSynchronously，
+    // owner id 非 null 时必进 loadBitmapFromCache，后者先拿 AvatarHandler.class
+    // 锁；辅助线程先占住这把锁，预取线程就卡在锁上、latch 永远不归零，调用
+    // 线程必定停在 latch.await 里。辅助线程轮询调用线程栈，看到 await 帧
+    // （且栈里同时有 prefetchRepoAvatars 帧——RxJava blockingGet 里也有一个
+    // 短暂的 CountDownLatch.await，不能只认 await）后先中断调用线程、再放锁：
+    // 放锁前 latch 不可能归零，所以中断必定先于 await 正常返回到达，无竞态。
+    // 第 1 版经 doWork() 调：辅助线程确实看到了 await、中断已送达，但
+    // doWork() 走完后中断标志已不在（下游显示路径某处清掉了标志），断言失败；
+    // 本版直接反射调私有 prefetchRepoAvatars，在 catch 返回后立即读标志，
+    // 不经过下游代码。头像 fetch 本身走真实网络失败路径（与既存
+    // doWork_ownerWithRealAvatarId_postsNotification 同款，离线环境下快速
+    // IOException -> null），不依赖网络成功；catch（L537）恢复中断标志
+    // （L538）后方法即返回，断言 Thread.interrupted() 为 true 即证明
+    // L538 执行过（同时清标志，不污染同 JVM 里的后续测试）。
+    @Test(timeout = 120000)
+    public void prefetchRepoAvatars_interrupted_restoresInterruptFlag() throws Exception {
+        Date now = new Date(System.currentTimeMillis());
+        Repository r = repo(123L, ownerWithId(1L));
+        java.util.List<java.util.List<NotificationThread>> grouped = Collections.singletonList(
+                Collections.singletonList(thread(r, now)));
+        java.lang.reflect.Method prefetch = NotificationsWorker.class
+                .getDeclaredMethod("prefetchRepoAvatars", java.util.List.class);
+        prefetch.setAccessible(true);
+        final Thread testThread = Thread.currentThread();
+        final CountDownLatch lockAcquired = new CountDownLatch(1);
+        final AtomicBoolean helperSawAwait = new AtomicBoolean(false);
+        Thread helper = new Thread(() -> {
+            synchronized (AvatarHandler.class) {
+                lockAcquired.countDown();
+                long deadline = System.currentTimeMillis() + 10000;
+                boolean seen = false;
+                while (System.currentTimeMillis() < deadline) {
+                    boolean hasAwait = false, hasPrefetch = false;
+                    for (StackTraceElement e : testThread.getStackTrace()) {
+                        if (e.getClassName().equals("java.util.concurrent.CountDownLatch")
+                                && e.getMethodName().equals("await")) {
+                            hasAwait = true;
+                        }
+                        if (e.getClassName().endsWith("NotificationsWorker")
+                                && e.getMethodName().equals("prefetchRepoAvatars")) {
+                            hasPrefetch = true;
+                        }
+                    }
+                    if (hasAwait && hasPrefetch) {
+                        seen = true;
+                        break;
+                    }
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException ignored) {
+                        return;
+                    }
+                }
+                helperSawAwait.set(seen);
+                if (seen) {
+                    // 先中断、再放锁（出 synchronized 块才放锁）。
+                    testThread.interrupt();
+                }
+            }
+        }, "prefetch-interrupt-helper");
+        helper.start();
+        assertTrue("helper did not acquire AvatarHandler lock in time",
+                lockAcquired.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        boolean wasInterrupted;
+        try {
+            prefetch.invoke(worker(), grouped);
+            // L538 恢复的中断标志；读一次即清掉，不污染后续测试。
+            wasInterrupted = Thread.interrupted();
+        } finally {
+            Thread.interrupted();
+            helper.join(15000);
+        }
+        assertTrue("helper never observed latch.await inside prefetchRepoAvatars",
+                helperSawAwait.get());
+        assertTrue("interrupt flag was not restored (L538 did not run)", wasInterrupted);
     }
 
 

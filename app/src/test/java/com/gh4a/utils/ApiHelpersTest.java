@@ -37,6 +37,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
@@ -892,4 +893,11 @@ public class ApiHelpersTest {
         observer.assertNoErrors();
         observer.assertValue(java.util.Optional.empty());
     }
+    // ---- normalizeUri：L225-226（path == null 时原样返回）在测试环境下
+    // 不可达，已删第 1 轮的 normalizeUri_nullPathReturnsAsIs：只有 authority
+    // 没有 path 的 URI 在 Robolectric 下 getPath() 返回 "" 而非 null，于是
+    // normalizeUri 照常把 api.github.com 削成 github.com（与已有的
+    // normalizeUri_apiHostOnlyStripsPrefix 断言一致）。 opaque URI（path
+    // 为 null 的唯一情形）的 authority 恒为 null，早在 L218 就返回了。
+
 }

@@ -19,6 +19,7 @@ import org.robolectric.RobolectricTestRunner;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -485,6 +486,21 @@ public class SettingsFragmentTest {
                 f.findPreference(SettingsFragment.KEY_MIRROR_PRESET);
         assertNotNull(pref);
         pref.setValue("");
+        call(f, "refreshMirrorPresetSummary", new Class<?>[]{});
+        assertEquals("", pref.getSummary().toString());
+    }
+
+    @Test
+    public void refreshMirrorPresetSummary_nullValueClearsSummary() throws Exception {
+        // L363：v == null 真臂——直接 setValue(null) 驱动（新鲜挂载拿不到
+        // null：同一 JVM 内别的测试已把值持久化进 SharedPreferences，
+        // ListPreference 绑定时会读回它）。与空串臂互补。
+        SettingsFragment f = attach(R.xml.settings);
+        androidx.preference.ListPreference pref =
+                f.findPreference(SettingsFragment.KEY_MIRROR_PRESET);
+        assertNotNull(pref);
+        pref.setValue(null);
+        assertNull(pref.getValue());
         call(f, "refreshMirrorPresetSummary", new Class<?>[]{});
         assertEquals("", pref.getSummary().toString());
     }
@@ -1028,6 +1044,124 @@ public class SettingsFragmentTest {
         } catch (NullPointerException expected) {
             // 预期行为：空偏好无键可比，下一行即抛错
         }
+    }
+
+    @Test
+    public void restoreLauncher_callbackDetachedWithUri_isNoop() throws Exception {
+        // L111：文档选择器返回 uri 但 fragment 已脱离时不弹恢复确认框。
+        // 回调在 onDestroy 时随 registry 注销，直接调 lambda 本身：
+        // 唯一单参 Uri 的 lambda 就是 mRestoreLauncher 的回调。
+        SettingsFragment f = attachResumed(R.xml.settings);
+        mActivity.getSupportFragmentManager().beginTransaction().remove(f).commitNow();
+        assertFalse(f.isAdded());
+        java.lang.reflect.Method lambda = null;
+        for (java.lang.reflect.Method m : SettingsFragment.class.getDeclaredMethods()) {
+            if (m.getName().startsWith("lambda$")
+                    && m.getParameterTypes().length == 1
+                    && m.getParameterTypes()[0] == android.net.Uri.class) {
+                lambda = m;
+                break;
+            }
+        }
+        assertNotNull(lambda);
+        int before = org.robolectric.shadows.ShadowDialog.getShownDialogs().size();
+        lambda.setAccessible(true);
+        lambda.invoke(f, android.net.Uri.parse("content://com.example/backup.json"));
+        idle();
+        assertEquals(before,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void refreshMirrorPresetSummary_withUrlValue_showsHost() throws Exception {
+        // L363：镜像预设值非空时摘要显示 displayHost(v)。
+        SettingsFragment f = attach(R.xml.settings);
+        MirrorPresetPreference pref =
+                f.findPreference(SettingsFragment.KEY_MIRROR_PRESET);
+        assertNotNull(pref);
+        pref.setValue("https://mirror.example.com/api");
+        call(f, "refreshMirrorPresetSummary", new Class<?>[]{});
+        assertEquals("mirror.example.com", pref.getSummary().toString());
+    }
+
+    @Test
+    public void doRestore_successWithNullListener_skipsThemeRefresh() throws Exception {
+        // L450：恢复成功但 mListener 为 null 时不回调 onThemeChanged。
+        SettingsFragment f = attach(R.xml.settings);
+        setField(f, "mListener", null);
+        android.net.Uri uri = android.net.Uri.parse("content://com.example/backup.json");
+        try (org.mockito.MockedStatic<com.gh4a.utils.Background> bg =
+                     mockBackgroundImmediate();
+             org.mockito.MockedStatic<com.gh4a.utils.SettingsBackupManager> mgr =
+                     org.mockito.Mockito.mockStatic(
+                             com.gh4a.utils.SettingsBackupManager.class);
+             org.mockito.MockedStatic<com.gh4a.utils.DarkModeScheduler> sched =
+                     org.mockito.Mockito.mockStatic(
+                             com.gh4a.utils.DarkModeScheduler.class)) {
+            mgr.when(() -> com.gh4a.utils.SettingsBackupManager.readBackupFile(
+                            org.mockito.ArgumentMatchers.any(Context.class),
+                            org.mockito.ArgumentMatchers.eq(uri)))
+                    .thenReturn(new org.json.JSONObject());
+            mgr.when(() -> com.gh4a.utils.SettingsBackupManager.applyBackup(
+                            org.mockito.ArgumentMatchers.any(Context.class),
+                            org.mockito.ArgumentMatchers.any(
+                                    org.json.JSONObject.class)))
+                    .thenReturn(true);
+            call(f, "doRestore", new Class<?>[]{android.net.Uri.class}, uri);
+            idle();
+            assertEquals(mContext.getString(R.string.restore_success),
+                    org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+            assertEquals(0, mActivity.themeChangedCalls);
+        }
+    }
+
+    @Test
+    public void aboutDialog_repoButtonStartsRepositoryActivity() {
+        // L573：关于对话框的 btn_gh4a 打开仓库页。
+        com.gh4a.Gh4Application.get().addAccount(
+                com.meisolsson.githubsdk.model.User.builder()
+                        .login("octocat").id(1L).build(), "token-xyz");
+        SettingsFragment f = attachResumed(R.xml.settings);
+        Preference about = f.findPreference("about");
+        assertTrue(f.onPreferenceClick(about));
+        f.getChildFragmentManager().executePendingTransactions();
+        SettingsFragment.AboutDialogFragment dialogFragment =
+                (SettingsFragment.AboutDialogFragment)
+                        f.getChildFragmentManager().findFragmentByTag("about");
+        assertNotNull(dialogFragment);
+        android.app.Dialog dialog = dialogFragment.getDialog();
+        assertNotNull(dialog);
+        dialog.findViewById(R.id.btn_gh4a).performClick();
+        android.content.Intent repoIntent =
+                org.robolectric.Shadows.shadowOf(mActivity).getNextStartedActivity();
+        assertNotNull(repoIntent);
+        assertEquals(com.gh4a.activities.RepositoryActivity.class.getName(),
+                repoIntent.getComponent().getClassName());
+    }
+
+    @Test
+    public void aboutDialog_unmatchedButtonId_doesNothing() {
+        // L573：onClick 的三个 id 分支都不匹配时静默返回（else-if 链末尾的
+        // fall-through 臂）。对话框只给三个按钮挂了监听，只能直接调其
+        // onClick（AboutDialog 实现 View.OnClickListener）。
+        com.gh4a.Gh4Application.get().addAccount(
+                com.meisolsson.githubsdk.model.User.builder()
+                        .login("octocat").id(1L).build(), "token-xyz");
+        SettingsFragment f = attachResumed(R.xml.settings);
+        Preference about = f.findPreference("about");
+        assertTrue(f.onPreferenceClick(about));
+        f.getChildFragmentManager().executePendingTransactions();
+        SettingsFragment.AboutDialogFragment dialogFragment =
+                (SettingsFragment.AboutDialogFragment)
+                        f.getChildFragmentManager().findFragmentByTag("about");
+        assertNotNull(dialogFragment);
+        android.app.Dialog dialog = dialogFragment.getDialog();
+        assertNotNull(dialog);
+        android.view.View other = mock(android.view.View.class);
+        when(other.getId()).thenReturn(R.id.copyright);
+        ((android.view.View.OnClickListener) dialog).onClick(other);
+        assertNull(org.robolectric.Shadows.shadowOf(mActivity)
+                .getNextStartedActivity());
     }
 
     private Object openSourceAdapter() throws Exception {

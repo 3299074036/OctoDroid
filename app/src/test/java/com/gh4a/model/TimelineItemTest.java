@@ -575,4 +575,12 @@ public class TimelineItemTest {
         assertNull(reply.getUser());
         assertNull(reply.getCreatedAt());
     }
+
+    @Test(expected = AssertionError.class)
+    public void getInitialTimelineComment_diffCommentsContainNull_throwsAssertionError() {
+        TimelineItem.Diff diff =
+                new TimelineItem.Diff(new TimelineItem.TimelineComment(diffComment()));
+        diff.comments.set(0, null);
+        diff.getInitialTimelineComment();
+    }
 }

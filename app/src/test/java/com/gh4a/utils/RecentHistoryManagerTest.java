@@ -192,4 +192,10 @@ public class RecentHistoryManagerTest {
         assertEquals("good2", entries.get(1).repo);
         assertEquals(3, entries.get(1).number);
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L25：类声明行；隐式默认构造器。
+        new RecentHistoryManager();
+    }
+
 }

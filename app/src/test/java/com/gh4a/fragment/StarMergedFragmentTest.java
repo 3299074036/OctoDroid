@@ -3133,7 +3133,10 @@ public class StarMergedFragmentTest {
             setField(f, "mListsGeneration", (int) field(f, "mListsGeneration") + 1);
             subject.onSuccess(java.util.Arrays.asList(
                     list("l1", "Group 1", java.util.Collections.emptyList())));
-            idle();
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mListsLoading")));
+            assertFalse((Boolean) field(f, "mListsLoading"));
             assertFalse((Boolean) field(f, "mListsLoaded"));
             assertNull(field(f, "mOfficialLists"));
         }
@@ -3150,7 +3153,10 @@ public class StarMergedFragmentTest {
             call(f, "loadOfficialLists", new Class<?>[]{boolean.class}, false);
             setField(f, "mListsGeneration", (int) field(f, "mListsGeneration") + 1);
             subject.onError(new RuntimeException("boom"));
-            idle();
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mListsLoading")));
+            assertFalse((Boolean) field(f, "mListsLoading"));
             assertFalse((Boolean) field(f, "mListsFailed"));
         }
     }
@@ -3168,7 +3174,10 @@ public class StarMergedFragmentTest {
             setField(f, "mStarredGeneration", (int) field(f, "mStarredGeneration") + 1);
             subject.onSuccess(Response.success(starredPage(
                     java.util.Arrays.asList(repo("a/b")), null)));
-            idle();
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mStarredLoading")));
+            assertFalse((Boolean) field(f, "mStarredLoading"));
             assertFalse((Boolean) field(f, "mStarredLoaded"));
             assertTrue(((java.util.List<?>) field(f, "mStarred")).isEmpty());
         }
@@ -3186,7 +3195,10 @@ public class StarMergedFragmentTest {
                     new Class<?>[]{boolean.class, boolean.class}, true, false);
             setField(f, "mStarredGeneration", (int) field(f, "mStarredGeneration") + 1);
             subject.onError(new RuntimeException("boom"));
-            idle();
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mStarredLoading")));
+            assertFalse((Boolean) field(f, "mStarredLoading"));
             assertFalse((Boolean) field(f, "mStarredFailed"));
         }
     }
@@ -3202,7 +3214,10 @@ public class StarMergedFragmentTest {
             call(f, "loadUpdates", new Class<?>[]{boolean.class}, false);
             setField(f, "mUpdatesGeneration", (int) field(f, "mUpdatesGeneration") + 1);
             subject.onSuccess(java.util.Arrays.asList(radar("o", "r1", 1L)));
-            idle();
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mUpdatesLoading")));
+            assertFalse((Boolean) field(f, "mUpdatesLoading"));
             assertFalse((Boolean) field(f, "mUpdatesLoaded"));
         }
     }
@@ -3218,7 +3233,10 @@ public class StarMergedFragmentTest {
             call(f, "loadUpdates", new Class<?>[]{boolean.class}, false);
             setField(f, "mUpdatesGeneration", (int) field(f, "mUpdatesGeneration") + 1);
             subject.onError(new RuntimeException("boom"));
-            idle();
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mUpdatesLoading")));
+            assertFalse((Boolean) field(f, "mUpdatesLoading"));
             assertFalse((Boolean) field(f, "mUpdatesFailed"));
         }
     }
@@ -3740,5 +3758,1349 @@ public class StarMergedFragmentTest {
             awaitCondition(() -> (Boolean) field(f, "mUpdatesLoaded"));
             assertEquals(1, starCount[0]);
         }
+    }
+
+    // ---- A 组补缺（2026-11-22）：StarMergedFragment 剩余分支 ----
+
+    private static Object newItem(int type) throws Exception {
+        Class<?> c = Class.forName("com.gh4a.fragment.StarMergedFragment$Item");
+        java.lang.reflect.Constructor<?> ctor = c.getDeclaredConstructor();
+        ctor.setAccessible(true);
+        Object item = ctor.newInstance();
+        java.lang.reflect.Field tf = c.getDeclaredField("type");
+        tf.setAccessible(true);
+        tf.setInt(item, type);
+        return item;
+    }
+
+    private static void setItemField(Object item, String name, Object value)
+            throws Exception {
+        java.lang.reflect.Field fld = item.getClass().getDeclaredField(name);
+        fld.setAccessible(true);
+        fld.set(item, value);
+    }
+
+    private static RecyclerView.OnScrollListener scrollListener(
+            StarMergedFragment f) throws Exception {
+        RecyclerView rv = (RecyclerView) field(f, "mList");
+        java.lang.reflect.Field lf =
+                RecyclerView.class.getDeclaredField("mScrollListeners");
+        lf.setAccessible(true);
+        java.util.List<RecyclerView.OnScrollListener> listeners =
+                (java.util.List<RecyclerView.OnScrollListener>) lf.get(rv);
+        assertEquals(1, listeners.size());
+        return listeners.get(0);
+    }
+
+    private static ItemTouchHelper.Callback sortCallback(
+            StarMergedFragment f) throws Exception {
+        ItemTouchHelper helper = (ItemTouchHelper) field(f, "mSortTouchHelper");
+        assertNotNull(helper);
+        java.lang.reflect.Field cbField =
+                ItemTouchHelper.class.getDeclaredField("mCallback");
+        cbField.setAccessible(true);
+        return (ItemTouchHelper.Callback) cbField.get(helper);
+    }
+
+    private StarMergedFragment attachResumedLogin(String login) {
+        mActivity.setTheme(com.gh4a.R.style.AppTheme);
+        StarMergedFragment f = StarMergedFragment.newInstance(login);
+        mActivity.getSupportFragmentManager().beginTransaction().add(f, "test")
+                .setMaxLifecycle(f, Lifecycle.State.RESUMED).commitNow();
+        return f;
+    }
+
+    /** onCreateView 里 UserListsCache 回填的成功回调 lambda（单参 List）。 */
+    private static java.lang.reflect.Method cacheCallbackMethod() throws Exception {
+        for (java.lang.reflect.Method m :
+                StarMergedFragment.class.getDeclaredMethods()) {
+            if (m.getName().startsWith("lambda$onCreateView")
+                    && m.getParameterTypes().length == 1
+                    && m.getParameterTypes()[0] == java.util.List.class) {
+                m.setAccessible(true);
+                return m;
+            }
+        }
+        throw new IllegalStateException("cache callback lambda not found");
+    }
+
+    @Test
+    public void scrollListener_whileLoadingDoesNotLoad() throws Exception {
+        // L287：!mStarredLoading 为假时滚动不触发加载。
+        Single<Response<Page<Repository>>> page1 = Single.just(Response.success(
+                starredPage(java.util.Arrays.asList(repo("a/b"), repo("c/d")), 2)));
+        try (MockedStatic<UserListsGraphQL> mockedLists = mockListsFetch(Single.just(
+                java.util.Arrays.asList(
+                        list("l1", "Group 1", java.util.Collections.emptyList()))));
+             MockedStatic<com.gh4a.ServiceFactory> mockedFactory =
+                     mockStarring(starringService(page1));
+             MockedStatic<RadarGraphQL> mockedRadar =
+                     mockRadarFetch(Single.just(java.util.Collections.emptyList()))) {
+            StarMergedFragment f = attachResumed();
+            awaitCondition(() -> (Boolean) field(f, "mStarredLoaded"));
+            setField(f, "mCurrentTab", 1);
+            ((java.util.List<?>) field(f, "mItems")).clear();
+            setField(f, "mStarredLoading", true);
+            setField(f, "mStarredHasMore", true);
+            scrollListener(f).onScrolled((RecyclerView) field(f, "mList"), 0, 10);
+            Thread.sleep(300);
+            idle();
+            assertEquals(2, ((java.util.List<?>) field(f, "mStarred")).size());
+        }
+    }
+
+    @Test
+    public void scrollListener_farFromEndDoesNotLoad() throws Exception {
+        // L287：last < mItems.size() - 8 时滚动不触发加载
+        // （Robolectric 下 RecyclerView 未真实布局，last 为 NO_POSITION）。
+        Single<Response<Page<Repository>>> page1 = Single.just(Response.success(
+                starredPage(java.util.Arrays.asList(repo("a/b"), repo("c/d")), 2)));
+        try (MockedStatic<UserListsGraphQL> mockedLists = mockListsFetch(Single.just(
+                java.util.Arrays.asList(
+                        list("l1", "Group 1", java.util.Collections.emptyList()))));
+             MockedStatic<com.gh4a.ServiceFactory> mockedFactory =
+                     mockStarring(starringService(page1));
+             MockedStatic<RadarGraphQL> mockedRadar =
+                     mockRadarFetch(Single.just(java.util.Collections.emptyList()))) {
+            StarMergedFragment f = attachResumed();
+            awaitCondition(() -> (Boolean) field(f, "mStarredLoaded"));
+            setField(f, "mCurrentTab", 1);
+            java.util.List<Object> items = (java.util.List<Object>) field(f, "mItems");
+            items.clear();
+            for (int i = 0; i < 12; i++) {
+                items.add(newItem(typeConst("TYPE_STARRED_REPO")));
+            }
+            // 高度压到 0 确保没有任何子项可见（last 为 NO_POSITION）
+            RecyclerView rv = (RecyclerView) field(f, "mList");
+            rv.measure(
+                    View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.EXACTLY));
+            rv.layout(0, 0, 1080, 0);
+            setField(f, "mStarredLoading", false);
+            setField(f, "mStarredHasMore", true);
+            scrollListener(f).onScrolled(rv, 0, 10);
+            Thread.sleep(300);
+            idle();
+            assertEquals(2, ((java.util.List<?>) field(f, "mStarred")).size());
+        }
+    }
+
+    @Test
+    public void onCreateView_nullLoginSkipsCacheBlock() throws Exception {
+        // L342：mLogin 为 null 时跳过缓存回填块（空登录守卫随后失败态）。
+        try (MockedStatic<UserListsGraphQL> mockedLists =
+                     mockListsFetch(Single.never());
+             MockedStatic<com.gh4a.ServiceFactory> mockedFactory =
+                     mockStarring(starringService(Single.never()));
+             MockedStatic<RadarGraphQL> mockedRadar =
+                     mockRadarFetch(Single.never())) {
+            StarMergedFragment f = attachResumedLogin(null);
+            assertNull(field(f, "mLogin"));
+            assertTrue((Boolean) field(f, "mListsFailed"));
+            assertNotNull(field(f, "mList"));
+        }
+    }
+
+    @Test
+    public void cacheCallback_detachedReturnsEarly() throws Exception {
+        // L357：未挂载时缓存回调直接返回。
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        java.lang.reflect.Method cb = cacheCallbackMethod();
+        cb.invoke(f, java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList())));
+        assertNull(field(f, "mOfficialLists"));
+    }
+
+    @Test
+    public void cacheCallback_nullCachedReturnsEarly() throws Exception {
+        // L357：缓存为 null 时回调直接返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        java.lang.reflect.Method cb = cacheCallbackMethod();
+        cb.invoke(f, (Object) null);
+        assertNull(field(f, "mOfficialLists"));
+    }
+
+    @Test
+    public void cacheCallback_alreadyLoadedReturnsEarly() throws Exception {
+        // L357：mListsLoaded 已真时缓存回调直接返回（不覆盖新鲜数据）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mListsLoaded", true);
+        java.lang.reflect.Method cb = cacheCallbackMethod();
+        cb.invoke(f, java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList())));
+        assertNull(field(f, "mOfficialLists"));
+    }
+
+    @Test
+    public void cacheCallback_nonListsTabSkipsRebuild() throws Exception {
+        // L357 全假 + L370：当前页不是分组页时缓存回填后不 rebuild。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 1);
+        java.lang.reflect.Method cb = cacheCallbackMethod();
+        cb.invoke(f, java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()),
+                list("l2", "Group 2", java.util.Collections.emptyList())));
+        assertEquals(2, ((java.util.List<?>) field(f, "mOfficialLists")).size());
+        assertFalse((Boolean) field(f, "mListsFailed"));
+        assertTrue(((java.util.List<?>) field(f, "mItems")).isEmpty());
+    }
+
+    @Test
+    public void onCreateView_restoredUpdatesLoadedNullCacheSkips() throws Exception {
+        // L380：恢复态 star_updates_loaded=true 但 RadarCache 为空时不恢复。
+        Bundle saved = new Bundle();
+        saved.putBoolean("star_updates_loaded", true);
+        try (MockedStatic<UserListsGraphQL> mockedLists =
+                     mockListsFetch(Single.never());
+             MockedStatic<com.gh4a.ServiceFactory> mockedFactory =
+                     mockStarring(starringService(Single.never()));
+             MockedStatic<RadarGraphQL> mockedRadar =
+                     mockRadarFetch(Single.never())) {
+            StarMergedFragment f = attachResumedWithSavedState(saved);
+            assertNull(field(f, "mUpdates"));
+            assertFalse((Boolean) field(f, "mUpdatesLoaded"));
+        }
+    }
+
+    @Test
+    public void cancelListsRequest_disposedDisposableSkipsDispose() throws Exception {
+        // L467：disposable 已 dispose 时只清字段、不再调 dispose。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        io.reactivex.disposables.Disposable d =
+                org.mockito.Mockito.mock(io.reactivex.disposables.Disposable.class);
+        org.mockito.Mockito.when(d.isDisposed()).thenReturn(true);
+        int gen = (int) field(f, "mListsGeneration");
+        setField(f, "mListsLoading", true);
+        setField(f, "mListsDisposable", d);
+        call(f, "cancelListsRequest", new Class<?>[]{});
+        org.mockito.Mockito.verify(d, org.mockito.Mockito.never()).dispose();
+        assertNull(field(f, "mListsDisposable"));
+        assertFalse((Boolean) field(f, "mListsLoading"));
+        assertEquals(gen + 1, (int) field(f, "mListsGeneration"));
+    }
+
+    @Test
+    public void cancelStarredRequest_disposedDisposableSkipsDispose() throws Exception {
+        // L476：同上，Starred 页。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        io.reactivex.disposables.Disposable d =
+                org.mockito.Mockito.mock(io.reactivex.disposables.Disposable.class);
+        org.mockito.Mockito.when(d.isDisposed()).thenReturn(true);
+        int gen = (int) field(f, "mStarredGeneration");
+        setField(f, "mStarredLoading", true);
+        setField(f, "mStarredDisposable", d);
+        call(f, "cancelStarredRequest", new Class<?>[]{});
+        org.mockito.Mockito.verify(d, org.mockito.Mockito.never()).dispose();
+        assertNull(field(f, "mStarredDisposable"));
+        assertFalse((Boolean) field(f, "mStarredLoading"));
+        assertEquals(gen + 1, (int) field(f, "mStarredGeneration"));
+    }
+
+    @Test
+    public void cancelUpdatesRequest_disposedDisposableSkipsDispose() throws Exception {
+        // L485：同上，更新页。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        io.reactivex.disposables.Disposable d =
+                org.mockito.Mockito.mock(io.reactivex.disposables.Disposable.class);
+        org.mockito.Mockito.when(d.isDisposed()).thenReturn(true);
+        int gen = (int) field(f, "mUpdatesGeneration");
+        setField(f, "mUpdatesLoading", true);
+        setField(f, "mUpdatesDisposable", d);
+        call(f, "cancelUpdatesRequest", new Class<?>[]{});
+        org.mockito.Mockito.verify(d, org.mockito.Mockito.never()).dispose();
+        assertNull(field(f, "mUpdatesDisposable"));
+        assertFalse((Boolean) field(f, "mUpdatesLoading"));
+        assertEquals(gen + 1, (int) field(f, "mUpdatesGeneration"));
+    }
+
+    @Test
+    public void stopRefreshingFor_otherTabDoneAndIdleStops() throws Exception {
+        // L495：完成页不是刷新页、但三页均不在加载时也停转圈。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        androidx.swiperefreshlayout.widget.SwipeRefreshLayout swipe =
+                org.mockito.Mockito.mock(
+                        androidx.swiperefreshlayout.widget.SwipeRefreshLayout.class);
+        setField(f, "mSwipe", swipe);
+        setField(f, "mRefreshActive", true);
+        setField(f, "mRefreshTab", 0);
+        call(f, "stopRefreshingFor", new Class<?>[]{int.class}, 1);
+        org.mockito.Mockito.verify(swipe).setRefreshing(false);
+        assertFalse((Boolean) field(f, "mRefreshActive"));
+    }
+
+    @Test
+    public void stopRefreshingFor_otherTabDoneButListsLoadingKeeps() throws Exception {
+        // L495：完成页不是刷新页、且仍有页在加载时不停转圈。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        androidx.swiperefreshlayout.widget.SwipeRefreshLayout swipe =
+                org.mockito.Mockito.mock(
+                        androidx.swiperefreshlayout.widget.SwipeRefreshLayout.class);
+        setField(f, "mSwipe", swipe);
+        setField(f, "mRefreshActive", true);
+        setField(f, "mRefreshTab", 0);
+        setField(f, "mListsLoading", true);
+        call(f, "stopRefreshingFor", new Class<?>[]{int.class}, 1);
+        org.mockito.Mockito.verify(swipe, org.mockito.Mockito.never())
+                .setRefreshing(org.mockito.ArgumentMatchers.anyBoolean());
+        assertTrue((Boolean) field(f, "mRefreshActive"));
+    }
+
+    @Test
+    public void stopRefreshingFor_otherTabDoneButUpdatesLoadingKeeps() throws Exception {
+        // L495：同上，更新页仍在加载时不停转圈。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        androidx.swiperefreshlayout.widget.SwipeRefreshLayout swipe =
+                org.mockito.Mockito.mock(
+                        androidx.swiperefreshlayout.widget.SwipeRefreshLayout.class);
+        setField(f, "mSwipe", swipe);
+        setField(f, "mRefreshActive", true);
+        setField(f, "mRefreshTab", 0);
+        setField(f, "mUpdatesLoading", true);
+        call(f, "stopRefreshingFor", new Class<?>[]{int.class}, 1);
+        org.mockito.Mockito.verify(swipe, org.mockito.Mockito.never())
+                .setRefreshing(org.mockito.ArgumentMatchers.anyBoolean());
+        assertTrue((Boolean) field(f, "mRefreshActive"));
+    }
+
+    @Test
+    public void loadCurrentTab_updatesTabLoadsUpdates() throws Exception {
+        // L558：当前页是更新页时 loadCurrentTab 走 loadUpdates。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 2);
+        setField(f, "mLogin", null);
+        call(f, "loadCurrentTab", new Class<?>[]{});
+        assertTrue((Boolean) field(f, "mUpdatesFailed"));
+    }
+
+    @Test
+    public void refreshCurrentTab_updatesTabLoadsUpdates() throws Exception {
+        // L595：下拉刷新更新页时走 loadUpdates(true)。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 2);
+        setField(f, "mLogin", null);
+        call(f, "refreshCurrentTab", new Class<?>[]{});
+        assertEquals(2, field(f, "mRefreshTab"));
+        assertTrue((Boolean) field(f, "mRefreshActive"));
+        assertTrue((Boolean) field(f, "mUpdatesFailed"));
+    }
+
+    @Test
+    public void prefetchOtherTabs_forceSkipsPagedStarred() throws Exception {
+        // L617：强制预取时 Star 页已翻到第 2 页之后则跳过该页。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 0);
+        setField(f, "mStarredLoaded", true);
+        setField(f, "mStarredPage", 3);
+        StarringService service = org.mockito.Mockito.mock(StarringService.class);
+        try (MockedStatic<UserListsGraphQL> mockedLists = mockListsFetch(Single.just(
+                java.util.Arrays.asList(
+                        list("l1", "Group 1", java.util.Collections.emptyList()))));
+             MockedStatic<com.gh4a.ServiceFactory> mockedFactory =
+                     mockStarring(service);
+             MockedStatic<RadarGraphQL> mockedRadar =
+                     mockRadarFetch(Single.just(java.util.Collections.emptyList()))) {
+            org.mockito.Mockito.when(service.getStarredRepositories(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyLong()))
+                    .thenReturn(Single.never());
+            call(f, "prefetchOtherTabs", new Class<?>[]{boolean.class}, true);
+            awaitCondition(() -> (Boolean) field(f, "mListsLoaded"));
+            awaitCondition(() -> (Boolean) field(f, "mUpdatesLoaded"));
+            assertTrue((Boolean) field(f, "mStarredLoaded"));
+            org.mockito.Mockito.verify(service, org.mockito.Mockito.never())
+                    .getStarredRepositories(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyLong());
+        }
+    }
+
+    @Test
+    public void prefetchOtherTabs_noForceSkipsLoadedStarred() throws Exception {
+        // L623：非强制预取时已加载的 Star 页跳过。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 0);
+        setField(f, "mStarredLoaded", true);
+        StarringService service = org.mockito.Mockito.mock(StarringService.class);
+        try (MockedStatic<UserListsGraphQL> mockedLists = mockListsFetch(Single.just(
+                java.util.Arrays.asList(
+                        list("l1", "Group 1", java.util.Collections.emptyList()))));
+             MockedStatic<com.gh4a.ServiceFactory> mockedFactory =
+                     mockStarring(service);
+             MockedStatic<RadarGraphQL> mockedRadar =
+                     mockRadarFetch(Single.just(java.util.Collections.emptyList()))) {
+            org.mockito.Mockito.when(service.getStarredRepositories(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyLong()))
+                    .thenReturn(Single.never());
+            call(f, "prefetchOtherTabs", new Class<?>[]{boolean.class}, false);
+            awaitCondition(() -> (Boolean) field(f, "mListsLoaded"));
+            awaitCondition(() -> (Boolean) field(f, "mUpdatesLoaded"));
+            org.mockito.Mockito.verify(service, org.mockito.Mockito.never())
+                    .getStarredRepositories(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyLong());
+        }
+    }
+
+    @Test
+    public void prefetchOtherTabs_noForceSkipsLoadedUpdates() throws Exception {
+        // L631：非强制预取时已加载的更新页跳过。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 0);
+        setField(f, "mUpdatesLoaded", true);
+        try (MockedStatic<UserListsGraphQL> mockedLists = mockListsFetch(Single.just(
+                java.util.Arrays.asList(
+                        list("l1", "Group 1", java.util.Collections.emptyList()))));
+             MockedStatic<com.gh4a.ServiceFactory> mockedFactory =
+                     mockStarring(starringService(Single.never()));
+             MockedStatic<RadarGraphQL> mockedRadar =
+                     mockRadarFetch(Single.just(java.util.Collections.emptyList()))) {
+            call(f, "prefetchOtherTabs", new Class<?>[]{boolean.class}, false);
+            awaitCondition(() -> (Boolean) field(f, "mListsLoaded"));
+            mockedRadar.verify(() -> RadarGraphQL.fetch(
+                            org.mockito.ArgumentMatchers.anyString()),
+                    org.mockito.Mockito.times(0));
+        }
+    }
+
+    @Test
+    public void maybePrefetchAfterRefresh_otherTabDoesNotPrefetch() throws Exception {
+        // L639：完成页不是刷新页时不触发预取，标记保留。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mRefreshPendingPrefetch", true);
+        setField(f, "mRefreshTab", 0);
+        call(f, "maybePrefetchAfterRefresh", new Class<?>[]{int.class}, 1);
+        assertTrue((Boolean) field(f, "mRefreshPendingPrefetch"));
+    }
+
+    @Test
+    public void loadOfficialLists_nullLoginWithCachedListsKeepsCache() throws Exception {
+        // L649 + L653：空登录且已有缓存、当前页不是分组页时不重建。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        java.util.List<UserListsGraphQL.UserList> cached = new java.util.ArrayList<>(
+                java.util.Arrays.asList(
+                        list("l1", "Group 1", java.util.Collections.emptyList())));
+        setField(f, "mLogin", null);
+        setField(f, "mOfficialLists", cached);
+        setField(f, "mCurrentTab", 1);
+        call(f, "loadOfficialLists", new Class<?>[]{boolean.class}, false);
+        assertTrue((Boolean) field(f, "mListsFailed"));
+        assertEquals(cached, field(f, "mOfficialLists"));
+        assertTrue(((java.util.List<?>) field(f, "mItems")).isEmpty());
+    }
+
+    // ---- 迟到回调在未挂载时丢弃（L671/L693/L749/L776/L818/L836 的 !isAdded() 臂） ----
+    // 直接在未挂载的 Fragment 上起请求：世代一致、isAdded() 为假，回调走到 return。
+
+    @Test
+    public void loadOfficialLists_detachedSuccessIsDropped() throws Exception {
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        setField(f, "mLogin", "alice");
+        io.reactivex.subjects.SingleSubject<
+                java.util.List<UserListsGraphQL.UserList>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        try (MockedStatic<UserListsGraphQL> mocked = mockListsFetch(subject)) {
+            call(f, "loadOfficialLists", new Class<?>[]{boolean.class}, false);
+            subject.onSuccess(java.util.Arrays.asList(
+                    list("l1", "Group 1", java.util.Collections.emptyList())));
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mListsLoading")));
+            assertFalse((Boolean) field(f, "mListsLoading"));
+            assertFalse((Boolean) field(f, "mListsLoaded"));
+            assertNull(field(f, "mOfficialLists"));
+        }
+    }
+
+    @Test
+    public void loadOfficialLists_detachedErrorIsDropped() throws Exception {
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        setField(f, "mLogin", "alice");
+        io.reactivex.subjects.SingleSubject<
+                java.util.List<UserListsGraphQL.UserList>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        try (MockedStatic<UserListsGraphQL> mocked = mockListsFetch(subject)) {
+            call(f, "loadOfficialLists", new Class<?>[]{boolean.class}, false);
+            subject.onError(new RuntimeException("boom"));
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mListsLoading")));
+            assertFalse((Boolean) field(f, "mListsLoading"));
+            assertFalse((Boolean) field(f, "mListsFailed"));
+        }
+    }
+
+    @Test
+    public void loadStarredPage_detachedSuccessIsDropped() throws Exception {
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        setField(f, "mLogin", "alice");
+        io.reactivex.subjects.SingleSubject<Response<Page<Repository>>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        try (MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockStarring(starringService(subject))) {
+            call(f, "loadStarredPage",
+                    new Class<?>[]{boolean.class, boolean.class}, true, false);
+            subject.onSuccess(Response.success(starredPage(
+                    java.util.Arrays.asList(repo("a/b")), null)));
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mStarredLoading")));
+            assertFalse((Boolean) field(f, "mStarredLoading"));
+            assertFalse((Boolean) field(f, "mStarredLoaded"));
+            assertTrue(((java.util.List<?>) field(f, "mStarred")).isEmpty());
+        }
+    }
+
+    @Test
+    public void loadStarredPage_detachedErrorIsDropped() throws Exception {
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        setField(f, "mLogin", "alice");
+        io.reactivex.subjects.SingleSubject<Response<Page<Repository>>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        try (MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockStarring(starringService(subject))) {
+            call(f, "loadStarredPage",
+                    new Class<?>[]{boolean.class, boolean.class}, true, false);
+            subject.onError(new RuntimeException("boom"));
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mStarredLoading")));
+            assertFalse((Boolean) field(f, "mStarredLoading"));
+            assertFalse((Boolean) field(f, "mStarredFailed"));
+        }
+    }
+
+    @Test
+    public void loadUpdates_detachedSuccessIsDropped() throws Exception {
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        setField(f, "mLogin", "alice");
+        io.reactivex.subjects.SingleSubject<
+                java.util.List<ReleaseRadarFragment.RadarItem>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        try (MockedStatic<RadarGraphQL> mocked = mockRadarFetch(subject)) {
+            call(f, "loadUpdates", new Class<?>[]{boolean.class}, false);
+            subject.onSuccess(java.util.Arrays.asList(radar("o", "r1", 1L)));
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mUpdatesLoading")));
+            assertFalse((Boolean) field(f, "mUpdatesLoading"));
+            assertFalse((Boolean) field(f, "mUpdatesLoaded"));
+        }
+    }
+
+    @Test
+    public void loadUpdates_detachedErrorIsDropped() throws Exception {
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        setField(f, "mLogin", "alice");
+        io.reactivex.subjects.SingleSubject<
+                java.util.List<ReleaseRadarFragment.RadarItem>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        try (MockedStatic<RadarGraphQL> mocked = mockRadarFetch(subject)) {
+            call(f, "loadUpdates", new Class<?>[]{boolean.class}, false);
+            subject.onError(new RuntimeException("boom"));
+            // 回调经 IO 线程订阅 + 主线程投递，单次 idle() 不保证已跑完；
+            // 等回调首行的 loading 清零（守卫前执行）再断言丢弃，否则空转。
+            awaitCondition(() -> !((Boolean) field(f, "mUpdatesLoading")));
+            assertFalse((Boolean) field(f, "mUpdatesLoading"));
+            assertFalse((Boolean) field(f, "mUpdatesFailed"));
+        }
+    }
+
+    @Test
+    public void loadOfficialLists_errorOnOtherTabSkipsRebuild() throws Exception {
+        // L706：失败回调里当前页不是分组页时不 rebuild。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 1);
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     mockListsFetch(Single.error(new RuntimeException("boom")))) {
+            call(f, "loadOfficialLists", new Class<?>[]{boolean.class}, false);
+            awaitCondition(() -> (Boolean) field(f, "mListsFailed"));
+            assertTrue(((java.util.List<?>) field(f, "mItems")).isEmpty());
+        }
+    }
+
+    @Test
+    public void loadUpdates_errorKeepsExistingUpdates() throws Exception {
+        // L796：更新失败时已有列表保留不清空。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        java.util.List<ReleaseRadarFragment.RadarItem> kept =
+                new java.util.ArrayList<>(java.util.Arrays.asList(radar("o", "r1", 1L)));
+        setField(f, "mUpdates", kept);
+        try (MockedStatic<RadarGraphQL> mocked =
+                     mockRadarFetch(Single.error(new RuntimeException("boom")))) {
+            call(f, "loadUpdates", new Class<?>[]{boolean.class}, false);
+            awaitCondition(() -> (Boolean) field(f, "mUpdatesFailed"));
+            assertEquals(kept, field(f, "mUpdates"));
+        }
+    }
+
+    @Test
+    public void markUpdateRead_detachedIsNoop() throws Exception {
+        // L867：getActivity() 为 null 时直接返回。
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        setField(f, "mLogin", "alice");
+        call(f, "markUpdateRead",
+                new Class<?>[]{ReleaseRadarFragment.RadarItem.class}, radar("o", "r1", 1L));
+        assertFalse((Boolean) call(f, "isUpdateRead",
+                new Class<?>[]{ReleaseRadarFragment.RadarItem.class}, radar("o", "r1", 1L)));
+    }
+
+    @Test
+    public void markUpdateRead_nullLoginIsNoop() throws Exception {
+        // L867：mLogin 为 null 时直接返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mLogin", null);
+        call(f, "markUpdateRead",
+                new Class<?>[]{ReleaseRadarFragment.RadarItem.class}, radar("o", "r1", 1L));
+        assertFalse((Boolean) call(f, "isUpdateRead",
+                new Class<?>[]{ReleaseRadarFragment.RadarItem.class}, radar("o", "r1", 1L)));
+    }
+
+    @Test
+    public void markAllUpdatesRead_detachedIsNoop() throws Exception {
+        // L876：getActivity() 为 null 时直接返回。
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        setField(f, "mLogin", "alice");
+        setField(f, "mUpdates", new java.util.ArrayList<>(
+                java.util.Arrays.asList(radar("o", "r1", 1L))));
+        call(f, "markAllUpdatesRead", new Class<?>[]{});
+        assertFalse((Boolean) call(f, "isUpdateRead",
+                new Class<?>[]{ReleaseRadarFragment.RadarItem.class}, radar("o", "r1", 1L)));
+    }
+
+    @Test
+    public void markAllUpdatesRead_nullLoginIsNoop() throws Exception {
+        // L876：mLogin 为 null 时直接返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mLogin", null);
+        setField(f, "mUpdates", new java.util.ArrayList<>(
+                java.util.Arrays.asList(radar("o", "r1", 1L))));
+        call(f, "markAllUpdatesRead", new Class<?>[]{});
+        assertFalse((Boolean) call(f, "isUpdateRead",
+                new Class<?>[]{ReleaseRadarFragment.RadarItem.class}, radar("o", "r1", 1L)));
+    }
+
+    @Test
+    public void buildListsSection_failedWithFreshCacheShowsNoRetryRow() throws Exception {
+        // L942：缓存新鲜（年龄 < 阈值）时失败也不放重试行。
+        StarMergedFragment f = attachWithAdapter();
+        UserListsCache.save(mActivity, "alice", java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList())));
+        setField(f, "mOfficialLists", java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList())));
+        setField(f, "mListsFailed", true);
+        call(f, "buildListsSection", new Class<?>[]{});
+        assertEquals(typeConst("TYPE_LIST"), itemType(items(f).get(0)));
+        for (Object item : items(f)) {
+            assertFalse(itemBool(item, "retryLists"));
+        }
+    }
+
+    @Test
+    public void buildListsSection_sortModeWithNullSortListsShowsOnlyHintAndBar()
+            throws Exception {
+        // L1009：排序模式下 mSortLists 为 null 时只画提示行与底部栏。
+        StarMergedFragment f = attachWithAdapter();
+        setField(f, "mOfficialLists", new java.util.ArrayList<>());
+        setField(f, "mSortMode", true);
+        setField(f, "mSortLists", null);
+        call(f, "buildListsSection", new Class<?>[]{});
+        assertEquals(java.util.Arrays.asList(
+                typeConst("TYPE_SORT_HEADER"), typeConst("TYPE_ACTION_BAR")),
+                itemTypes(f));
+    }
+
+    @Test
+    public void buildStarredSection_emptyWhileLoadingShowsNothing() throws Exception {
+        // L1059：Star 列表为空但正在加载时不放状态行。
+        StarMergedFragment f = attachWithAdapter();
+        setField(f, "mCurrentTab", 1);
+        setField(f, "mStarredLoading", true);
+        call(f, "rebuild", new Class<?>[]{});
+        assertTrue(items(f).isEmpty());
+    }
+
+    @Test
+    public void openRepo_detachedIsNoop() throws Exception {
+        // L1112：getActivity() 为 null 时不跳转。
+        StarMergedFragment f = StarMergedFragment.newInstance("alice");
+        call(f, "openRepo", new Class<?>[]{String.class}, "octo/cat");
+        assertNull(org.robolectric.Shadows.shadowOf(mActivity)
+                .getNextStartedActivity());
+    }
+
+    @Test
+    public void officialListNames_nullListsReturnsEmpty() throws Exception {
+        // L1139：mOfficialLists 为 null 时返回空列表。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mOfficialLists", null);
+        Object names = call(f, "officialListNames", new Class<?>[]{});
+        assertTrue(((java.util.List<?>) names).isEmpty());
+    }
+
+    @Test
+    public void onCreateListNameConfirmed_createPlainRunsSingleOp() throws Exception {
+        // L1158：TAG_CREATE_PLAIN 时走 createList 单发操作。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        StarBatchMoveViewModel vm =
+                org.mockito.Mockito.mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        try (MockedStatic<UserListsGraphQL> mocked =
+                     org.mockito.Mockito.mockStatic(UserListsGraphQL.class)) {
+            mocked.when(() -> UserListsGraphQL.createList(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.anyBoolean()))
+                    .thenReturn(Single.just(
+                            list("l9", "New Group", java.util.Collections.emptyList())));
+            f.onCreateListNameConfirmed("create_plain", null, "New Group", false);
+            org.mockito.Mockito.verify(vm).runSingleOp(
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.eq(com.gh4a.R.string.star_list_created),
+                    org.mockito.ArgumentMatchers.eq(
+                            com.gh4a.R.string.star_list_create_failed),
+                    org.mockito.ArgumentMatchers.isNull());
+        }
+    }
+
+    @Test
+    public void onCreateListNameCancelled_isNoop() throws Exception {
+        // L1169：新建框取消无语义，直接返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        f.onCreateListNameCancelled("create_plain", null);
+    }
+
+    @Test
+    public void onAssignListsConfirmed_assignMoveStartsBatchMove() throws Exception {
+        // L1176：TAG_ASSIGN_MOVE 时批量移组。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        StarBatchMoveViewModel vm =
+                org.mockito.Mockito.mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        ((java.util.Set<String>) field(f, "mSelectedRepos")).add("a/b");
+        f.onAssignListsConfirmed("assign_move", "a/b",
+                java.util.Arrays.asList("l1"));
+        org.mockito.Mockito.verify(vm).start(
+                org.mockito.ArgumentMatchers.eq(
+                        new java.util.ArrayList<>(java.util.Arrays.asList("a/b"))),
+                org.mockito.ArgumentMatchers.eq(java.util.Arrays.asList("l1")));
+    }
+
+    @Test
+    public void onAssignListsCreateNew_assignMoveOpensCreateDialog() throws Exception {
+        // L1185：移组框里新建时打开建组对话框。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        f.onAssignListsCreateNew("assign_move", "a/b");
+        assertNotNull(latestDialog().findViewById(com.gh4a.R.id.et_list_name));
+    }
+
+    @Test
+    public void onAssignListsCancelled_isNoop() throws Exception {
+        // L1193：归属框取消无语义，直接返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        f.onAssignListsCancelled("assign_single", "a/b");
+    }
+
+    @Test
+    public void onTextInputConfirmed_nonRenameTagReturns() throws Exception {
+        // L1198/L1199：非改名 tag 时直接返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        StarBatchMoveViewModel vm =
+                org.mockito.Mockito.mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        f.onTextInputConfirmed("other_tag", "l1", "Old", "New");
+        org.mockito.Mockito.verifyNoInteractions(vm);
+    }
+
+    @Test
+    public void onTextInputConfirmed_emptyTextReturns() throws Exception {
+        // L1201：改名文本为空时直接返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        StarBatchMoveViewModel vm =
+                org.mockito.Mockito.mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        f.onTextInputConfirmed("rename", "l1", "Old", "");
+        org.mockito.Mockito.verifyNoInteractions(vm);
+    }
+
+    @Test
+    public void onRepoLongPressed_alreadyMultiSelectAddsRepo() throws Exception {
+        // L1320：已在多选模式时长按只加选，不重进模式。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mMultiSelect", true);
+        ((java.util.Set<String>) field(f, "mSelectedRepos")).add("x/y");
+        call(f, "onRepoLongPressed", new Class<?>[]{String.class}, "a/b");
+        assertTrue((Boolean) field(f, "mMultiSelect"));
+        assertTrue(((java.util.Set<String>) field(f, "mSelectedRepos"))
+                .contains("a/b"));
+    }
+
+    @Test
+    public void onMoveStateChanged_unfinishedReplacesHiddenDialog() throws Exception {
+        // L1449：进度框存在但未显示时重新创建。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        androidx.appcompat.app.AlertDialog hidden =
+                org.mockito.Mockito.mock(androidx.appcompat.app.AlertDialog.class);
+        org.mockito.Mockito.when(hidden.isShowing()).thenReturn(false);
+        setField(f, "mMoveProgressDialog", hidden);
+        call(f, "onMoveStateChanged",
+                new Class<?>[]{StarBatchMoveViewModel.State.class},
+                moveState(3, 1, false, java.util.Collections.emptyList(),
+                        java.util.Collections.emptyList()));
+        Object dialog = field(f, "mMoveProgressDialog");
+        assertNotNull(dialog);
+        assertTrue(dialog != hidden);
+        assertTrue(((androidx.appcompat.app.AlertDialog) dialog).isShowing());
+    }
+
+    @Test
+    public void onMoveStateChanged_unfinishedWithNullProgressBarSkipsProgress()
+            throws Exception {
+        // L1456：进度条为 null 时只更新标题，不碰进度。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        call(f, "onMoveStateChanged",
+                new Class<?>[]{StarBatchMoveViewModel.State.class},
+                moveState(3, 1, false, java.util.Collections.emptyList(),
+                        java.util.Collections.emptyList()));
+        androidx.appcompat.app.AlertDialog dialog =
+                (androidx.appcompat.app.AlertDialog) field(f, "mMoveProgressDialog");
+        assertTrue(dialog.isShowing());
+        setField(f, "mMoveProgressBar", null);
+        call(f, "onMoveStateChanged",
+                new Class<?>[]{StarBatchMoveViewModel.State.class},
+                moveState(3, 2, false, java.util.Collections.emptyList(),
+                        java.util.Collections.emptyList()));
+        assertEquals(mActivity.getString(com.gh4a.R.string.star_list_moving, 2, 3),
+                org.robolectric.Shadows.shadowOf(dialog).getTitle());
+    }
+
+    @Test
+    public void dismissMoveProgressDialog_hiddenDialogSkipsDismiss() throws Exception {
+        // L1529：进度框存在但未显示时直接清字段，不调 dismiss。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        androidx.appcompat.app.AlertDialog hidden =
+                org.mockito.Mockito.mock(androidx.appcompat.app.AlertDialog.class);
+        org.mockito.Mockito.when(hidden.isShowing()).thenReturn(false);
+        setField(f, "mMoveProgressDialog", hidden);
+        call(f, "dismissMoveProgressDialog", new Class<?>[]{});
+        org.mockito.Mockito.verify(hidden, org.mockito.Mockito.never()).dismiss();
+        assertNull(field(f, "mMoveProgressDialog"));
+    }
+
+    @Test
+    public void dismissMoveResultDialog_hiddenDialogSkipsDismiss() throws Exception {
+        // L1539：结果框存在但未显示时直接清字段，不调 dismiss。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        androidx.appcompat.app.AlertDialog hidden =
+                org.mockito.Mockito.mock(androidx.appcompat.app.AlertDialog.class);
+        org.mockito.Mockito.when(hidden.isShowing()).thenReturn(false);
+        setField(f, "mMoveResultDialog", hidden);
+        call(f, "dismissMoveResultDialog", new Class<?>[]{});
+        org.mockito.Mockito.verify(hidden, org.mockito.Mockito.never()).dismiss();
+        assertNull(field(f, "mMoveResultDialog"));
+    }
+
+    @Test
+    public void onSingleOpChanged_nullViewModelIsNoop() throws Exception {
+        // L1482：op 非空但 ViewModel 为 null 时直接返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        assertNull(field(f, "mMoveViewModel"));
+        StarBatchMoveViewModel.SingleOp op = new StarBatchMoveViewModel.SingleOp(
+                1L, true, com.gh4a.R.string.app_name, null);
+        call(f, "onSingleOpChanged",
+                new Class<?>[]{StarBatchMoveViewModel.SingleOp.class}, op);
+        assertNull(org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+    }
+
+    @Test
+    public void onSingleOpChanged_successWithNullClearIdKeepsExpanded() throws Exception {
+        // L1491：clearExpandedId 为 null 时不清除展开态，仍重拉。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        StarBatchMoveViewModel vm =
+                org.mockito.Mockito.mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        setField(f, "mLogin", null);
+        setField(f, "mExpandedOfficialId", "l1");
+        StarBatchMoveViewModel.SingleOp op = new StarBatchMoveViewModel.SingleOp(
+                1L, true, com.gh4a.R.string.app_name, null);
+        org.mockito.Mockito.when(vm.isSingleOpConsumed(op)).thenReturn(false);
+        call(f, "onSingleOpChanged",
+                new Class<?>[]{StarBatchMoveViewModel.SingleOp.class}, op);
+        assertEquals("l1", field(f, "mExpandedOfficialId"));
+        assertTrue((Boolean) field(f, "mListsFailed"));
+    }
+
+    @Test
+    public void enterSortMode_singleListReturns() throws Exception {
+        // L1549：只有 1 个列表时不进排序模式。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mOfficialLists", java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList())));
+        call(f, "enterSortMode", new Class<?>[]{});
+        assertFalse((Boolean) field(f, "mSortMode"));
+    }
+
+    @Test
+    public void exitSortMode_saveWithNullSortListsSkipsSave() throws Exception {
+        // L1560：保存时 mSortLists 为 null 则不写顺序，只清模式。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mSortMode", true);
+        setField(f, "mSortLists", null);
+        setField(f, "mOfficialLists", new java.util.ArrayList<>(java.util.Arrays.asList(
+                list("a", "A", java.util.Collections.emptyList()))));
+        call(f, "exitSortMode", new Class<?>[]{boolean.class}, true);
+        assertFalse((Boolean) field(f, "mSortMode"));
+        java.util.List<UserListsGraphQL.UserList> official =
+                (java.util.List<UserListsGraphQL.UserList>) field(f, "mOfficialLists");
+        assertEquals("a", official.get(0).id);
+        assertNull(mActivity.getSharedPreferences("star_list_order_alice",
+                        android.content.Context.MODE_PRIVATE)
+                .getString("order_ids", null));
+    }
+
+    @Test
+    public void sortTouchHelper_onMoveTargetNoPositionReturnsFalse() throws Exception {
+        // L1590：目标位置为 NO_POSITION 时拒绝。
+        StarMergedFragment f = attachWithAdapter();
+        java.util.List<UserListsGraphQL.UserList> lists = java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()),
+                list("l2", "Group 2", java.util.Collections.emptyList()),
+                list("l3", "Group 3", java.util.Collections.emptyList()));
+        setField(f, "mOfficialLists", new java.util.ArrayList<>(lists));
+        setField(f, "mSortMode", true);
+        setField(f, "mSortLists", new java.util.ArrayList<>(lists));
+        RecyclerView rv = adapterParent();
+        setField(f, "mList", rv);
+        call(f, "buildListsSection", new Class<?>[]{});
+        call(f, "attachSortTouchHelper", new Class<?>[]{});
+        ItemTouchHelper.Callback cb = sortCallback(f);
+        RecyclerView.ViewHolder from =
+                org.mockito.Mockito.mock(RecyclerView.ViewHolder.class);
+        RecyclerView.ViewHolder to =
+                org.mockito.Mockito.mock(RecyclerView.ViewHolder.class);
+        org.mockito.Mockito.when(from.getBindingAdapterPosition()).thenReturn(1);
+        org.mockito.Mockito.when(to.getBindingAdapterPosition())
+                .thenReturn(RecyclerView.NO_POSITION);
+        assertFalse(cb.onMove(rv, from, to));
+    }
+
+    @Test
+    public void sortTouchHelper_onMoveTargetNotSortRowReturnsFalse() throws Exception {
+        // L1594：目标不是排序行（提示行）时拒绝。
+        StarMergedFragment f = attachWithAdapter();
+        java.util.List<UserListsGraphQL.UserList> lists = java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()),
+                list("l2", "Group 2", java.util.Collections.emptyList()),
+                list("l3", "Group 3", java.util.Collections.emptyList()));
+        setField(f, "mOfficialLists", new java.util.ArrayList<>(lists));
+        setField(f, "mSortMode", true);
+        setField(f, "mSortLists", new java.util.ArrayList<>(lists));
+        RecyclerView rv = adapterParent();
+        setField(f, "mList", rv);
+        call(f, "buildListsSection", new Class<?>[]{});
+        call(f, "attachSortTouchHelper", new Class<?>[]{});
+        ItemTouchHelper.Callback cb = sortCallback(f);
+        RecyclerView.ViewHolder from =
+                org.mockito.Mockito.mock(RecyclerView.ViewHolder.class);
+        RecyclerView.ViewHolder to =
+                org.mockito.Mockito.mock(RecyclerView.ViewHolder.class);
+        org.mockito.Mockito.when(from.getBindingAdapterPosition()).thenReturn(1);
+        org.mockito.Mockito.when(to.getBindingAdapterPosition()).thenReturn(0);
+        assertFalse(cb.onMove(rv, from, to));
+        java.util.List<UserListsGraphQL.UserList> sorted =
+                (java.util.List<UserListsGraphQL.UserList>) field(f, "mSortLists");
+        assertEquals("l1", sorted.get(0).id);
+    }
+
+    @Test
+    public void sortTouchHelper_onMoveFromHeaderRowPositionReturnsFalse() throws Exception {
+        // L1601：from 为 0（listFrom=-1）时越界拒绝——mItems[0] 人工置为排序行。
+        StarMergedFragment f = attachWithAdapter();
+        java.util.List<UserListsGraphQL.UserList> lists = java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()),
+                list("l2", "Group 2", java.util.Collections.emptyList()));
+        setField(f, "mOfficialLists", new java.util.ArrayList<>(lists));
+        setField(f, "mSortMode", true);
+        setField(f, "mSortLists", new java.util.ArrayList<>(lists));
+        RecyclerView rv = adapterParent();
+        setField(f, "mList", rv);
+        java.util.List<Object> items = (java.util.List<Object>) field(f, "mItems");
+        items.clear();
+        items.add(newItem(typeConst("TYPE_SORT_ROW")));
+        items.add(newItem(typeConst("TYPE_SORT_ROW")));
+        call(f, "attachSortTouchHelper", new Class<?>[]{});
+        ItemTouchHelper.Callback cb = sortCallback(f);
+        RecyclerView.ViewHolder from =
+                org.mockito.Mockito.mock(RecyclerView.ViewHolder.class);
+        RecyclerView.ViewHolder to =
+                org.mockito.Mockito.mock(RecyclerView.ViewHolder.class);
+        org.mockito.Mockito.when(from.getBindingAdapterPosition()).thenReturn(0);
+        org.mockito.Mockito.when(to.getBindingAdapterPosition()).thenReturn(1);
+        assertFalse(cb.onMove(rv, from, to));
+    }
+
+    @Test
+    public void sortTouchHelper_onMoveOutOfRangeReturnsFalse() throws Exception {
+        // L1601/L1602：mSortLists 比 mItems 的排序行少时越界拒绝。
+        StarMergedFragment f = attachWithAdapter();
+        java.util.List<UserListsGraphQL.UserList> lists = java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()),
+                list("l2", "Group 2", java.util.Collections.emptyList()),
+                list("l3", "Group 3", java.util.Collections.emptyList()));
+        setField(f, "mOfficialLists", new java.util.ArrayList<>(lists));
+        setField(f, "mSortMode", true);
+        setField(f, "mSortLists", new java.util.ArrayList<>(lists));
+        RecyclerView rv = adapterParent();
+        setField(f, "mList", rv);
+        call(f, "buildListsSection", new Class<?>[]{});
+        call(f, "attachSortTouchHelper", new Class<?>[]{});
+        ItemTouchHelper.Callback cb = sortCallback(f);
+        setField(f, "mSortLists", new java.util.ArrayList<>(java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()))));
+        RecyclerView.ViewHolder from =
+                org.mockito.Mockito.mock(RecyclerView.ViewHolder.class);
+        RecyclerView.ViewHolder to =
+                org.mockito.Mockito.mock(RecyclerView.ViewHolder.class);
+        // listFrom=1 越界
+        org.mockito.Mockito.when(from.getBindingAdapterPosition()).thenReturn(2);
+        org.mockito.Mockito.when(to.getBindingAdapterPosition()).thenReturn(3);
+        assertFalse(cb.onMove(rv, from, to));
+        // listTo=2 越界
+        org.mockito.Mockito.when(from.getBindingAdapterPosition()).thenReturn(1);
+        org.mockito.Mockito.when(to.getBindingAdapterPosition()).thenReturn(3);
+        assertFalse(cb.onMove(rv, from, to));
+    }
+
+    @Test
+    public void showAssignToGroupDialog_nullListsOpensCreateDialog() throws Exception {
+        // L1643：mOfficialLists 为 null 时直接新建。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mOfficialLists", null);
+        call(f, "showAssignToGroupDialog",
+                new Class<?>[]{Repository.class}, repo("a/b"));
+        assertNotNull(latestDialog().findViewById(com.gh4a.R.id.et_list_name));
+    }
+
+    @Test
+    public void applySavedListOrder_staleIdIsSkipped() throws Exception {
+        // L1666：保存的顺序里有已删除的 id 时跳过该 id。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        mActivity.getSharedPreferences("star_list_order_alice",
+                        android.content.Context.MODE_PRIVATE)
+                .edit().putString("order_ids", "[\"l2\",\"deleted\",\"l1\"]").apply();
+        setField(f, "mOfficialLists", new java.util.ArrayList<>(java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()),
+                list("l2", "Group 2", java.util.Collections.emptyList()))));
+        call(f, "applySavedListOrder", new Class<?>[]{});
+        java.util.List<UserListsGraphQL.UserList> official =
+                (java.util.List<UserListsGraphQL.UserList>) field(f, "mOfficialLists");
+        assertEquals("l2", official.get(0).id);
+        assertEquals("l1", official.get(1).id);
+    }
+
+    @Test
+    public void bindListRepoRow_emptySubtitleHidesSubtitle() throws Exception {
+        // L1830：仓库行简介为空串时隐藏副标题。
+        StarMergedFragment f = attachWithAdapter();
+        Object adapter = field(f, "mAdapter");
+        RecyclerView parent = adapterParent();
+        setField(f, "mOfficialLists", java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Arrays.asList(
+                        new UserListsGraphQL.Repo("a/b", "")))));
+        setField(f, "mExpandedOfficialId", "l1");
+        call(f, "buildListsSection", new Class<?>[]{});
+        RecyclerView.ViewHolder holder = boundHolder(f, adapter, parent, 1);
+        assertEquals(View.GONE,
+                holder.itemView.findViewById(com.gh4a.R.id.tv_subtitle)
+                        .getVisibility());
+    }
+
+    @Test
+    public void bindListRepoRow_lastRepoHidesDivider() throws Exception {
+        // L1838：仓库行是最后一项（pos + 1 == size）时不显示分隔线。
+        StarMergedFragment f = attachWithAdapter();
+        Object adapter = field(f, "mAdapter");
+        RecyclerView parent = adapterParent();
+        java.util.List<Object> items = (java.util.List<Object>) field(f, "mItems");
+        items.clear();
+        Object row = newItem(typeConst("TYPE_LIST_REPO"));
+        setItemField(row, "title", "a/b");
+        setItemField(row, "subtitle", "d-a/b");
+        setItemField(row, "fullName", "a/b");
+        items.add(row);
+        parent.setAdapter((RecyclerView.Adapter) adapter);
+        parent.measure(
+                View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY));
+        parent.layout(0, 0, 1080, 1920);
+        RecyclerView.ViewHolder holder = parent.findViewHolderForAdapterPosition(0);
+        assertNotNull(holder);
+        assertEquals(View.GONE,
+                holder.itemView.findViewById(com.gh4a.R.id.v_divider).getVisibility());
+    }
+
+    @Test
+    public void bindStarredRepo_clickDetachedIsNoop() throws Exception {
+        // L1925：Star 仓库行点按时宿主已空则不跳转。
+        StarMergedFragment f = attachWithAdapter();
+        Object adapter = field(f, "mAdapter");
+        RecyclerView parent = adapterParent();
+        setField(f, "mCurrentTab", 1);
+        setField(f, "mStarred", new java.util.ArrayList<>(
+                java.util.Arrays.asList(repo("a/b"))));
+        call(f, "rebuild", new Class<?>[]{});
+        RecyclerView.ViewHolder holder = boundHolder(f, adapter, parent, 0);
+        mActivity.getSupportFragmentManager().beginTransaction()
+                .remove(f).commitNow();
+        holder.itemView.performClick();
+        assertNull(org.robolectric.Shadows.shadowOf(mActivity)
+                .getNextStartedActivity());
+    }
+
+    @Test
+    public void bindUpdateRow_clickDetachedIsNoop() throws Exception {
+        // L1946：更新行点按时宿主已空则不跳转（已读标记也直接返回）。
+        StarMergedFragment f = attachWithAdapter();
+        Object adapter = field(f, "mAdapter");
+        RecyclerView parent = adapterParent();
+        setField(f, "mCurrentTab", 2);
+        setField(f, "mUpdates", new java.util.ArrayList<>(
+                java.util.Arrays.asList(radar("o", "r1", 1L))));
+        call(f, "rebuild", new Class<?>[]{});
+        // 更新页首项是“全部已读”行，更新行在位置 1
+        RecyclerView.ViewHolder holder = boundHolder(f, adapter, parent, 1);
+        mActivity.getSupportFragmentManager().beginTransaction()
+                .remove(f).commitNow();
+        holder.itemView.performClick();
+        assertNull(org.robolectric.Shadows.shadowOf(mActivity)
+                .getNextStartedActivity());
+    }
+
+    @Test
+    public void bindSortRow_dragTouchNonDownReturnsFalse() throws Exception {
+        // L2012：拖动手柄上非 ACTION_DOWN 事件不启动拖动。
+        StarMergedFragment f = attachWithAdapter();
+        Object adapter = field(f, "mAdapter");
+        RecyclerView parent = adapterParent();
+        setField(f, "mOfficialLists", java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()),
+                list("l2", "Group 2", java.util.Collections.emptyList())));
+        setField(f, "mSortMode", true);
+        setField(f, "mSortLists", java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()),
+                list("l2", "Group 2", java.util.Collections.emptyList())));
+        call(f, "buildListsSection", new Class<?>[]{});
+        RecyclerView.ViewHolder holder = boundHolder(f, adapter, parent, 1);
+        View drag = holder.itemView.findViewById(com.gh4a.R.id.tv_drag);
+        ItemTouchHelper helper = org.mockito.Mockito.mock(ItemTouchHelper.class);
+        setField(f, "mSortTouchHelper", helper);
+        MotionEvent up = MotionEvent.obtain(0, 0, MotionEvent.ACTION_UP, 0, 0, 0);
+        assertFalse(drag.dispatchTouchEvent(up));
+        org.mockito.Mockito.verify(helper, org.mockito.Mockito.never())
+                .startDrag(org.mockito.ArgumentMatchers.any());
+    }
+
+    // ---- 第 2 轮补缺（验证跑后残留分支） ----
+
+    @Test
+    public void stopRefreshingFor_otherTabStarredLoadingKeeps() throws Exception {
+        // L495：完成页不是刷新页、Star 页仍在加载时不停转圈（与 Lists/Updates
+        // 侧的两个 keeps 测试互补；缺的正是 !mStarredLoading 这一臂）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        androidx.swiperefreshlayout.widget.SwipeRefreshLayout swipe =
+                org.mockito.Mockito.mock(
+                        androidx.swiperefreshlayout.widget.SwipeRefreshLayout.class);
+        setField(f, "mSwipe", swipe);
+        setField(f, "mRefreshActive", true);
+        setField(f, "mRefreshTab", 0);
+        setField(f, "mStarredLoading", true);
+        call(f, "stopRefreshingFor", new Class<?>[]{int.class}, 1);
+        org.mockito.Mockito.verify(swipe, org.mockito.Mockito.never())
+                .setRefreshing(org.mockito.ArgumentMatchers.anyBoolean());
+        assertTrue((Boolean) field(f, "mRefreshActive"));
+    }
+
+    @Test
+    public void loadCurrentTab_invalidTabIsNoop() throws Exception {
+        // L558：mCurrentTab 不是三页之一时 else-if 链走到底，什么也不加载。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 99);
+        call(f, "loadCurrentTab", new Class<?>[]{});
+        assertFalse((Boolean) field(f, "mListsLoaded"));
+        assertFalse((Boolean) field(f, "mStarredLoaded"));
+        assertFalse((Boolean) field(f, "mUpdatesLoaded"));
+    }
+
+    @Test
+    public void refreshCurrentTab_invalidTabIsNoop() throws Exception {
+        // L595：同上，refreshCurrentTab 的 else-if 链走到底（只置刷新标志）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 99);
+        call(f, "refreshCurrentTab", new Class<?>[]{});
+        assertTrue((Boolean) field(f, "mRefreshActive"));
+        assertFalse((Boolean) field(f, "mListsLoaded"));
+        assertFalse((Boolean) field(f, "mStarredLoaded"));
+        assertFalse((Boolean) field(f, "mUpdatesLoaded"));
+    }
+
+    @Test
+    public void prefetchOtherTabs_noForceSkipsStarredWhileLoading() throws Exception {
+        // L623：非强制预取、Star 页未加载但正在加载时跳过（与已加载跳过、
+        // 未加载拉取互补）。当前页为列表页，列表块跳过、更新页已加载跳过，
+        // 全程无网络调用。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 0);
+        setField(f, "mStarredLoaded", false);
+        setField(f, "mStarredLoading", true);
+        setField(f, "mUpdatesLoaded", true);
+        call(f, "prefetchOtherTabs", new Class<?>[]{boolean.class}, false);
+        assertFalse((Boolean) field(f, "mStarredLoaded"));
+        assertTrue((Boolean) field(f, "mStarredLoading"));
+    }
+
+    @Test
+    public void prefetchOtherTabs_noForceSkipsUpdatesWhileLoading() throws Exception {
+        // L631：同上，更新页未加载但正在加载时跳过。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 0);
+        setField(f, "mStarredLoaded", true);
+        setField(f, "mUpdatesLoaded", false);
+        setField(f, "mUpdatesLoading", true);
+        call(f, "prefetchOtherTabs", new Class<?>[]{boolean.class}, false);
+        assertFalse((Boolean) field(f, "mUpdatesLoaded"));
+        assertTrue((Boolean) field(f, "mUpdatesLoading"));
+    }
+
+    @Test
+    public void prefetchOtherTabs_forceReloadsFirstPageStarred() throws Exception {
+        // L617：强制预取、Star 页已加载但只到第 2 页（page <= 2）时重拉
+        // 第 1 页（与 page > 2 跳过互补）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mCurrentTab", 0);
+        setField(f, "mStarredLoaded", true);
+        setField(f, "mStarredPage", 2);
+        com.meisolsson.githubsdk.service.activity.StarringService service =
+                org.mockito.Mockito.mock(
+                        com.meisolsson.githubsdk.service.activity.StarringService.class);
+        // 先建 Page 再 stub：starredPage 内部也有 when()，不能嵌在外层
+        // when(...).thenReturn(...) 的参数里，否则 UnfinishedStubbing。
+        com.meisolsson.githubsdk.model.Page<com.meisolsson.githubsdk.model.Repository> page =
+                starredPage(java.util.Arrays.asList(repo("a/b")), null);
+        org.mockito.Mockito.when(service.getStarredRepositories(
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyLong()))
+                .thenReturn(Single.just(Response.success(page)));
+        try (MockedStatic<UserListsGraphQL> mockedLists = mockListsFetch(Single.just(
+                java.util.Arrays.asList(
+                        list("l1", "Group 1", java.util.Collections.emptyList()))));
+             MockedStatic<com.gh4a.ServiceFactory> mockedFactory =
+                     mockStarring(service);
+             MockedStatic<RadarGraphQL> mockedRadar =
+                     mockRadarFetch(Single.just(java.util.Collections.emptyList()))) {
+            call(f, "prefetchOtherTabs", new Class<?>[]{boolean.class}, true);
+            awaitCondition(() -> (Boolean) field(f, "mStarredLoaded"));
+            org.mockito.Mockito.verify(service, org.mockito.Mockito.times(1))
+                    .getStarredRepositories(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyLong());
+        }
+    }
+
+    @Test
+    public void enterSortMode_nullListsReturns() throws Exception {
+        // L1549：mOfficialLists 为 null 时不进排序模式（与 1 个列表、
+        // 2 个列表互补）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mOfficialLists", null);
+        call(f, "enterSortMode", new Class<?>[]{});
+        assertFalse((Boolean) field(f, "mSortMode"));
+    }
+
+    @Test
+    public void applySavedListOrder_nullListsReturns() throws Exception {
+        // L1643：mOfficialLists 为 null 时直接返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mOfficialLists", null);
+        call(f, "applySavedListOrder", new Class<?>[]{});
+        assertNull(field(f, "mOfficialLists"));
+    }
+
+    @Test
+    public void applySavedListOrder_emptyListsReturns() throws Exception {
+        // L1643：mOfficialLists 为空列表时直接返回（与 null 臂互补）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mOfficialLists", new java.util.ArrayList<>());
+        call(f, "applySavedListOrder", new Class<?>[]{});
+        assertTrue(((java.util.List<?>) field(f, "mOfficialLists")).isEmpty());
+    }
+
+    @Test
+    public void loadUpdates_nullLoginKeepsExistingUpdates() throws Exception {
+        // L796：空登录且 mUpdates 已非空时不重新创建空列表（保留原列表）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        java.util.List<?> existing = new java.util.ArrayList<>();
+        setField(f, "mUpdates", existing);
+        setField(f, "mLogin", null);
+        call(f, "loadUpdates", new Class<?>[]{boolean.class}, false);
+        assertTrue((Boolean) field(f, "mUpdatesFailed"));
+        assertFalse((Boolean) field(f, "mUpdatesLoading"));
+        assertTrue(existing == field(f, "mUpdates"));
+    }
+
+    @Test
+    public void officialListIds_withListsReturnsIds() throws Exception {
+        // L1139：mOfficialLists 非空时返回全部 id（与空列表臂互补）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        setField(f, "mOfficialLists", new java.util.ArrayList<>(java.util.Arrays.asList(
+                list("l1", "Group 1", java.util.Collections.emptyList()),
+                list("l2", "Group 2", java.util.Collections.emptyList()))));
+        Object ids = call(f, "officialListIds", new Class<?>[]{});
+        assertEquals(java.util.Arrays.asList("l1", "l2"), ids);
+    }
+
+    @Test
+    public void onCreateListNameConfirmed_unknownTagIsNoop() throws Exception {
+        // L1158：tag 三个分支都不匹配时静默返回（else-if 链末尾 fall-through）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        StarBatchMoveViewModel vm =
+                org.mockito.Mockito.mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        f.onCreateListNameConfirmed("unknown_tag", null, "X", false);
+        org.mockito.Mockito.verifyNoInteractions(vm);
+    }
+
+    @Test
+    public void onAssignListsConfirmed_unknownTagIsNoop() throws Exception {
+        // L1176：同上，归属确认的未知 tag 静默返回。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        StarBatchMoveViewModel vm =
+                org.mockito.Mockito.mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        f.onAssignListsConfirmed("unknown_tag", "a/b",
+                java.util.Arrays.asList("l1"));
+        org.mockito.Mockito.verifyNoInteractions(vm);
+    }
+
+    @Test
+    public void onAssignListsCreateNew_unknownTagIsNoop() throws Exception {
+        // L1185：同上，新建入口的未知 tag 不弹任何对话框。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        int before = org.robolectric.shadows.ShadowDialog.getShownDialogs().size();
+        f.onAssignListsCreateNew("unknown_tag", "a/b");
+        assertEquals(before,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void officialListIds_nullListsReturnsEmpty() throws Exception {
+        // L1139（第 3 轮）：mOfficialLists 为 null 时返回空表（与 R2 的非空臂互补）。
+        StarMergedFragment f = attach(StarMergedFragment.newInstance("alice"));
+        Object ids = call(f, "officialListIds", new Class<?>[]{});
+        assertTrue(((java.util.List<?>) ids).isEmpty());
     }
 }

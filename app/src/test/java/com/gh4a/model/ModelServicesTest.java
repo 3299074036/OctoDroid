@@ -85,9 +85,10 @@ public class ModelServicesTest {
     }
 
     @Test
-    public void gitHubFeedService_getFeed_emptyFeed_failsParse() {
-        // Same required-@ElementList behaviour as GitHubFeedTest: zero
-        // entries fail the whole parse (RxJava wraps it in RuntimeException).
+    public void gitHubFeedService_getFeed_emptyFeed_yieldsNoEntries() {
+        // T-121：@ElementList required=false，零条目 feed 解析成功、不再 abort
+        // 整篇（与 GitHubFeedTest.parse_emptyFeed_yieldsNoEntries 同行为）；
+        // 无 entry 时字段保持 null，由 SingleFactory.loadFeed 兜底为空列表。
         GitHubFeedService service = new Retrofit.Builder()
                 .baseUrl("https://github.com/")
                 .client(stubClient("<feed></feed>", "application/atom+xml"))
@@ -96,13 +97,9 @@ public class ModelServicesTest {
                 .build()
                 .create(GitHubFeedService.class);
 
-        try {
-            service.getFeed("empty.atom").blockingGet();
-            org.junit.Assert.fail("expected RuntimeException for empty feed");
-        } catch (RuntimeException expected) {
-            assertTrue(expected.getCause()
-                    instanceof org.simpleframework.xml.core.ValueRequiredException);
-        }
+        Response<GitHubFeed> response = service.getFeed("empty.atom").blockingGet();
+        assertTrue(response.isSuccessful());
+        assertTrue(response.body().feed == null || response.body().feed.isEmpty());
     }
 
     @Test

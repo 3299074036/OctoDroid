@@ -36,6 +36,7 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 
 import okhttp3.Interceptor;
+import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
@@ -43,6 +44,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -1169,4 +1171,168 @@ public class MirrorHelperTest {
             assertFalse(allComplete[0]);
         }
     }
+    @Test
+    public void nextMirrorBase_skipsBlankCacheKey() throws Exception {
+        // L606：测速缓存里键为空白（" =5" 解析后键为 " "，归一化为空），
+        // 候选循环里 !norm.isEmpty() 为假，跳过；故障转移仍走到 b。
+        enableMirrorWithList("https://a.example.com",
+                "https://a.example.com", "https://b.example.com");
+        seedSpeedCache(" =5", "https://b.example.com=5");
+        Request request = new Request.Builder().url(RAW_URL).build();
+        Interceptor.Chain chain = mockChain(request);
+        Response r500 = mockResponse(500);
+        Response r200 = mockResponse(200);
+        when(chain.proceed(any(Request.class))).thenReturn(r500, r200);
+        assertEquals(r200, MirrorHelper.mirrorInterceptor(context()).intercept(chain));
+        ArgumentCaptor<Request> captor = ArgumentCaptor.forClass(Request.class);
+        verify(chain, times(2)).proceed(captor.capture());
+        assertEquals("https://b.example.com/" + RAW_URL,
+                captor.getAllValues().get(1).url().toString());
+    }
+
+    @Test
+    public void getSpeedTestClient_reusedAcrossCalls() throws Exception {
+        // L806：getSpeedTestClient 里 sSpeedTestClient != null 的一侧——
+        // 同一测试内连调两次测速，第二次复用已建的静态 client。
+        // （静态量跨测试也存活，但显式两次调用才不依赖用例执行顺序。）
+        for (int round = 0; round < 2; round++) {
+            seedMirrorList("https://nonexistent.invalid");
+            CountDownLatch done = new CountDownLatch(1);
+            MirrorHelper.testAllMirrorsSpeed(context(),
+                    new MirrorHelper.SpeedTestCallback() {
+                        @Override
+                        public void onProbeComplete(
+                                MirrorHelper.MirrorSpeedResult result) {
+                        }
+
+                        @Override
+                        public void onAllComplete() {
+                            done.countDown();
+                        }
+                    });
+            assertTrue(waitForLatch(done, 30_000));
+        }
+    }
+
+    @Test
+    public void getSpeedTestClient_doubleCheckedLock_innerFalseReturnsPreset()
+            throws Exception {
+        // L806：内层 if (sSpeedTestClient == null) 的 false 分支——工作线程已
+        // 越过外层检查后在 synchronized 内复读到非空（与 SingleFactory 趋势
+        // 服务同款确定性技术）。finally 里把静态 client 清回 null，让后续
+        // 测速测试重建带 5 秒超时的专用 client（预设是默认超时）。
+        java.lang.reflect.Field clientField =
+                MirrorHelper.class.getDeclaredField("sSpeedTestClient");
+        clientField.setAccessible(true);
+        clientField.set(null, null);
+        OkHttpClient preset = new OkHttpClient();
+        java.lang.reflect.Method m =
+                MirrorHelper.class.getDeclaredMethod("getSpeedTestClient");
+        m.setAccessible(true);
+        java.util.concurrent.atomic.AtomicReference<Object> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                result.set(m.invoke(null));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        try {
+            synchronized (MirrorHelper.class) {
+                worker.start();
+                long deadline = System.currentTimeMillis() + 10_000;
+                while (worker.getState() != Thread.State.BLOCKED
+                        && System.currentTimeMillis() < deadline) {
+                    Thread.sleep(1);
+                }
+                assertEquals(Thread.State.BLOCKED, worker.getState());
+                clientField.set(null, preset);
+            }
+            worker.join(10_000);
+            assertSame(preset, result.get());
+        } finally {
+            clientField.set(null, null);
+        }
+    }
+
+    @Test
+    public void testAllMirrorsSpeed_nullCallbackEmptyTargets() {
+        // L848：空目标 + null 回调时投递的 runnable 里 cb == null，不回调、不崩。
+        MirrorHelper.testAllMirrorsSpeed(context(), new ArrayList<>(), null);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+    }
+
+    @Test
+    public void testAllMirrorsSpeed_nullCallbackNonEmptyTargets() throws Exception {
+        // L875/L889：非空目标 + null 回调时，逐个完成与全部完成的两次投递
+        // 里 cb == null，不回调、不崩。
+        try (LocalHttpServer server = new LocalHttpServer(false, 200, new byte[2048])) {
+            List<MirrorHelper.MirrorSpeedResult> targets = new ArrayList<>();
+            targets.add(new MirrorHelper.MirrorSpeedResult("ok", server.url(), -1));
+            MirrorHelper.testAllMirrorsSpeed(context(), targets, null);
+            // 探针走真实后台线程：等它跑完并把两次回调都投递到主线程。
+            Thread.sleep(3000);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+        }
+    }
+
+    @Test
+    public void testAllMirrorsSpeed_truncatedBodyReturnsUnavailable() throws Exception {
+        // L920：服务端谎报 Content-Length（2048）但一个字节都不发就关连接，
+        // OkHttp 读流时抛“unexpected end of stream”，探针返回 latencyMs = -1。
+        // 注意：第 1 轮写的是“只发 10 字节”——单次 in.read(new byte[1024])
+        // 只会返回已到的 10 字节而不抛错（截断错只在读到已耗尽后再读时才抛，
+        // 而生产代码只读一次），于是 latency 是 0 而非 -1；改成 0 字节后
+        // 第一次读就抛错。
+        ServerSocket serverSocket = new ServerSocket(0, 50,
+                InetAddress.getByName("127.0.0.1"));
+        Thread acceptThread = new Thread(() -> {
+            try {
+                Socket socket = serverSocket.accept();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(
+                        socket.getInputStream(), StandardCharsets.UTF_8));
+                String line;
+                while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                    // consume request headers
+                }
+                OutputStream out = socket.getOutputStream();
+                out.write(("HTTP/1.1 200 OK\r\nContent-Length: 2048\r\n"
+                        + "Connection: close\r\n\r\n")
+                        .getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                socket.close();
+            } catch (Exception ignored) {
+            }
+        });
+        acceptThread.setDaemon(true);
+        acceptThread.start();
+        try {
+            String url = "http://127.0.0.1:" + serverSocket.getLocalPort();
+            List<MirrorHelper.MirrorSpeedResult> targets = new ArrayList<>();
+            targets.add(new MirrorHelper.MirrorSpeedResult("trunc", url, -1));
+            List<MirrorHelper.MirrorSpeedResult> probes =
+                    Collections.synchronizedList(new ArrayList<>());
+            CountDownLatch done = new CountDownLatch(1);
+            MirrorHelper.testAllMirrorsSpeed(context(), targets,
+                    new MirrorHelper.SpeedTestCallback() {
+                        @Override
+                        public void onProbeComplete(
+                                MirrorHelper.MirrorSpeedResult result) {
+                            probes.add(result);
+                        }
+
+                        @Override
+                        public void onAllComplete() {
+                            done.countDown();
+                        }
+                    });
+            assertTrue(waitForLatch(done, 30_000));
+            assertEquals(1, probes.size());
+            assertEquals(-1L, probes.get(0).latencyMs);
+        } finally {
+            serverSocket.close();
+        }
+    }
+
 }

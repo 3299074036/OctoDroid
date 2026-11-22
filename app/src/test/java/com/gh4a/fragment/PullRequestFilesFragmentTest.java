@@ -332,15 +332,24 @@ public class PullRequestFilesFragmentTest {
             PullRequestFilesFragment f = PullRequestFilesFragment.newInstance(
                     "octo", "cat", 42, "abc123");
             attachResumed(f);
+            // 确定性修复（第 3 轮）：初始加载经 RxUtils.doInBackground 在 IO
+            // 线程订阅；若 onRefresh 的 force 重载在初始订阅落点前 dispose
+            // 掉它，服务调用只有 onRefresh 的 1 次，times(2) 在 chunk 负载
+            // 下偶发不足。先等初始调用落点（各 1 次），再 onRefresh，
+            // 之后总数必为 2。超时放宽到 10 秒。
+            verify(prService, Mockito.timeout(10000).times(1))
+                    .getPullRequestFiles(eq("octo"), eq("cat"), eq(42L), eq(1L));
+            verify(commentService, Mockito.timeout(10000).times(1))
+                    .getPullRequestComments(eq("octo"), eq("cat"), eq(42L), eq(1L));
             setField(f, "mComments", Collections.singletonList(
                     mockComment("a.java", 0)));
             f.onRefresh();
             assertNull(field(f, "mComments"));
             assertFalse(f.isContentShown());
             // 初始加载（force=false）＋ onRefresh（force=true）各一次
-            verify(prService, Mockito.timeout(5000).times(2))
+            verify(prService, Mockito.timeout(10000).times(2))
                     .getPullRequestFiles(eq("octo"), eq("cat"), eq(42L), eq(1L));
-            verify(commentService, Mockito.timeout(5000).times(2))
+            verify(commentService, Mockito.timeout(10000).times(2))
                     .getPullRequestComments(eq("octo"), eq("cat"), eq(42L), eq(1L));
         }
     }

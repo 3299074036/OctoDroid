@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -871,4 +872,126 @@ public class CommentTranslatorTest {
             assertFalse(second.cancelled);
         });
     }
+    @Test
+    public void translateAllWithProvider_cancelFromProgressStopsBatch() throws Exception {
+        // L183：第一条跑完、onProgress 里 cancelBatch() 后，第二条不再翻译；
+        // 已翻译的第一条保留在缓存里，且收到 onCancelled、没有 onComplete。
+        PrefixTranslator fake = new PrefixTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        withStubs(fake, () -> {
+            CountDownLatch done = new CountDownLatch(1);
+            AtomicBoolean cancelled = new AtomicBoolean(false);
+            AtomicBoolean completed = new AtomicBoolean(false);
+            CommentTranslator.BatchCallback cb = new CommentTranslator.BatchCallback() {
+                @Override
+                public void onProgress(int doneCount, int total) {
+                    if (doneCount == 1) {
+                        ct.cancelBatch();
+                    }
+                }
+
+                @Override
+                public void onComplete() {
+                    completed.set(true);
+                    done.countDown();
+                }
+
+                @Override
+                public void onCancelled() {
+                    cancelled.set(true);
+                    done.countDown();
+                }
+
+                @Override
+                public void onError(Exception e) {
+                    done.countDown();
+                }
+            };
+            ct.translateAllWithProvider(context(), "google", Arrays.asList(
+                    new CommentTranslator.TranslatableItem(1, "<p>one</p>"),
+                    new CommentTranslator.TranslatableItem(2, "<p>two</p>")), cb);
+            assertTrue("timed out", await(done));
+            assertTrue(cancelled.get());
+            assertFalse(completed.get());
+            assertEquals("<p>TR:one</p>", ct.getTranslatedHtml("comment", 1));
+            assertNull(ct.getTranslatedHtml("comment", 2));
+            assertFalse(fake.seen.contains("two"));
+            assertFalse(ct.isBatchRunning());
+        });
+    }
+
+    @Test
+    public void translateAllWithProvider_destroyFromProgressStopsBatch() throws Exception {
+        // L183：第一条跑完、onProgress 里 destroy() 后，第二条不再翻译；
+        // destroy 不发 onCancelled，用 pump 等主线程跑完再断言状态。
+        PrefixTranslator fake = new PrefixTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        withStubs(fake, () -> {
+            CommentTranslator.BatchCallback cb = new CommentTranslator.BatchCallback() {
+                @Override
+                public void onProgress(int doneCount, int total) {
+                    if (doneCount == 1) {
+                        ct.destroy();
+                    }
+                }
+
+                @Override
+                public void onComplete() {
+                }
+
+                @Override
+                public void onCancelled() {
+                }
+
+                @Override
+                public void onError(Exception e) {
+                }
+            };
+            ct.translateAllWithProvider(context(), "google", Arrays.asList(
+                    new CommentTranslator.TranslatableItem(1, "<p>one</p>"),
+                    new CommentTranslator.TranslatableItem(2, "<p>two</p>")), cb);
+            pumpQuietly(2000);
+            assertEquals("<p>TR:one</p>", ct.getTranslatedHtml("comment", 1));
+            assertNull(ct.getTranslatedHtml("comment", 2));
+            assertFalse(fake.seen.contains("two"));
+            assertFalse(ct.isBatchRunning());
+        });
+    }
+
+    @Test
+    public void translateAllWithProvider_nullCallbackCompletesSilently() throws Exception {
+        // L191/L206/L220：callback 为 null 时进度与完成都不回调，批量照常跑完。
+        PrefixTranslator fake = new PrefixTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        withStubs(fake, () -> {
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(1, "<p>Hello</p>")),
+                    null);
+            pumpQuietly(2000);
+            assertEquals("<p>TR:Hello</p>", ct.getTranslatedHtml("comment", 1));
+            assertFalse(ct.isBatchRunning());
+        });
+    }
+
+    @Test
+    public void translateAllWithProvider_nullCallbackFailingItemCompletesSilently()
+            throws Exception {
+        // L220：onError 里 callback 为 null 时不回调进度，批量照常跑完。第 1 轮
+        // 的 null 回调测试只走了成功项的 onSuccess（L206），onError 的 null
+        // 检查没跑到；这里用 SignallingFailTranslator 让唯一项失败。
+        SignallingFailTranslator fake = new SignallingFailTranslator();
+        CommentTranslator ct = new CommentTranslator();
+        withStubs(fake, () -> {
+            ct.translateAllWithProvider(context(), "google",
+                    Collections.singletonList(
+                            new CommentTranslator.TranslatableItem(1, "<p>one</p>")),
+                    null);
+            assertTrue(await(fake.thrown));
+            pumpQuietly(2000);
+            assertNull(ct.getTranslatedHtml("comment", 1));
+            assertFalse(ct.isBatchRunning());
+        });
+    }
+
 }

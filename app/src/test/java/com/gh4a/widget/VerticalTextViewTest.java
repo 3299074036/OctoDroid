@@ -142,4 +142,19 @@ public class VerticalTextViewTest {
         assertEquals(Gravity.CENTER_HORIZONTAL,
                 view.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK);
     }
+
+    @Test
+    public void constructor_gravityTop_isTopDownAndGravityUnchanged() throws Exception {
+        FragmentActivity activity = activity();
+        VerticalTextView view = new VerticalTextView(activity,
+                Robolectric.buildAttributeSet()
+                        .addAttribute(android.R.attr.gravity, "top")
+                        .build());
+        java.lang.reflect.Field topDownField =
+                VerticalTextView.class.getDeclaredField("mTopDown");
+        topDownField.setAccessible(true);
+        assertTrue((boolean) topDownField.get(view));
+        // Vertical but not BOTTOM, so the constructor leaves gravity alone.
+        assertEquals(Gravity.TOP, view.getGravity() & Gravity.VERTICAL_GRAVITY_MASK);
+    }
 }

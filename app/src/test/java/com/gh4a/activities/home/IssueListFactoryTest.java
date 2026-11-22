@@ -325,4 +325,67 @@ public class IssueListFactoryTest {
             assertNotNull(menu);
         }
     }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void constructor_orderOnly_doesNotApplySort() {
+        // Only the sort order pref is set (no direction): the restore guard
+        // requires both, so the default sort mode ("created") stays
+        // (L49, the order-set/dir-null edge).
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            prefs().edit().clear()
+                    .putString("home_issue_list_sort_order", "comments")
+                    .apply();
+            IssueListFactory f = issues(activity);
+            assertEquals("created",
+                    f.makeFragment(0).getArguments().getString("sortmode"));
+        } finally {
+            prefs().edit().clear().apply();
+        }
+    }
+
+    @Test
+    public void showActionFilterDialog_clickCurrentItem_keepsFilter() throws Exception {
+        // Clicking the already-selected filter (position 0 == mActionFilter):
+        // the `which != mActionFilter` guard is false and the filter stays 0
+        // (L147 false side).
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            IssueListFactory f = issues(activity);
+            MenuBuilder menu = new MenuBuilder(activity);
+            f.onCreateOptionsMenu(menu);
+            assertTrue(f.onOptionsItemSelected(menu.findItem(Menu.FIRST + 2)));
+            assertFalse(ShadowAlertDialog.getShownDialogs().isEmpty());
+            androidx.appcompat.app.AlertDialog dialog =
+                    (androidx.appcompat.app.AlertDialog)
+                            ShadowAlertDialog.getShownDialogs().get(0);
+            ShadowLooper.idleMainLooper();
+            android.widget.ListView listView = dialog.getListView();
+            assertNotNull(listView);
+            android.view.View row = listView.getChildAt(0);
+            if (row == null) {
+                row = new android.view.View(activity);
+            }
+            listView.performItemClick(row, 0, listView.getItemIdAtPosition(0));
+            assertEquals(0, intField(f, "mActionFilter"));
+        }
+    }
+
+    @Test
+    public void toggleStateFilter_twice_returnsToOpen() {
+        // Toggling the state filter twice returns to the open title
+        // (L206, the toggle running in both directions).
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            IssueListFactory f = issues(activity);
+            MenuBuilder menu = new MenuBuilder(activity);
+            f.onCreateOptionsMenu(menu);
+            f.onOptionsItemSelected(menu.findItem(Menu.FIRST));
+            assertEquals(R.string.issues_closed, f.getTitleResId());
+            f.onOptionsItemSelected(menu.findItem(Menu.FIRST));
+            assertEquals(R.string.issues_open, f.getTitleResId());
+        }
+    }
 }

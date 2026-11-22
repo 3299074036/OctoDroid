@@ -515,4 +515,196 @@ public class ReleaseRadarFragmentTest {
                 .assertNotTerminated()
                 .assertNoValues();
     }
+
+    // ---- A 组补缺（2026-11-22）：ReleaseRadarFragment 剩余分支 ----
+
+    private static Object call(ReleaseRadarFragment f, String name,
+            Class<?>[] types, Object... args) throws Exception {
+        java.lang.reflect.Method m =
+                ReleaseRadarFragment.class.getDeclaredMethod(name, types);
+        m.setAccessible(true);
+        return m.invoke(f, args);
+    }
+
+    private static RadarHostActivity attachCreated(ReleaseRadarFragment f) {
+        RadarHostActivity activity =
+                Robolectric.buildActivity(RadarHostActivity.class).setup().get();
+        activity.getSupportFragmentManager().beginTransaction()
+                .add(android.R.id.content, f, "test")
+                .setMaxLifecycle(f, Lifecycle.State.CREATED).commitNow();
+        return activity;
+    }
+
+    private static void resume(ReleaseRadarFragment f, RadarHostActivity activity) {
+        activity.getSupportFragmentManager().beginTransaction()
+                .setMaxLifecycle(f, Lifecycle.State.RESUMED).commitNow();
+        idleMain();
+    }
+
+    private static MockedStatic<RadarGraphQL> mockFetchFor(String login,
+            Single<List<ReleaseRadarFragment.RadarItem>> single) {
+        MockedStatic<RadarGraphQL> mocked = Mockito.mockStatic(RadarGraphQL.class);
+        mocked.when(() -> RadarGraphQL.fetch(login)).thenReturn(single);
+        return mocked;
+    }
+
+    @Test
+    public void onViewCreated_completeButFailed_reloadsDirect() throws Exception {
+        // L100：mLoadComplete 为真但 mLoadFailed 为真时不走缓存渲染，重拉。
+        try (MockedStatic<RadarGraphQL> mocked = mockFetchFor("bob", Single.never());
+             MockedStatic<RadarCache> cacheMock =
+                     Mockito.mockStatic(RadarCache.class)) {
+            ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("bob");
+            RadarHostActivity activity = attachCreated(f);
+            setField(f, "mLoadComplete", true);
+            setField(f, "mLoadFailed", true);
+            setField(f, "mLatestItems", Arrays.asList(item("x", 1L)));
+            resume(f, activity);
+            mocked.verify(() -> RadarGraphQL.fetch("bob"), Mockito.times(1));
+            assertFalse((Boolean) field(f, "mLoadComplete"));
+            assertTrue((Boolean) field(f, "mLoadFailed"));
+        }
+    }
+
+    @Test
+    public void onViewCreated_completeNoItems_reloadsDirect() throws Exception {
+        // L100：mLoadComplete 为真但 mLatestItems 为空时不走缓存渲染，重拉。
+        try (MockedStatic<RadarGraphQL> mocked = mockFetchFor("bob", Single.never());
+             MockedStatic<RadarCache> cacheMock =
+                     Mockito.mockStatic(RadarCache.class)) {
+            ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("bob");
+            RadarHostActivity activity = attachCreated(f);
+            setField(f, "mLoadComplete", true);
+            setField(f, "mLoadFailed", false);
+            setField(f, "mLatestItems", null);
+            resume(f, activity);
+            mocked.verify(() -> RadarGraphQL.fetch("bob"), Mockito.times(1));
+            assertFalse((Boolean) field(f, "mLoadComplete"));
+            assertEquals(null, field(f, "mLatestItems"));
+        }
+    }
+
+    @Test
+    public void startDirectLoad_nullAdapter_skipsClear() throws Exception {
+        // L161：mAdapter 为空时不调 clear（直接调私有方法；CREATED 态尚无 view，
+        // setContentShown/updateEmptyState 均有判空，不崩溃）。
+        // 附带：setStage 排队的 runnable 在 getView() 为空时返回（L181）。
+        try (MockedStatic<RadarGraphQL> mocked = mockFetch(Single.never())) {
+            ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("alice");
+            attach(f);
+            setField(f, "mShowingCache", false);
+            call(f, "startDirectLoad", new Class<?>[]{boolean.class}, true);
+            idleMain();
+            assertNotNull(field(f, "mDirectLoad"));
+            assertFalse((Boolean) field(f, "mLoadComplete"));
+            assertEquals(null, field(f, "mLatestItems"));
+        }
+    }
+
+    @Test
+    public void setStage_rootNull_returns() throws Exception {
+        // L181：stage runnable 运行时 getView() 为空则直接返回。
+        try (MockedStatic<RadarGraphQL> mocked = mockFetch(Single.never())) {
+            ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("alice");
+            attach(f);
+            call(f, "setStage", new Class<?>[]{String.class}, "stage");
+            idleMain();
+            assertTrue(f.isAdded());
+            assertEquals(null, f.getView());
+        }
+    }
+
+    @Test
+    public void renderItems_detached_returns() throws Exception {
+        // L191/L192：未挂载时 renderItems 直接返回，不写 mLatestItems。
+        ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("alice");
+        call(f, "renderItems",
+                new Class<?>[]{java.util.List.class},
+                Arrays.asList(item("a", 1L)));
+        assertEquals(null, field(f, "mLatestItems"));
+    }
+
+    @Test
+    public void renderItems_nullAdapter_returns() throws Exception {
+        // L191/L192：已挂载但 mAdapter 为空（CREATED 态）时直接返回。
+        try (MockedStatic<RadarGraphQL> mocked = mockFetch(Single.never())) {
+            ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("alice");
+            attach(f);
+            assertEquals(null, field(f, "mAdapter"));
+            call(f, "renderItems",
+                    new Class<?>[]{java.util.List.class},
+                    Arrays.asList(item("a", 1L)));
+            assertEquals(null, field(f, "mLatestItems"));
+        }
+    }
+
+    @Test
+    public void onFreshData_detached_returns() throws Exception {
+        // L203/L204：未挂载时 onFreshData 直接返回，不置 mLoadComplete。
+        ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("alice");
+        call(f, "onFreshData",
+                new Class<?>[]{java.util.List.class},
+                Arrays.asList(item("a", 1L)));
+        assertFalse((Boolean) field(f, "mLoadComplete"));
+    }
+
+    @Test
+    public void onLoadComplete_directCall_isNoop() throws Exception {
+        // L220：onLoadComplete 是保留的空方法（Single 路径已不用），直接调用无操作。
+        ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("alice");
+        call(f, "onLoadComplete", new Class<?>[]{});
+        assertFalse((Boolean) field(f, "mLoadComplete"));
+    }
+
+    @Test
+    public void showDiagnostic_withItems_returns() throws Exception {
+        // L223/L224：adapter 已有数据时不弹诊断 toast。
+        try (MockedStatic<RadarGraphQL> mocked =
+                     mockFetch(Single.just(Arrays.asList(item("a", 1L))))) {
+            ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("alice");
+            attachResumed(f);
+            waitUntil(() -> {
+                try {
+                    return adapterCount(f) == 1;
+                } catch (Exception e) {
+                    return false;
+                }
+            });
+            assertEquals(null,
+                    org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+            call(f, "showDiagnostic", new Class<?>[]{});
+            assertEquals(null,
+                    org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void showDiagnostic_nullContext_returns() throws Exception {
+        // L223/L224：adapter 为空且 getContext() 为空时直接返回（第二臂）。
+        ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("alice");
+        setField(f, "mAdapter", new ReleaseRadarAdapter(mActivity));
+        call(f, "showDiagnostic", new Class<?>[]{});
+        assertEquals(null,
+                org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+    }
+
+    @Test
+    public void renderError_nullAdapter_showsError() throws Exception {
+        // L237：mAdapter 为空时走错误分支（不走静默缓存分支），照常弹错。
+        try (MockedStatic<RadarGraphQL> mocked = mockFetch(Single.never())) {
+            ReleaseRadarFragment f = ReleaseRadarFragment.newInstance("alice");
+            attachResumed(f);
+            setField(f, "mAdapter", null);
+            call(f, "renderError",
+                    new Class<?>[]{Throwable.class},
+                    new RuntimeException("boom"));
+            idleMain();
+            assertTrue((Boolean) field(f, "mLoadFailed"));
+            String expected = f.getString(R.string.radar_stage_load_failed,
+                    "RuntimeException: boom");
+            assertEquals(expected, emptyViewText(f));
+            assertTrue(org.robolectric.shadows.ShadowToast.getTextOfLatestToast()
+                    .contains("boom"));
+        }
+    }
 }

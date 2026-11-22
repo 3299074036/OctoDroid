@@ -1151,4 +1151,30 @@ public class IssueListActivityTest {
         waitFor(() -> get(activity, "mIsCollaborator") != null, 5000);
         assertEquals(false, get(activity, "mIsCollaborator"));
     }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void onPageMoved_searchMode_skipsFabScaling() {
+        // mSearchMode true: onPageMoved skips the FAB scaling block entirely
+        // (L240 first operand false), so the FAB scale stays 1.0.
+        IssueListActivity activity = launch(IssueListActivity.class, intent(false));
+        com.google.android.material.floatingactionbutton.FloatingActionButton fab =
+                new com.google.android.material.floatingactionbutton
+                        .FloatingActionButton(activity);
+        set(activity, "mCreateFab", fab);
+        set(activity, "mSearchMode", true);
+        activity.onPageMoved(0, 0.5f);
+        assertEquals(1.0f, fab.getScaleX(), 0.001f);
+        assertEquals(1.0f, fab.getScaleY(), 0.001f);
+    }
+
+    @Test
+    public void onPageMoved_nullFab_skipsSilently() {
+        // mCreateFab null: onPageMoved skips the FAB scaling block without
+        // crashing (L240 second operand false).
+        IssueListActivity activity = launch(IssueListActivity.class, intent(false));
+        set(activity, "mCreateFab", null);
+        activity.onPageMoved(0, 0.5f);
+    }
 }

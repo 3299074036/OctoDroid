@@ -422,4 +422,43 @@ public class NotificationAdapterTest {
         avatar.performClick();
         assertNull(AdapterTestSupport.shadowApp(context).getNextStartedActivity());
     }
+
+    @Test
+    public void markAsRead_singleNotification_otherUnreadInRepo_headerStaysUnread() {
+        Repository r = repo("o/r");
+        Repository r2 = repo("o/r2");
+        NotificationThread t1 = thread(r, "Issue", "t1", true);
+        NotificationThread t2 = thread(r, "Issue", "t2", true);
+        adapter.add(new NotificationHolder(r));
+        adapter.add(new NotificationHolder(t1));
+        adapter.add(new NotificationHolder(t2));
+        adapter.add(new NotificationHolder(r2));
+        assertFalse(adapter.markAsRead(null, t2));
+        assertTrue(adapter.getItem(2).isRead());
+        assertFalse(adapter.getItem(0).isRead());
+    }
+
+    @Test
+    public void markAsRead_singleNotification_headerWithNullRepo_staysUnread() {
+        Repository r = repo("o/r");
+        Repository r2 = repo("o/r2");
+        NotificationThread t1 = thread(r, "Issue", "t1", true);
+        adapter.add(new NotificationHolder((Repository) null));
+        adapter.add(new NotificationHolder(t1));
+        adapter.add(new NotificationHolder(r2));
+        assertTrue(adapter.markAsRead(null, t1));
+        assertTrue(adapter.getItem(1).isRead());
+        assertFalse(adapter.getItem(0).isRead());
+    }
+
+    @Test
+    public void onClick_unknownViewId_doesNothing() {
+        Repository r = repo("o/r");
+        NotificationThread t = thread(r, "Issue", "t", true);
+        NotificationAdapter.ViewHolder h = holderFor(new NotificationHolder(t));
+        h.onClick(new View(context));
+        assertTrue(markedRead.isEmpty());
+        assertTrue(unsubscribed.isEmpty());
+        assertNull(AdapterTestSupport.shadowApp(context).getNextStartedActivity());
+    }
 }

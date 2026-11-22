@@ -379,4 +379,48 @@ public class TopicDiscoveryFragmentTest {
         }
     }
 
+    @Test
+    public void editorAction_nonEnterKeyIsNotHandled() throws Exception {
+        // L85：event 非空但 keyCode 不是 ENTER → 不是搜索手势。
+        installTrampolineSchedulers();
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            SearchService service = mockSearchService();
+            mocked.when(() -> ServiceFactory.get(eq(SearchService.class), anyBoolean()))
+                    .thenReturn(service);
+            TopicDiscoveryFragment f = mountResumed(service);
+            pumpMainLooper();
+            EditText input = topicInputOf(f);
+            input.setText("flutter");
+            KeyEvent keyA = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A);
+            boolean handled = Shadows.shadowOf(input).getOnEditorActionListener().onEditorAction(
+                    input, EditorInfo.IME_ACTION_UNSPECIFIED, keyA);
+            assertFalse(handled);
+            assertEquals("android", topicOf(f));
+        } finally {
+            resetSchedulers();
+        }
+    }
+
+    @Test
+    public void selectTopic_nonChipChildIsSkipped() throws Exception {
+        // L117：chip 组里混进一个非 Chip 子 View，循环里跳过它。
+        installTrampolineSchedulers();
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            SearchService service = mockSearchService();
+            mocked.when(() -> ServiceFactory.get(eq(SearchService.class), anyBoolean()))
+                    .thenReturn(service);
+            TopicDiscoveryFragment f = mountResumed(service);
+            pumpMainLooper();
+            ChipGroup chips = chipGroupOf(f);
+            chips.addView(new View(mActivity));
+            Chip kotlin = (Chip) chips.getChildAt(9);
+            assertEquals("kotlin", kotlin.getText().toString());
+            kotlin.performClick();
+            assertEquals("kotlin", topicOf(f));
+            assertTrue(kotlin.isChecked());
+        } finally {
+            resetSchedulers();
+        }
+    }
+
 }

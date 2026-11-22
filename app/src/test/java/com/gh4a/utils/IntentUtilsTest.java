@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Looper;
@@ -46,9 +47,11 @@ import retrofit2.Response;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.fail;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -513,6 +516,32 @@ public class IntentUtilsTest {
     }
 
     @Test
+    public void createActivityChooserIntent_disabledBrowserIsSkipped() throws Exception {
+        // L213：!info.enabled 为真时跳过该浏览器。经 launchBrowser 公共路径
+        // 走不到这条边：Robolectric 的 queryIntentActivities 在查询层就
+        // 滤掉了 disabled 的 ResolveInfo（已有测试只覆盖了 !exported 边与
+        // 全合法边）。此处直接调私有方法、把 disabled 条目放进查询结果，
+        // 覆盖该防御分支。
+        Uri uri = Uri.parse("https://example.com/x.apk");
+        Intent queryIntent = browserQueryIntent(uri);
+        java.util.List<ResolveInfo> activities = new ArrayList<>();
+        activities.add(browserInfo("com.example.disabled", "Disabled", false, true));
+        activities.add(browserInfo("com.example.browser", "Valid", true, true));
+        PackageManager pm = mock(PackageManager.class);
+        when(pm.queryIntentActivities(any(Intent.class),
+                eq(PackageManager.MATCH_DEFAULT_ONLY))).thenReturn(activities);
+        Context ctx = mock(Context.class);
+        when(ctx.getPackageManager()).thenReturn(pm);
+        when(ctx.getPackageName()).thenReturn("com.gh4a");
+        java.lang.reflect.Method m = IntentUtils.class.getDeclaredMethod(
+                "createActivityChooserIntent", Context.class, Intent.class, Uri.class);
+        m.setAccessible(true);
+        Intent result = (Intent) m.invoke(null, ctx, queryIntent, uri);
+        assertNotNull(result);
+        assertEquals("com.example.browser", result.getPackage());
+    }
+
+    @Test
     public void launchBrowser_twoResolversShowsChooser() {
         Uri uri = Uri.parse("https://example.com/x.apk");
         shadowPm.addResolveInfoForIntent(browserQueryIntent(uri),
@@ -632,4 +661,70 @@ public class IntentUtilsTest {
         assertNull(restored.date);
         parcel.recycle();
     }
+    @Test
+    public void openLink_mailtoWithoutHandlerShowsToast() {
+        // L63-64：checkActivities(true) 后，无邮件应用可解析 mailto 时
+        // startActivity 抛 ActivityNotFoundException，弹链接打不开 toast。
+        Shadows.shadowOf((Application) mContext).checkActivities(true);
+        FragmentActivity activity = activity();
+        IntentUtils.openLinkInternallyOrExternally(activity,
+                Uri.parse("mailto:foo@bar.com"));
+        assertEquals(mContext.getString(R.string.link_not_openable), latestToast());
+        assertNull(startedIntent(activity));
+    }
+
+    @Test
+    public void openLink_httpSchemeFallsBackToBrowserToast() {
+        // L71：http scheme 时 !http 为假，继续走 LinkParser → 非 github 链接
+        // 回落浏览器；无浏览器时弹 no_browser_found。
+        TestActivity activity = baseActivity();
+        IntentUtils.openLinkInternallyOrExternally(activity,
+                Uri.parse("http://example.com/x"));
+        assertEquals(mContext.getString(R.string.no_browser_found), latestToast());
+    }
+
+    @Test
+    public void launchBrowser_seededBrowserUnresolvableShowsToast() {
+        // L101：chooser 找到浏览器、但 startActivity 时解析失败（测试环境
+        // 无真实浏览器）时抛 ActivityNotFoundException，弹 no_browser_found。
+        // 注意：必须用 Activity context 调 launchBrowser——Application
+        // context 调 startActivity 时 Robolectric 在解析之前就先抛
+        // AndroidRuntimeException（缺 FLAG_ACTIVITY_NEW_TASK），到不了
+        // 生产代码的 ActivityNotFoundException 分支；生产调用方也全是
+        // Activity（见 IntentUtils.launchBrowser 的调用点）。
+        Shadows.shadowOf((Application) mContext).checkActivities(true);
+        Uri uri = Uri.parse("https://example.com/x.apk");
+        shadowPm.addResolveInfoForIntent(browserQueryIntent(uri),
+                browserInfo("com.example.browser", "Example Browser", true, true));
+        FragmentActivity activity = activity();
+        IntentUtils.launchBrowser(activity, uri);
+        assertEquals(mContext.getString(R.string.no_browser_found), latestToast());
+    }
+
+    @Test
+    public void openInCustomTab_launchThrowsFallsBackToBrowser() {
+        // L159/L162-163：Custom Tabs 启动抛 ActivityNotFoundException 时
+        // 清包名缓存并回落系统浏览器；无浏览器时弹 no_browser_found。
+        Shadows.shadowOf((Application) mContext).checkActivities(true);
+        addChromeWithCustomTabsService();
+        setCustomTabsEnabled(true);
+        TestActivity activity = baseActivity();
+        IntentUtils.openInCustomTabOrBrowser(activity, Uri.parse("https://example.com/x"));
+        assertEquals(mContext.getString(R.string.no_browser_found), latestToast());
+    }
+
+    @Test
+    public void uncompressBytes_garbageThrowsUnchecked() throws Exception {
+        // L312-313：非 gzip 数据解压时 Inflater 抛错，包成 UncheckedIOException。
+        java.lang.reflect.Method m = IntentUtils.class.getDeclaredMethod(
+                "uncompressBytes", byte[].class);
+        m.setAccessible(true);
+        try {
+            m.invoke(null, (Object) new byte[]{1, 2, 3, 4});
+            fail("expected UncheckedIOException");
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            assertTrue(e.getCause() instanceof java.io.UncheckedIOException);
+        }
+    }
+
 }

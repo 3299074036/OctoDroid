@@ -192,6 +192,32 @@ public class CommitCommentLoadTaskTest {
         }
     }
 
+    // D2-1（生产缺陷，见报告）：getCommit 返回 200 + null body 时，
+    // load() 里 .map(ApiHelpers::throwOnFailure) 原样返回 null，
+    // RxJava 的 map 禁 null，在 L73 的 commit != null 守卫生效前即抛
+    // NullPointerException("The mapper function returned a null value")，
+    // 永远到不了 CommitActivity。本测试钉住当前行为；生产修好后应改回
+    // 期望 CommitActivity（原测试名 load_commitNull_opensCommitActivity）。
+    @Test
+    public void load_commitNull_throwsNullPointerException() {
+        Context ctx = ApplicationProvider.getApplicationContext();
+        RepositoryCommitService commitService = mock(RepositoryCommitService.class);
+        RepositoryCommentService commentService = mock(RepositoryCommentService.class);
+        when(commitService.getCommit(anyString(), anyString(), anyString()))
+                .thenReturn(Single.just(Response.success(null)));
+        stubComments(commentService, comment(7L, "src/Foo.java"));
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            stubServices(mocked, commitService, commentService);
+            try {
+                CommitCommentLoadTask.load(ctx, "octo", "cat", "abc123",
+                        new IntentUtils.InitialCommentMarker(7L)).blockingGet();
+                fail("expected NullPointerException");
+            } catch (NullPointerException e) {
+                assertEquals("The mapper function returned a null value.", e.getMessage());
+            }
+        }
+    }
+
     @Test
     public void load_commitFilesContainNullEntry_opensCommitActivity() {
         Context ctx = ApplicationProvider.getApplicationContext();

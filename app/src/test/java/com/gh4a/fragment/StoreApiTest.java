@@ -40,7 +40,9 @@ import org.mockito.MockedStatic;
 
 import java.lang.reflect.Field;
 import java.util.Date;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
@@ -457,6 +459,80 @@ public class StoreApiTest {
     @Test
     public void implicitCtor_instantiatesUtilityClass() {
         assertNotNull(new StoreApi());
+    }
+
+    @Test
+    public void fetchClient_doubleCheckedLocking_secondCallerSeesCachedClient()
+            throws Exception {
+        // L81/L82：第二个调用方在外层读到 null、进 synchronized 后重读到已缓存的 client。
+        Field f = fetchClientField();
+        OkHttpClient saved = (OkHttpClient) f.get(null);
+        OkHttpClient cached = mock(OkHttpClient.class);
+        try {
+            f.set(null, null);
+            CountDownLatch holderReady = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            AtomicReference<Object> result = new AtomicReference<>();
+            AtomicReference<Throwable> error = new AtomicReference<>();
+            Thread holder = new Thread(() -> {
+                synchronized (StoreApi.class) {
+                    holderReady.countDown();
+                    try {
+                        if (!release.await(10, TimeUnit.SECONDS)) {
+                            return;
+                        }
+                        f.set(null, cached);
+                    } catch (Exception e) {
+                        error.set(e);
+                    }
+                }
+            });
+            Thread worker = new Thread(() -> {
+                try {
+                    result.set(invokePrivate("fetchClient", new Class<?>[0]));
+                } catch (Throwable t) {
+                    error.set(t);
+                }
+            });
+            holder.start();
+            assertTrue(holderReady.await(10, TimeUnit.SECONDS));
+            worker.start();
+            // 等 worker 在 StoreApi.class 监视器上阻塞：此时它已读到外层 null，
+            // 接下来进 synchronized 后重读即看到 holder 刚写入的 client。
+            long deadline = System.currentTimeMillis() + 10000;
+            while (worker.getState() != Thread.State.BLOCKED
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10);
+            }
+            assertEquals(Thread.State.BLOCKED, worker.getState());
+            release.countDown();
+            worker.join(10000);
+            holder.join(10000);
+            assertNull(error.get());
+            assertFalse(worker.isAlive());
+            assertTrue(result.get() == cached);
+        } finally {
+            f.set(null, saved);
+        }
+    }
+
+    @Test
+    public void readFile_shortRead_returnsPartialContent() throws Exception {
+        // L308：文件长度谎报（length() > 实际字节数）时 read() 返回 -1 → break。
+        File dir = new File(mContext.getFilesDir(), "storeapi-test");
+        dir.mkdirs();
+        File empty = new File(dir, "empty.bin");
+        if (!empty.exists()) {
+            assertTrue(empty.createNewFile());
+        }
+        File lying = new File(empty.getPath()) {
+            @Override
+            public long length() {
+                return 8;
+            }
+        };
+        String out = (String) invokePrivate("readFile", new Class<?>[]{File.class}, lying);
+        assertEquals("", out);
     }
 
     @Test

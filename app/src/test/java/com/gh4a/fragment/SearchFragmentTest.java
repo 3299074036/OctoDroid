@@ -384,8 +384,9 @@ public class SearchFragmentTest {
     @Test
     public void onSuggestionClick_noSuggestionsAdapterReturnsTrue() throws Exception {
         // mSearch 未建建议适配器 → 直接返回 true，不碰 cursor。
-        // 注：mSearch 本身为 null 时直接 NPE（见缺陷记录 T-125），
-        // 生产上建议点击只在 SearchView 存在时触发，故用 mock 顶上测本分支。
+        // 注：mSearch 本身为 null 时 onSuggestionClick 首行判空返回 false（见
+        // onSuggestionClick_nullSearch_returnsFalse），不抛 NPE；缺陷记录里并无 T-125，
+        // 旧注有误。生产上建议点击只在 SearchView 存在时触发，故用 mock 顶上测本分支。
         SearchFragment f = attach(SearchFragment.newInstance(
                 SearchFragment.SEARCH_TYPE_REPO, null, false));
         setMockSearchView(f);
@@ -3131,5 +3132,238 @@ public class SearchFragmentTest {
                 SearchFragment.SEARCH_TYPE_REPO, null, false));
         CursorAdapter adapter = adapterWithMergedCursor(f);
         assertEquals(0, adapter.getItemViewType(5));
+    }
+
+    // ---- A 组补缺（2026-11-22）：SearchFragment 剩余分支 ----
+
+    @Test
+    public void capSearchBoxWidth_nullSearch_returns() throws Exception {
+        // L235：已挂载但 mSearch 为空时直接返回（|| 的第二臂；第一臂已有
+        // capSearchBoxWidth_detachedFragment_returns 覆盖，第三臂 getActivity()
+        // 为空在 isAdded() 为真时不可能）。
+        SearchFragment f = attach(SearchFragment.newInstance(
+                SearchFragment.SEARCH_TYPE_REPO, null, false));
+        assertEquals(null, field(f, "mSearch"));
+        call(f, "capSearchBoxWidth", new Class<?>[]{});
+        assertFalse((Boolean) field(f, "mToolbarInsetsSaved"));
+    }
+
+    @Test
+    public void onSuggestionClick_nullSearch_returnsFalse() {
+        // L809/L810：mSearch 为空时返回 false，不碰 cursor。
+        // 注：同文件 onSuggestionClick_noSuggestionsAdapterReturnsTrue 的注释称
+        // “mSearch 为空时直接 NPE（T-125）”，但当前代码首行即判空返回，
+        // 该注释疑似守卫补上之前所写；本测试即覆盖此守卫。
+        SearchFragment f = new SearchFragment();
+        assertFalse(f.onSuggestionClick(0));
+    }
+
+    @Test
+    public void loadRecentSearches_emptySuggestion_skipped_withPersistCheck() throws Exception {
+        // L1212：空串建议被跳过（isEmpty 为假分支）。
+        insertSuggestion("", 0);
+        Thread.sleep(5);
+        insertSuggestion("kotlin", 0);
+        Thread.sleep(5);
+        insertSuggestion("java", 0);
+        try {
+            // 先确认空串确实落盘，否则本测试是空测。
+            Cursor c = mActivity.getContentResolver().query(
+                    SuggestionsProvider.Columns.CONTENT_URI,
+                    new String[]{SuggestionsProvider.Columns.SUGGESTION},
+                    SuggestionsProvider.Columns.TYPE + " = ?",
+                    new String[]{"0"}, null);
+            boolean hasEmpty = false;
+            int rows = 0;
+            while (c != null && c.moveToNext()) {
+                rows++;
+                if ("".equals(c.getString(0))) hasEmpty = true;
+            }
+            if (c != null) c.close();
+            assertEquals(3, rows);
+            assertTrue(hasEmpty);
+            SearchFragment f = attach(SearchFragment.newInstance(
+                    SearchFragment.SEARCH_TYPE_REPO, null, false));
+            java.util.List<String> recents =
+                    (java.util.List<String>) call(f, "loadRecentSearches",
+                            new Class<?>[]{});
+            assertEquals(2, recents.size());
+            assertFalse(recents.contains(""));
+            assertTrue(recents.containsAll(
+                    java.util.Arrays.asList("kotlin", "java")));
+        } finally {
+            clearSuggestions();
+        }
+    }
+
+    @Test
+    public void loadRecentSearches_nullCursor_returnsEmpty() throws Exception {
+        // L1208：query 返回 null 时直接返回空列表（ContentResolver 用 mock
+        // 注入；生产上 provider 出错即返回 null）。
+        SearchFragment f = attach(SearchFragment.newInstance(
+                SearchFragment.SEARCH_TYPE_REPO, null, false));
+        SearchFragment spy = org.mockito.Mockito.spy(f);
+        android.content.Context mockCtx = mock(android.content.Context.class);
+        android.content.ContentResolver mockCr =
+                mock(android.content.ContentResolver.class);
+        when(mockCtx.getContentResolver()).thenReturn(mockCr);
+        when(mockCr.query(
+                org.mockito.ArgumentMatchers.any(android.net.Uri.class),
+                org.mockito.ArgumentMatchers.any(String[].class),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(String[].class),
+                org.mockito.ArgumentMatchers.anyString())).thenReturn(null);
+        when(spy.getContext()).thenReturn(mockCtx);
+        java.util.List<String> recents =
+                (java.util.List<String>) call(spy, "loadRecentSearches",
+                        new Class<?>[]{});
+        assertTrue(recents.isEmpty());
+    }
+
+    @Test
+    public void loadRecentSearches_queryThrows_returnsEmpty() throws Exception {
+        // L1215：query 抛错时 catch 住返回空列表。
+        SearchFragment f = attach(SearchFragment.newInstance(
+                SearchFragment.SEARCH_TYPE_REPO, null, false));
+        SearchFragment spy = org.mockito.Mockito.spy(f);
+        android.content.Context mockCtx = mock(android.content.Context.class);
+        android.content.ContentResolver mockCr =
+                mock(android.content.ContentResolver.class);
+        when(mockCtx.getContentResolver()).thenReturn(mockCr);
+        when(mockCr.query(
+                org.mockito.ArgumentMatchers.any(android.net.Uri.class),
+                org.mockito.ArgumentMatchers.any(String[].class),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(String[].class),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenThrow(new RuntimeException("provider boom"));
+        when(spy.getContext()).thenReturn(mockCtx);
+        java.util.List<String> recents =
+                (java.util.List<String>) call(spy, "loadRecentSearches",
+                        new Class<?>[]{});
+        assertTrue(recents.isEmpty());
+    }
+
+    @Test
+    public void loadRecentSearches_duplicateRowSkipped() throws Exception {
+        // L1212（第 3 轮）：cursor 吐出重复词时，第二遍被 !out.contains(s)
+        // 跳过。注意：真实 provider 的 suggestions 表有
+        // unique(type, suggestion) on conflict replace，同一词永远只存
+        // 一行——R1/R2 的“插 kotlin/java/kotlin 再查”实际只剩两行，
+        // 去重臂走真实库永远到不了；这里用 mock cursor 直接喂重复行。
+        SearchFragment f = attach(SearchFragment.newInstance(
+                SearchFragment.SEARCH_TYPE_REPO, null, false));
+        SearchFragment spy = org.mockito.Mockito.spy(f);
+        android.content.Context mockCtx = mock(android.content.Context.class);
+        android.content.ContentResolver mockCr =
+                mock(android.content.ContentResolver.class);
+        Cursor cursor = mock(Cursor.class);
+        when(cursor.getColumnIndexOrThrow(
+                SuggestionsProvider.Columns.SUGGESTION)).thenReturn(0);
+        when(cursor.moveToNext()).thenReturn(true, true, true, false);
+        when(cursor.getString(0)).thenReturn("kotlin", "java", "kotlin");
+        when(mockCtx.getContentResolver()).thenReturn(mockCr);
+        when(mockCr.query(
+                org.mockito.ArgumentMatchers.any(android.net.Uri.class),
+                org.mockito.ArgumentMatchers.any(String[].class),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(String[].class),
+                org.mockito.ArgumentMatchers.anyString())).thenReturn(cursor);
+        when(spy.getContext()).thenReturn(mockCtx);
+        java.util.List<String> recents =
+                (java.util.List<String>) call(spy, "loadRecentSearches",
+                        new Class<?>[]{});
+        assertEquals(java.util.Arrays.asList("kotlin", "java"), recents);
+    }
+
+    @Test
+    public void refreshDefaultHeader_deleteDetached_skipsRefresh() throws Exception {
+        // L1157：确认删除后、后台删完已 post 回调、主线程放行前卸掉
+        // fragment，回调里的 isAdded() 为假，不跑 refreshDefaultHeader。
+        insertSuggestion("kotlin", 0);
+        try {
+            SearchFragment f = attach(SearchFragment.newInstance(
+                    SearchFragment.SEARCH_TYPE_REPO, null, false));
+            setField(f, "mHotRepos", java.util.Collections.emptyList());
+            android.view.View header = inflateDefaultHeader(f);
+            call(f, "refreshDefaultHeader", new Class<?>[]{});
+            android.widget.LinearLayout recent = header.findViewById(
+                    com.gh4a.R.id.search_default_recent_container);
+            assertEquals(1, recent.getChildCount());
+            android.view.View chip = recent.getChildAt(0);
+            assertTrue(chip.performLongClick());
+            assertFalse(org.robolectric.shadows.ShadowDialog
+                    .getShownDialogs().isEmpty());
+            android.app.Dialog dialog = org.robolectric.shadows.ShadowDialog
+                    .getShownDialogs().get(0);
+            // 确定性重写（第 3 轮）：原版点确认后调 idleMain() 放行对话框的
+            // Handler 消息，但 idleMain 会把队列排空——后台线程若已暖
+            // （线程池复用），删除+post 可能在同一次 idleMain 里落点并
+            // 执行，refresh 在 fragment 仍 attach 时跑掉，chip 被空文案
+            // 替换，测试按时序随机失败；反之 post 若在 idleMain 之后才
+            // 落点，测试空转通过、L1157 假臂也覆盖不到（探针证实：某次跑
+            // 里 chip 在第一次 idleMain 后已是空文案、后台任务已完成）。
+            // 改法：不经过 Handler，直接反射取出 AlertController 的
+            // mButtonPositiveMessage.obj（即生产代码传给 setPositiveButton
+            // 的那个 OnClickListener），在主线程同步调用它——真实的删除
+            // +post 逻辑照常跑，但主队列在 remove 之前一次也不放行，post
+            // 不可能提前执行；随后等 post 入队（isIdle 翻转为假）再卸
+            // fragment，最后 idleMain 放行，lambda 必在 detached 态跑，
+            // isAdded() 假臂确定性覆盖。
+            DialogInterface.OnClickListener positiveListener =
+                    positiveButtonListener(
+                            (androidx.appcompat.app.AlertDialog) dialog);
+            positiveListener.onClick(dialog, DialogInterface.BUTTON_POSITIVE);
+            // 轮询等后台删完（上限 10 秒，chunk 负载下线程启动可能慢）。
+            long deadline = System.currentTimeMillis() + 10000;
+            int count = -1;
+            while (System.currentTimeMillis() < deadline) {
+                Cursor c = mActivity.getContentResolver().query(
+                        SuggestionsProvider.Columns.CONTENT_URI,
+                        new String[]{SuggestionsProvider.Columns._ID},
+                        SuggestionsProvider.Columns.TYPE + " = ?",
+                        new String[]{"0"}, null);
+                count = c == null ? 0 : c.getCount();
+                if (c != null) c.close();
+                if (count == 0) break;
+                Thread.sleep(50);
+            }
+            assertEquals(0, count);
+            // 等删除完成回调 post 到主队列（isIdle 翻转为假）再卸 fragment。
+            long postDeadline = System.currentTimeMillis() + 10000;
+            while (System.currentTimeMillis() < postDeadline
+                    && org.robolectric.Shadows.shadowOf(
+                            android.os.Looper.getMainLooper()).isIdle()) {
+                Thread.sleep(20);
+            }
+            assertFalse(org.robolectric.Shadows.shadowOf(
+                    android.os.Looper.getMainLooper()).isIdle());
+            mActivity.getSupportFragmentManager().beginTransaction()
+                    .remove(f).commitNow();
+            idleMain();
+            // chip 还在：refresh 没跑（跑了会重建 recent 区，chip 被空文案替换）。
+            assertEquals(1, recent.getChildCount());
+            assertEquals("kotlin",
+                    ((android.widget.TextView) recent.getChildAt(0))
+                            .getText().toString());
+        } finally {
+            clearSuggestions();
+        }
+    }
+
+    private static DialogInterface.OnClickListener positiveButtonListener(
+            androidx.appcompat.app.AlertDialog dialog) throws Exception {
+        // AppCompat AlertDialog.mAlert.mButtonPositiveMessage.obj 即
+        // setPositiveButton 时传的 listener（平时 ButtonHandler 经 Handler
+        // 消息分发它；这里直接取出来同步调用，跳过不确定的派发时序）。
+        java.lang.reflect.Field alertField =
+                androidx.appcompat.app.AlertDialog.class.getDeclaredField("mAlert");
+        alertField.setAccessible(true);
+        Object controller = alertField.get(dialog);
+        java.lang.reflect.Field msgField =
+                controller.getClass().getDeclaredField("mButtonPositiveMessage");
+        msgField.setAccessible(true);
+        android.os.Message msg = (android.os.Message) msgField.get(controller);
+        return (DialogInterface.OnClickListener) msg.obj;
     }
 }

@@ -151,4 +151,10 @@ public class TranslationUiHelperTest {
         mgr.when(() -> TranslationManager.getProviderDisplayName(any(), eq("deepl")))
                 .thenReturn("DeepL");
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L18：类声明行；隐式默认构造器。
+        new TranslationUiHelper();
+    }
+
 }

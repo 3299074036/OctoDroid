@@ -783,4 +783,44 @@ public class HtmlUtilsTest {
         assertTrue(encode("<?pi data?>x").toString().contains("x"));
         assertTrue(encode("a &nosuchentity; b").toString().contains("a"));
     }
+    @Test
+    public void encode_centeredDivBacksOffTrailingBlankLine() {
+        // L399-402：段落 span 末尾是 "\n\n"（空行）时 end 回退一格，
+        // 只包住 "hi\n" 而不是 "hi\n\n"。
+        Spanned spanned = encode("<div style=\"text-align: center\">hi</div>bye");
+        assertEquals("hi\n\nbye", spanned.toString());
+        AlignmentSpan[] spans = spanned.getSpans(0, spanned.length(),
+                AlignmentSpan.class);
+        assertEquals(1, spans.length);
+        assertEquals(0, spanned.getSpanStart(spans[0]));
+        assertEquals(3, spanned.getSpanEnd(spans[0]));
+    }
+
+    @Test
+    public void encode_emptyCenteredDivRemovesSpan() {
+        // L405-406：空 div 的 AlignmentSpan 范围为空（起始位置无内容可包，
+        // 末尾又无换行可补）时整个 span 被移除。
+        Spanned spanned = encode("<div style=\"text-align: center\"></div>");
+        assertEquals("", spanned.toString());
+        assertEquals(0, spanned.getSpans(0, spanned.length(),
+                AlignmentSpan.class).length);
+    }
+
+    @Test
+    public void encode_spaceAfterBlockEndIsNotDuplicated() {
+        // L1012：块结束后的空格前一个字符已是换行时，不再补空格。
+        Spanned spanned = encode("<p>hi</p> there");
+        assertEquals("hi\n\nthere", spanned.toString());
+    }
+
+    @Test
+    public void encode_spaceAfterSpaceIsNotDuplicated() {
+        // L1012 的另一半：前一个字符已是空格时，新的空格字符同样不补——
+        // characters() 里 pred == ' ' 使 `pred != ' '` 为假。输入 "a <b> b</b>"
+        // 是两个文本块（"a " 与 " b"），第二块开头的空格在 builder 已以空格
+        // 结尾时被吞掉，结果只有一个空格。
+        Spanned spanned = encode("a <b> b</b>");
+        assertEquals("a b", spanned.toString());
+    }
+
 }

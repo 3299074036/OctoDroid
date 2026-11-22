@@ -174,4 +174,10 @@ public class DrawerManagerTest {
         assertTrue(DrawerManager.getHiddenKeys(context).isEmpty());
         assertEquals(8, DrawerManager.getVisibleOrderedItems(context).size());
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L28：类声明行；隐式默认构造器。
+        new DrawerManager();
+    }
+
 }

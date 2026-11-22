@@ -16,12 +16,14 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Shadows;
+import org.robolectric.shadows.ShadowSystemClock;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -38,6 +40,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -492,4 +495,111 @@ public class UpdateCheckerTest {
     public void shouldAutoCheck_alwaysTrue() {
         assertTrue(UpdateChecker.shouldAutoCheck(null));
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L44：类声明行；隐式默认构造器。
+        new UpdateChecker();
+    }
+
+    @Test
+    public void getClient_doubleCheckedLock_innerFalseReturnsPreset() throws Exception {
+        // L74：内层 if (sClient == null) 的 false 分支，确定性复现
+        //（同 SingleFactory 的持锁手法，锁是 UpdateChecker.class）。
+        setClient(null);
+        OkHttpClient preset = new OkHttpClient();
+        java.util.concurrent.atomic.AtomicReference<OkHttpClient> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                result.set(getClientReflectively());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        synchronized (UpdateChecker.class) {
+            worker.start();
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (worker.getState() != Thread.State.BLOCKED
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(1);
+            }
+            assertEquals(Thread.State.BLOCKED, worker.getState());
+            setClient(preset);
+        }
+        worker.join(10_000);
+        assertSame(preset, result.get());
+    }
+
+    @Test
+    public void fetchLatestRelease_interruptedThrowsInterrupted() throws Exception {
+        // L207-209：poll 等待时测试线程被中断，catch 里置 interrupted 标志
+        // 并把 lastError 换成 IOException("interrupted")。
+        CountDownLatch never = new CountDownLatch(1);
+        Call hanging = mock(Call.class);
+        when(hanging.execute()).thenAnswer(invocation -> {
+            never.await();
+            return null;
+        });
+        stubCalls(hanging, hanging, hanging);
+        Thread testThread = Thread.currentThread();
+        Thread interrupter = new Thread(() -> {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException ignored) {
+            }
+            testThread.interrupt();
+        });
+        interrupter.start();
+        Method m = UpdateChecker.class.getDeclaredMethod(
+                "fetchLatestRelease", Context.class);
+        m.setAccessible(true);
+        try {
+            m.invoke(null, mContext);
+            fail("expected IOException");
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            assertTrue(e.getCause() instanceof IOException);
+            assertEquals("interrupted", e.getCause().getMessage());
+        } finally {
+            interrupter.join(2000);
+            // InterruptedException 已清掉中断标志；以防万一再清一次。
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    public void fetchLatestRelease_waitMsExhaustedBreaksLoop() throws Exception {
+        // L187-188：第一轮 poll 拿到一个失败的 Future 后，第二轮开头
+        // waitMs <= 0，直接 break，不再等满 30 秒。
+        // 关键：Robolectric 下 SystemClock.elapsedRealtime() 是虚拟时钟
+        //（PAUSED 模式默认冻结），必须由辅助线程 advanceBy(31s) 推进；
+        // 真实时间只花“慢失败”的 500ms，不是 30 秒。
+        Call slowFail = mock(Call.class);
+        when(slowFail.execute()).thenAnswer(invocation -> {
+            Thread.sleep(500);
+            throw new IOException();
+        });
+        CountDownLatch never = new CountDownLatch(1);
+        Call hanging = mock(Call.class);
+        when(hanging.execute()).thenAnswer(invocation -> {
+            never.await();
+            return null;
+        });
+        stubCalls(slowFail, hanging, hanging);
+        Thread advancer = new Thread(() -> {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException ignored) {
+            }
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(31));
+        });
+        advancer.start();
+        try {
+            RecordingCallback cb = runCheck();
+            assertEquals(0L, cb.latch.getCount());
+            assertEquals("java.io.IOException", cb.error);
+        } finally {
+            advancer.join(2000);
+        }
+    }
+
 }

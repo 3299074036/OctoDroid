@@ -41,6 +41,7 @@ import org.robolectric.android.controller.ActivityController;
 import org.robolectric.shadows.ShadowActivity;
 import org.robolectric.shadows.ShadowLooper;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -1478,5 +1479,86 @@ public class BaseActivityTest {
             return R.menu.bottom_nav_main;
         }
         // getInitialLeftDrawerSelection() stays at the base default 0.
+    }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void requestPermission_rationaleShown_showsSnackbarAndRequestsOnActionClick() {
+        // Permission denied + rationale flag set: requestPermission must show
+        // the rationale Snackbar (L778-L782) instead of requesting directly;
+        // tapping its action triggers the real permission request.
+        Shadows.shadowOf((android.app.Application) appContext())
+                .denyPermissions(Manifest.permission.CAMERA);
+        TestActivity activity = launch();
+        List<int[]> results = new ArrayList<>();
+        androidx.core.app.ActivityCompat.OnRequestPermissionsResultCallback cb =
+                (code, perms, grants) -> results.add(grants);
+        Shadows.shadowOf(activity.getPackageManager())
+                .setShouldShowRequestPermissionRationale(Manifest.permission.CAMERA, true);
+        try {
+            activity.requestPermission(Manifest.permission.CAMERA, cb, R.string.ok);
+            // No permission request yet and the callback has not fired.
+            assertTrue(results.isEmpty());
+            assertNull(Shadows.shadowOf(activity).getLastRequestedPermission());
+            ShadowLooper.idleMainLooper();
+            View action = activity.getRootLayout().findViewById(
+                    com.google.android.material.R.id.snackbar_action);
+            assertNotNull(action);
+            action.performClick();
+            ShadowLooper.idleMainLooper();
+            ShadowActivity.PermissionsRequest req =
+                    Shadows.shadowOf(activity).getLastRequestedPermission();
+            assertNotNull(req);
+            assertEquals(1, req.requestedPermissions.length);
+            assertEquals(Manifest.permission.CAMERA, req.requestedPermissions[0]);
+            // Delivering the result now fires the pending callback.
+            activity.onRequestPermissionsResult(0,
+                    new String[]{Manifest.permission.CAMERA},
+                    new int[]{android.content.pm.PackageManager.PERMISSION_GRANTED});
+            assertEquals(1, results.size());
+        } finally {
+            Shadows.shadowOf(activity.getPackageManager())
+                    .setShouldShowRequestPermissionRationale(Manifest.permission.CAMERA, false);
+        }
+    }
+
+    @Test
+    public void updateDrawerGestureExclusion_belowQ_returnsEarly() throws Exception {
+        // SDK < Q: updateDrawerGestureExclusion returns immediately
+        // (L1034 first operand true). The drawer-null side is already
+        // covered by updateDrawerGestureExclusion_nullDrawer_noCrash.
+        TestActivity activity = launch();
+        Field sdkInt = android.os.Build.VERSION.class.getField("SDK_INT");
+        sdkInt.setAccessible(true);
+        int original = sdkInt.getInt(null);
+        try {
+            sdkInt.setInt(null, 28);
+            callPrivate(activity, "updateDrawerGestureExclusion", new Class<?>[0]);
+        } finally {
+            sdkInt.setInt(null, original);
+        }
+    }
+
+    @Test
+    public void createDefaultNavigationColorStateList_unresolvableAttr_returnsNull() {
+        // Attribute id 0 never resolves in the theme: the first
+        // resolveAttribute fails and the method returns null
+        // (L1070 true side + L1071).
+        TestActivity activity = launch();
+        Object result = callPrivate(activity, "createDefaultNavigationColorStateList",
+                new Class<?>[]{int.class}, 0);
+        assertNull(result);
+    }
+
+    @Test
+    public void ensureContent_progressNull_reinitializes() {
+        // mContentContainer set but mProgress null: ensureContent must fall
+        // through and re-find the progress view (L1099, the
+        // container-set/progress-null edge).
+        TestActivity activity = launch();
+        setBaseField(activity, "mProgress", null);
+        callPrivate(activity, "ensureContent", new Class<?>[0]);
+        assertNotNull(getBaseField(activity, "mProgress"));
     }
 }

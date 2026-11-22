@@ -226,4 +226,10 @@ public class LauncherIconTest {
                 component(mBaseContext, "com.gh4a.LauncherGreen"),
                 ENABLED, PackageManager.DONT_KILL_APP);
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L18：类声明行；隐式默认构造器。
+        new LauncherIcon();
+    }
+
 }

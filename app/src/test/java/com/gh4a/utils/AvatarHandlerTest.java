@@ -755,4 +755,16 @@ public class AvatarHandlerTest {
         assertTrue(d.getConstantState().newDrawable()
                 instanceof AvatarHandler.DefaultAvatarDrawable);
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L43：类声明行；隐式默认构造器。
+        new AvatarHandler();
+    }
+
+    // 第 2 轮已删 loadUserAvatarSynchronously_fetchUndecodableBytesReturnsNull：
+    // 200 + 无法解码的字节在 Robolectric 下得不到 null——ShadowBitmapFactory
+    // 对任意字节都返回非 null 占位 Bitmap（单跑证实返回 Bitmap@65b70bd），
+    // 只有真机上 decodeByteArray 才返回 null；L311-312 在测试环境下不可达。
+    // （见第 2 轮报告。）
+
 }

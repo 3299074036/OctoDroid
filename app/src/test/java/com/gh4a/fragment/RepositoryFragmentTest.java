@@ -95,6 +95,13 @@ public class RepositoryFragmentTest {
         m.invoke(f, args);
     }
 
+    private static Object call(RepositoryFragment f, String name, Class<?>[] types,
+            Object... args) throws Exception {
+        Method m = RepositoryFragment.class.getDeclaredMethod(name, types);
+        m.setAccessible(true);
+        return m.invoke(f, args);
+    }
+
     private static Repository richRepo() {
         Permissions permissions = mock(Permissions.class);
         when(permissions.push()).thenReturn(true);
@@ -2030,5 +2037,921 @@ public class RepositoryFragmentTest {
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    // ---- A 组补缺（2026-11-22）：RepositoryFragment 剩余分支 ----
+
+    private static void setAdded(RepositoryFragment f, boolean added) throws Exception {
+        // Fragment.isAdded() 读 mHost != null && mAdded；只翻 mAdded 可在
+        // 保持 getActivity() 非空的前提下模拟“未挂载”。
+        java.lang.reflect.Field fld =
+                androidx.fragment.app.Fragment.class.getDeclaredField("mAdded");
+        fld.setAccessible(true);
+        fld.setBoolean(f, added);
+    }
+
+    private static java.lang.reflect.Method readmeSubscribeLambda() throws Exception {
+        // loadReadme 的成功回调 lambda：返回值 void、末参 Optional。
+        // map 阶段的 lambda 返回 Optional，可据此区分。
+        for (java.lang.reflect.Method m :
+                RepositoryFragment.class.getDeclaredMethods()) {
+            if (m.getName().startsWith("lambda$loadReadme")
+                    && m.getReturnType() == void.class
+                    && m.getParameterTypes().length >= 1
+                    && m.getParameterTypes()[m.getParameterTypes().length - 1]
+                            == java.util.Optional.class) {
+                m.setAccessible(true);
+                return m;
+            }
+        }
+        throw new IllegalStateException("readme subscribe lambda not found");
+    }
+
+    private static java.lang.reflect.Method readmeMapLambda() throws Exception {
+        // loadReadme 的 map 阶段 lambda：返回值 Optional、末参 Optional。
+        // javap 核对签名：
+        // lambda$loadReadme$8(String, String, Context, Long, Optional)。
+        // 与返回 void 的订阅 lambda（lambda$loadReadme$10）以返回值区分。
+        for (java.lang.reflect.Method m :
+                RepositoryFragment.class.getDeclaredMethods()) {
+            if (m.getName().startsWith("lambda$loadReadme")
+                    && m.getReturnType() == java.util.Optional.class
+                    && m.getParameterTypes().length >= 1
+                    && m.getParameterTypes()[m.getParameterTypes().length - 1]
+                            == java.util.Optional.class) {
+                m.setAccessible(true);
+                return m;
+            }
+        }
+        throw new IllegalStateException("readme map lambda not found");
+    }
+
+    private static java.lang.reflect.Method pickProviderLambda() throws Exception {
+        for (java.lang.reflect.Method m :
+                RepositoryFragment.class.getDeclaredMethods()) {
+            if (m.getName().startsWith("lambda$pickProviderAndRetranslate")
+                    && m.getParameterTypes().length == 1
+                    && m.getParameterTypes()[0] == String.class) {
+                m.setAccessible(true);
+                return m;
+            }
+        }
+        throw new IllegalStateException("pick-provider lambda not found");
+    }
+
+    private static com.meisolsson.githubsdk.service.search.SearchService
+            neverSearchService() {
+        com.meisolsson.githubsdk.service.search.SearchService service =
+                mock(com.meisolsson.githubsdk.service.search.SearchService.class);
+        when(service.searchIssues(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(0L)))
+                .thenReturn(io.reactivex.Single.never());
+        return service;
+    }
+
+    @Test
+    public void fillData_privateRowShowsDivider() throws Exception {
+        // L310：无 fork、仅私有行可见时分隔线仍显示（|| 的第二臂）。
+        Repository repo = Repository.builder()
+                .fullName("octo/cat")
+                .owner(User.builder().login("octo").build())
+                .name("cat")
+                .isPrivate(true)
+                .build();
+        RepositoryFragment f = attachWithContent(repo);
+        callVoid(f, "fillData", new Class<?>[]{});
+        View content = (View) field(f, "mContentView");
+        assertEquals(View.VISIBLE,
+                content.findViewById(R.id.repository_overview_row_divider)
+                        .getVisibility());
+    }
+
+    @Test
+    public void fillData_languageRowShowsDivider() throws Exception {
+        // L311：无 fork、不私有、仅语言行可见时分隔线仍显示（|| 的第三臂）。
+        Repository repo = Repository.builder()
+                .fullName("octo/cat")
+                .owner(User.builder().login("octo").build())
+                .name("cat")
+                .language("Java")
+                .build();
+        RepositoryFragment f = attachWithContent(repo);
+        callVoid(f, "fillData", new Class<?>[]{});
+        View content = (View) field(f, "mContentView");
+        assertEquals(View.VISIBLE,
+                content.findViewById(R.id.repository_overview_row_divider)
+                        .getVisibility());
+    }
+
+    @Test
+    public void fillData_authorizedSkipsStarWatchUiUpdates() throws Exception {
+        // L343：已登录时不刷 star/watch 行的文本与开关态。
+        com.gh4a.Gh4Application mockApp = mock(com.gh4a.Gh4Application.class);
+        when(mockApp.isAuthorized()).thenReturn(true);
+        RepositoryFragment f = attachWithContent(richRepo());
+        try (org.mockito.MockedStatic<com.gh4a.Gh4Application> mockedApp =
+                     org.mockito.Mockito.mockStatic(com.gh4a.Gh4Application.class,
+                             org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            mockedApp.when(com.gh4a.Gh4Application::get).thenReturn(mockApp);
+            callVoid(f, "fillData", new Class<?>[]{});
+            View content = (View) field(f, "mContentView");
+            assertFalse(rowText(content, R.id.stars_row).contains("42"));
+            assertFalse(rowText(content, R.id.watchers_row).contains("3"));
+        }
+    }
+
+    @Test
+    public void fillData_permissionsPushFalseHidesCollaborators() throws Exception {
+        // L353：permissions 非空但 push 为假时协作者标签隐藏。
+        Permissions permissions = mock(Permissions.class);
+        when(permissions.push()).thenReturn(false);
+        Repository repo = Repository.builder()
+                .fullName("octo/cat")
+                .owner(User.builder().login("octo").build())
+                .name("cat")
+                .permissions(permissions)
+                .build();
+        RepositoryFragment f = attachWithContent(repo);
+        callVoid(f, "fillData", new Class<?>[]{});
+        View content = (View) field(f, "mContentView");
+        assertEquals(View.GONE,
+                content.findViewById(R.id.tv_collaborators_label).getVisibility());
+    }
+
+    @Test
+    public void fillTextView_withStringIdFormatsText() throws Exception {
+        // L411/L412：stringId 非 0 时按格式串设文本。
+        RepositoryFragment f = attachWithContent(repo());
+        callVoid(f, "fillTextView",
+                new Class<?>[]{int.class, int.class, String.class},
+                R.id.tv_desc, R.string.repo_language, "Java");
+        View content = (View) field(f, "mContentView");
+        assertEquals("Written in Java", text(content, R.id.tv_desc));
+        assertEquals(View.VISIBLE,
+                content.findViewById(R.id.tv_desc).getVisibility());
+    }
+
+    @Test
+    public void onOtherInfoLabelClick_unknownIdIsNoop() throws Exception {
+        // L468（releases 条件为假）+ L472（intent 为 null 时不跳转）。
+        RepositoryFragment f = attachWithContent(richRepo());
+        callVoid(f, "fillData", new Class<?>[]{});
+        android.view.View label = new android.view.View(mActivity);
+        label.setId(R.id.tv_repo_name);
+        callVoid(f, "onOtherInfoLabelClick", new Class<?>[]{android.view.View.class},
+                label);
+        assertEquals(null, org.robolectric.Shadows.shadowOf(mActivity)
+                .getNextStartedActivity());
+    }
+
+    @Test
+    public void onRefresh_nullViewsSkipResets() throws Exception {
+        // L177/L183/L197 + L200（未加载）：视图字段全空时 onRefresh 只跑加载。
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, null, neverSearchService(), null)) {
+            RepositoryFragment f = attachWithContent(repo());
+            setField(f, "mReadmeView", null);
+            setField(f, "mLoadingView", null);
+            setField(f, "mContentView", null);
+            setField(f, "mImageGetter", null);
+            setField(f, "mIsReadmeLoaded", false);
+            callVoid(f, "onRefresh", new Class<?>[]{});
+            idleMainLooper();
+            assertEquals(null, field(f, "mIsStarring"));
+            assertEquals(null, field(f, "mIsWatching"));
+            assertEquals(null, field(f, "mOriginalReadmeHtml"));
+        }
+    }
+
+    @Test
+    public void onRefresh_nullLoadingViewWithExpandedSkips() throws Exception {
+        // L180：mLoadingView 为 null 时即使展开也不碰 loading 行。
+        // 注意：不能同时置 mIsReadmeLoaded=true——onRefresh 会调 loadReadme(true)，
+        // 其 doOnSubscribe 里的 updateReadmeVisibility() 对 mLoadingView 无守卫
+        // （RepositoryFragment.java:499-501，与 L180/L267 的守卫不一致），
+        // 空 loading 视图会在订阅阶段 NPE，订阅静默失败、mIsReadmeLoaded 永不
+        // 为 true。见报告 A2-1。该测试只覆盖 L180 本身，故令 readme 未加载。
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, null, searchService(), readmeService("<p>readme</p>"))) {
+            RepositoryFragment f = attachResumed(repoWithIssues());
+            setField(f, "mImageGetter", null);
+            setField(f, "mIsReadmeLoaded", false);
+            setField(f, "mIsReadmeExpanded", true);
+            setField(f, "mLoadingView", null);
+            setField(f, "mIsWatching", false);
+            setField(f, "mIsStarring", true);
+            callVoid(f, "onRefresh", new Class<?>[]{});
+            idleMainLooper();
+            assertEquals(null, field(f, "mIsWatching"));
+            assertEquals(null, field(f, "mIsStarring"));
+            assertFalse((Boolean) field(f, "mIsReadmeLoaded"));
+        }
+    }
+
+    @Test
+    public void onRefresh_nullWatcherRowSkipsSetText() throws Exception {
+        // L189：mIsWatching 非空但行空时不调 setText，仍清 null。
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, null, searchService(), readmeService("<p>readme</p>"))) {
+            RepositoryFragment f = attachResumed(repoWithIssues());
+            setField(f, "mImageGetter", mock(HttpImageGetter.class));
+            setField(f, "mIsWatching", false);
+            setField(f, "mWatcherRow", null);
+            callVoid(f, "onRefresh", new Class<?>[]{});
+            assertEquals(null, field(f, "mIsWatching"));
+        }
+    }
+
+    @Test
+    public void onRefresh_nullStarsRowSkipsSetText() throws Exception {
+        // L193：mIsStarring 非空但行空时不调 setText，仍清 null。
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, null, searchService(), readmeService("<p>readme</p>"))) {
+            RepositoryFragment f = attachResumed(repoWithIssues());
+            setField(f, "mImageGetter", mock(HttpImageGetter.class));
+            setField(f, "mIsStarring", true);
+            setField(f, "mStarsRow", null);
+            callVoid(f, "onRefresh", new Class<?>[]{});
+            assertEquals(null, field(f, "mIsStarring"));
+        }
+    }
+
+    @Test
+    public void onViewCreated_savedStateLoadedOnlyLoadsReadme() throws Exception {
+        // L227：仅 mIsReadmeLoaded 为真（未展开）时 onViewCreated 也加载。
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, null, searchService(), readmeService("<p>readme</p>"))) {
+            Bundle saved = new Bundle();
+            saved.putBoolean("is_readme_loaded", true);
+            java.lang.reflect.Constructor<androidx.fragment.app.Fragment.SavedState> ctor =
+                    androidx.fragment.app.Fragment.SavedState.class
+                            .getDeclaredConstructor(Bundle.class);
+            ctor.setAccessible(true);
+            androidx.fragment.app.Fragment.SavedState state = ctor.newInstance(saved);
+            RepositoryFragment f = RepositoryFragment.newInstance(repoWithIssues(), "main");
+            f.setInitialSavedState(state);
+            mActivity.setTheme(R.style.AppTheme);
+            mActivity.getSupportFragmentManager().beginTransaction().add(f, "test")
+                    .setMaxLifecycle(f, Lifecycle.State.RESUMED).commitNow();
+            setField(f, "mImageGetter", mock(HttpImageGetter.class));
+            awaitReadmeLoaded(f);
+            assertFalse((Boolean) field(f, "mIsReadmeExpanded"));
+            assertTrue((Boolean) field(f, "mIsReadmeLoaded"));
+        }
+    }
+
+    @Test
+    public void loadReadme_mapStageSkipsEncodeWhenNotAdded() throws Exception {
+        // L526：map 阶段 isAdded() 为假时不调 encode。
+        HttpImageGetter getter = mock(HttpImageGetter.class);
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, null, searchService(), readmeService("<p>readme</p>"))) {
+            RepositoryFragment f = attachWithContent(repo());
+            setField(f, "mImageGetter", getter);
+            setAdded(f, false);
+            callVoid(f, "loadReadme", new Class<?>[]{boolean.class}, false);
+            Thread.sleep(1000);
+            idleMainLooper();
+            org.mockito.Mockito.verify(getter, org.mockito.Mockito.never())
+                    .encode(org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyString());
+        }
+    }
+
+    @Test
+    public void loadReadme_mapStageSkipsEncodeWhenImageGetterNull() throws Exception {
+        // L526：map 阶段 isAdded() 为真但 mImageGetter 为 null 时不调 encode。
+        // 与 loadReadme_mapStageSkipsEncodeWhenNotAdded 互补（那个覆 isAdded()
+        // 为假臂）。空 getter 时订阅回调同样提前返回，故只断言无崩溃且
+        // mOriginalReadmeHtml 未写入。
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, null, searchService(), readmeService("<p>readme</p>"))) {
+            RepositoryFragment f = attachWithContent(repo());
+            setField(f, "mImageGetter", null);
+            callVoid(f, "loadReadme", new Class<?>[]{boolean.class}, false);
+            Thread.sleep(1000);
+            idleMainLooper();
+            assertEquals(null, field(f, "mOriginalReadmeHtml"));
+        }
+    }
+
+    @Test
+    public void loadReadme_subscribeSkipsBindWhenNotAdded() throws Exception {
+        // L541：成功回调里 !isAdded() 时直接返回。
+        RepositoryFragment f = new RepositoryFragment();
+        java.lang.reflect.Method lambda = readmeSubscribeLambda();
+        lambda.invoke(f, new Object[]{null, java.util.Optional.of("<p>hi</p>")});
+        assertEquals(null, field(f, "mOriginalReadmeHtml"));
+    }
+
+    @Test
+    public void loadReadme_subscribeSkipsBindWhenViewNull() throws Exception {
+        // L541：CREATED 态（getView() 为 null）时成功回调直接返回。
+        RepositoryFragment f = attachWithContent(repo());
+        setField(f, "mImageGetter", mock(HttpImageGetter.class));
+        java.lang.reflect.Method lambda = readmeSubscribeLambda();
+        lambda.invoke(f, new Object[]{1L, java.util.Optional.of("<p>hi</p>")});
+        assertEquals(null, field(f, "mOriginalReadmeHtml"));
+        assertFalse((Boolean) field(f, "mIsReadmeLoaded"));
+    }
+
+    @Test
+    public void loadReadme_subscribeSkipsBindWhenReadmeViewNull() throws Exception {
+        // L541：mReadmeView 为 null 时成功回调直接返回。
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, null, searchService(), readmeService("<p>readme</p>"))) {
+            RepositoryFragment f = attachResumed(repoWithIssues());
+            setField(f, "mImageGetter", mock(HttpImageGetter.class));
+            setField(f, "mReadmeView", null);
+            java.lang.reflect.Method lambda = readmeSubscribeLambda();
+            lambda.invoke(f, new Object[]{1L, java.util.Optional.of("<p>hi</p>")});
+            assertEquals(null, field(f, "mOriginalReadmeHtml"));
+            assertFalse((Boolean) field(f, "mIsReadmeLoaded"));
+        }
+    }
+
+    @Test
+    public void onTranslateButtonClicked_translatingWithoutTranslatorResets()
+            throws Exception {
+        // L566：翻译中但 translator 已空时直接复位，不调 cancel。
+        RepositoryFragment f = attachWithContent(repo());
+        setField(f, "mReadmeTranslator", null);
+        setField(f, "mIsTranslating", true);
+        callVoid(f, "onTranslateButtonClicked", new Class<?>[]{});
+        assertFalse((Boolean) field(f, "mIsTranslating"));
+        assertTrue(org.robolectric.shadows.ShadowToast.showedToast(
+                mActivity.getString(R.string.translate_cancelled)));
+    }
+
+    @Test
+    public void onTranslateButtonClicked_switchBackWithNullOriginalSkipsRebind()
+            throws Exception {
+        // L578：切回原文但原文为空时不 rebind。
+        RepositoryFragment f = attachWithContent(repo());
+        HttpImageGetter getter = mock(HttpImageGetter.class);
+        setField(f, "mImageGetter", getter);
+        setField(f, "mOriginalReadmeHtml", null);
+        setField(f, "mShowingTranslated", true);
+        callVoid(f, "onTranslateButtonClicked", new Class<?>[]{});
+        assertFalse((Boolean) field(f, "mShowingTranslated"));
+        org.mockito.Mockito.verify(getter, org.mockito.Mockito.never())
+                .rebind(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    public void startWithDefaultProvider_noActivityIsNoop() throws Exception {
+        // L601：getActivity() 为 null 时直接返回。
+        RepositoryFragment f = RepositoryFragment.newInstance(repo(), "main");
+        setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+        callVoid(f, "startWithDefaultProvider", new Class<?>[]{});
+        assertFalse((Boolean) field(f, "mIsTranslating"));
+        assertEquals(null, field(f, "mReadmeTranslator"));
+    }
+
+    @Test
+    public void pickProviderAndRetranslate_noActivityIsNoop() throws Exception {
+        // L616：getActivity() 为 null 时直接返回。
+        RepositoryFragment f = RepositoryFragment.newInstance(repo(), "main");
+        setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+        callVoid(f, "pickProviderAndRetranslate", new Class<?>[]{});
+        assertFalse((Boolean) field(f, "mIsTranslating"));
+        assertEquals(null, field(f, "mReadmeTranslator"));
+    }
+
+    @Test
+    public void pickProviderAndRetranslate_translatingIsNoop() throws Exception {
+        // L616：翻译中时直接返回，不弹选择框。
+        RepositoryFragment f = attachWithContent(repo());
+        setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+        setField(f, "mIsTranslating", true);
+        callVoid(f, "pickProviderAndRetranslate", new Class<?>[]{});
+        assertEquals(null, field(f, "mReadmeTranslator"));
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void startReadmeTranslation_noActivityIsNoop() throws Exception {
+        // L630：getActivity() 为 null 时直接返回。
+        RepositoryFragment f = RepositoryFragment.newInstance(repo(), "main");
+        setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+        callVoid(f, "startReadmeTranslation", new Class<?>[]{String.class}, "google");
+        assertFalse((Boolean) field(f, "mIsTranslating"));
+        assertEquals(null, field(f, "mReadmeTranslator"));
+    }
+
+    @Test
+    public void pickProviderCallback_notAddedSkipsToast() throws Exception {
+        // L621：provider 回调里 isAdded() 为假时不发切换 toast。
+        RepositoryFragment f = attachWithContent(repo());
+        setAdded(f, false);
+        java.lang.reflect.Method lambda = pickProviderLambda();
+        lambda.invoke(f, "google");
+        assertEquals(null,
+                org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+        assertFalse((Boolean) field(f, "mIsTranslating"));
+    }
+
+    private static Translator blockingTranslator(CountDownLatch entered,
+            CountDownLatch release) throws Exception {
+        Translator translator = mock(Translator.class);
+        when(translator.translate(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(inv -> {
+                    if ("Hello".equals(inv.getArgument(0))) {
+                        return "Hello";
+                    }
+                    entered.countDown();
+                    release.await(5, TimeUnit.SECONDS);
+                    return "TRANSLATED";
+                });
+        return translator;
+    }
+
+    @Test
+    public void startReadmeTranslation_progressDetachedReturns() throws Exception {
+        // L649：翻译中途宿主被拆时 onProgress 在 getActivity 守卫处返回。
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (org.mockito.MockedStatic<TranslationManager> mocked =
+                     mockTranslator(blockingTranslator(entered, release))) {
+            RepositoryFragment f = attachResumed(repoWithIssues());
+            setField(f, "mImageGetter", mock(HttpImageGetter.class));
+            setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+            callVoid(f, "startReadmeTranslation", new Class<?>[]{String.class},
+                    "google");
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            mActivity.getSupportFragmentManager().beginTransaction()
+                    .remove(f).commitNow();
+            Thread.sleep(400);
+            idleMainLooper();
+            assertFalse((Boolean) field(f, "mShowingTranslated"));
+            assertEquals(null, field(f, "mTranslatedReadmeHtml"));
+        }
+    }
+
+    @Test
+    public void startReadmeTranslation_progressWithNullReadmeViewReturns()
+            throws Exception {
+        // L649（mReadmeView 为 null）+ L673/L674（同）：onProgress 不动按钮，
+        // onComplete 不 rebind，但翻译态仍置真。
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (org.mockito.MockedStatic<TranslationManager> mocked =
+                     mockTranslator(blockingTranslator(entered, release))) {
+            RepositoryFragment f = attachResumed(repoWithIssues());
+            HttpImageGetter getter = mock(HttpImageGetter.class);
+            setField(f, "mImageGetter", getter);
+            setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+            callVoid(f, "startReadmeTranslation", new Class<?>[]{String.class},
+                    "google");
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            setField(f, "mReadmeView", null);
+            release.countDown();
+            Thread.sleep(400);
+            idleMainLooper();
+            assertTrue((Boolean) field(f, "mShowingTranslated"));
+            org.mockito.Mockito.verify(getter, org.mockito.Mockito.never())
+                    .rebind(org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any());
+        }
+    }
+
+    @Test
+    public void startReadmeTranslation_completeWithNullImageGetterSkipsRebind()
+            throws Exception {
+        // L673/L674：onComplete 时 mImageGetter 为 null 则不 rebind。
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (org.mockito.MockedStatic<TranslationManager> mocked =
+                     mockTranslator(blockingTranslator(entered, release))) {
+            RepositoryFragment f = attachResumed(repoWithIssues());
+            HttpImageGetter getter = mock(HttpImageGetter.class);
+            setField(f, "mImageGetter", getter);
+            setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+            callVoid(f, "startReadmeTranslation", new Class<?>[]{String.class},
+                    "google");
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            setField(f, "mImageGetter", null);
+            release.countDown();
+            Thread.sleep(400);
+            idleMainLooper();
+            assertTrue((Boolean) field(f, "mShowingTranslated"));
+            org.mockito.Mockito.verify(getter, org.mockito.Mockito.never())
+                    .rebind(org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any());
+        }
+    }
+
+    @Test
+    public void startReadmeTranslation_completeWithNullViewSkipsRebind()
+            throws Exception {
+        // L673/L674：onComplete 时 getView() 为 null 则不 rebind。
+        try (org.mockito.MockedStatic<TranslationManager> mocked =
+                     mockTranslator(translatorReturning("TRANSLATED"))) {
+            RepositoryFragment f = attachWithContent(repo());
+            HttpImageGetter getter = mock(HttpImageGetter.class);
+            setField(f, "mImageGetter", getter);
+            setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+            callVoid(f, "startReadmeTranslation", new Class<?>[]{String.class},
+                    "google");
+            Thread.sleep(1000);
+            idleMainLooper();
+            assertTrue((Boolean) field(f, "mShowingTranslated"));
+            org.mockito.Mockito.verify(getter, org.mockito.Mockito.never())
+                    .rebind(org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any());
+        }
+    }
+
+    @Test
+    public void startReadmeTranslation_completeNotAddedSkipsRebind() throws Exception {
+        // L673/L674：onComplete 时 isAdded() 为假则不 rebind。
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (org.mockito.MockedStatic<TranslationManager> mocked =
+                     mockTranslator(blockingTranslator(entered, release))) {
+            RepositoryFragment f = attachResumed(repoWithIssues());
+            HttpImageGetter getter = mock(HttpImageGetter.class);
+            setField(f, "mImageGetter", getter);
+            setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+            callVoid(f, "startReadmeTranslation", new Class<?>[]{String.class},
+                    "google");
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            setAdded(f, false);
+            release.countDown();
+            Thread.sleep(400);
+            idleMainLooper();
+            assertTrue((Boolean) field(f, "mShowingTranslated"));
+            org.mockito.Mockito.verify(getter, org.mockito.Mockito.never())
+                    .rebind(org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any());
+        }
+    }
+
+    @Test
+    public void startReadmeTranslation_errorNotAddedSkipsToast() throws Exception {
+        // L687：onError 时 isAdded() 为假则不发失败 toast。
+        try (org.mockito.MockedStatic<TranslationManager> mocked =
+                     mockTranslator(translatorFailing())) {
+            RepositoryFragment f = attachResumed(repoWithIssues());
+            setField(f, "mImageGetter", mock(HttpImageGetter.class));
+            setField(f, "mOriginalReadmeHtml", "<p>hi</p>");
+            callVoid(f, "startReadmeTranslation", new Class<?>[]{String.class},
+                    "google");
+            // 等后台线程把 onError 排进主 looper（未执行），再翻 mAdded
+            Thread.sleep(500);
+            setAdded(f, false);
+            idleMainLooper();
+            assertFalse((Boolean) field(f, "mIsTranslating"));
+            assertFalse(org.robolectric.shadows.ShadowToast.showedToast(
+                    mActivity.getString(R.string.translate_failed) + ": boom"));
+        }
+    }
+
+    @Test
+    public void toggleStarringState_inFlightIsNoop() throws Exception {
+        // L744：在途时不发新的 star/unstar 请求。
+        com.meisolsson.githubsdk.service.activity.StarringService service =
+                mock(com.meisolsson.githubsdk.service.activity.StarringService.class);
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(service, null, null, null)) {
+            RepositoryFragment f = attachWithContent(richRepo());
+            callVoid(f, "fillData", new Class<?>[]{});
+            setField(f, "mIsStarring", true);
+            setField(f, "mStarWatchInFlight", true);
+            callVoid(f, "toggleStarringState", new Class<?>[]{});
+            org.mockito.Mockito.verify(service, org.mockito.Mockito.never())
+                    .starRepository(org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.anyString());
+            org.mockito.Mockito.verify(service, org.mockito.Mockito.never())
+                    .unstarRepository(org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.anyString());
+        }
+    }
+
+    @Test
+    public void toggleStarringState_successWithNullStarringSkipsFlip()
+            throws Exception {
+        // L766：成功回包时 mIsStarring 已空则不翻态、不弹分组框。
+        com.meisolsson.githubsdk.service.activity.StarringService service =
+                mock(com.meisolsson.githubsdk.service.activity.StarringService.class);
+        CountDownLatch release = new CountDownLatch(1);
+        when(service.unstarRepository(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(latchSingle(release, false));
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(service, null, null, null)) {
+            RepositoryFragment f = attachWithContent(richRepo());
+            callVoid(f, "fillData", new Class<?>[]{});
+            StarBatchMoveViewModel vm = mock(StarBatchMoveViewModel.class);
+            setField(f, "mMoveViewModel", vm);
+            setField(f, "mIsStarring", true);
+            callVoid(f, "toggleStarringState", new Class<?>[]{});
+            setField(f, "mIsStarring", null);
+            release.countDown();
+            awaitNotInFlight(f);
+            assertFalse((Boolean) field(f, "mStarWatchInFlight"));
+            assertEquals(null, field(f, "mIsStarring"));
+            org.mockito.Mockito.verify(vm, org.mockito.Mockito.never())
+                    .fetchStarLists(org.mockito.ArgumentMatchers.any());
+        }
+    }
+
+    @Test
+    public void toggleWatchingState_inFlightIsNoop() throws Exception {
+        // L956：在途时不发新的订阅/退订请求。
+        com.meisolsson.githubsdk.service.activity.WatchingService service =
+                mock(com.meisolsson.githubsdk.service.activity.WatchingService.class);
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, service, null, null)) {
+            RepositoryFragment f = attachWithContent(richRepo());
+            callVoid(f, "fillData", new Class<?>[]{});
+            setField(f, "mIsWatching", true);
+            setField(f, "mStarWatchInFlight", true);
+            callVoid(f, "toggleWatchingState", new Class<?>[]{});
+            org.mockito.Mockito.verify(service, org.mockito.Mockito.never())
+                    .deleteRepositorySubscription(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.anyString());
+            org.mockito.Mockito.verify(service, org.mockito.Mockito.never())
+                    .setRepositorySubscription(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any());
+        }
+    }
+
+    @Test
+    public void toggleWatchingState_successWithNullWatchingSkipsFlip()
+            throws Exception {
+        // L989：成功回包时 mIsWatching 已空则不翻态、不刷行。
+        com.meisolsson.githubsdk.service.activity.WatchingService service =
+                mock(com.meisolsson.githubsdk.service.activity.WatchingService.class);
+        CountDownLatch release = new CountDownLatch(1);
+        when(service.deleteRepositorySubscription(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(latchSingle(release, false));
+        try (org.mockito.MockedStatic<com.gh4a.ServiceFactory> mocked =
+                     mockServices(null, service, null, null)) {
+            RepositoryFragment f = attachWithContent(richRepo());
+            callVoid(f, "fillData", new Class<?>[]{});
+            setField(f, "mIsWatching", true);
+            callVoid(f, "toggleWatchingState", new Class<?>[]{});
+            setField(f, "mIsWatching", null);
+            release.countDown();
+            awaitNotInFlight(f);
+            assertFalse((Boolean) field(f, "mStarWatchInFlight"));
+            assertEquals(null, field(f, "mIsWatching"));
+        }
+    }
+
+    @Test
+    public void onCreateListNameConfirmed_nullViewModelIsNoop() throws Exception {
+        // L838/L839：mMoveViewModel 为 null 时直接返回。
+        RepositoryFragment f = new RepositoryFragment();
+        callVoid(f, "onCreateListNameConfirmed",
+                new Class<?>[]{String.class, String.class, String.class, boolean.class},
+                "repo_create", "octo/cat", "New List", false);
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void onCreateListNameConfirmed_afterAssignSkipsMarkConsumed()
+            throws Exception {
+        // L844：repo_create_after_assign 只调 createListAndAssign，不 mark。
+        RepositoryFragment f = attachWithContent(repo());
+        StarBatchMoveViewModel vm = mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        callVoid(f, "onCreateListNameConfirmed",
+                new Class<?>[]{String.class, String.class, String.class, boolean.class},
+                "repo_create_after_assign", "octo/cat", "New List", true);
+        org.mockito.Mockito.verify(vm).createListAndAssign("octo/cat", "New List", true);
+        org.mockito.Mockito.verify(vm, org.mockito.Mockito.never())
+                .markStarListsConsumed(
+                        org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    public void onCreateListNameCancelled_nullViewModelIsNoop() throws Exception {
+        // L851：mMoveViewModel 为 null 时直接返回。
+        RepositoryFragment f = new RepositoryFragment();
+        callVoid(f, "onCreateListNameCancelled",
+                new Class<?>[]{String.class, String.class}, "repo_create", "octo/cat");
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void onAssignListsConfirmed_nullViewModelIsNoop() throws Exception {
+        // L859/L860：mMoveViewModel 为 null 时直接返回。
+        RepositoryFragment f = new RepositoryFragment();
+        callVoid(f, "onAssignListsConfirmed",
+                new Class<?>[]{String.class, String.class, java.util.List.class},
+                "assign_repo", "octo/cat", new ArrayList<String>());
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void onAssignListsCreateNew_nullViewModelIsNoop() throws Exception {
+        // L868/L869：mMoveViewModel 为 null 时直接返回。
+        RepositoryFragment f = new RepositoryFragment();
+        callVoid(f, "onAssignListsCreateNew",
+                new Class<?>[]{String.class, String.class}, "assign_repo", "octo/cat");
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void onAssignListsCreateNew_nullPendingShowsCreateDialog()
+            throws Exception {
+        // L874 + L817：mPendingStarListsResult 为 null 时 listNames(null) 得
+        // 空表，仍弹出新建列表框，并把 null 结果标已消费。
+        RepositoryFragment f = attachWithContent(repo());
+        StarBatchMoveViewModel vm = mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        callVoid(f, "onAssignListsCreateNew",
+                new Class<?>[]{String.class, String.class}, "assign_repo", "octo/cat");
+        idleMainLooper();
+        assertNotNull(latestDialog());
+        org.mockito.Mockito.verify(vm).markStarListsConsumed(
+                (StarBatchMoveViewModel.StarListsResult) null);
+    }
+
+    @Test
+    public void onAssignListsCancelled_nullViewModelIsNoop() throws Exception {
+        // L881：mMoveViewModel 为 null 时直接返回。
+        RepositoryFragment f = new RepositoryFragment();
+        callVoid(f, "onAssignListsCancelled",
+                new Class<?>[]{String.class, String.class}, "assign_repo", "octo/cat");
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void onStarListsLoaded_nullViewModelIsNoop() throws Exception {
+        // L897：mMoveViewModel 为 null 时直接返回。
+        RepositoryFragment f = new RepositoryFragment();
+        StarBatchMoveViewModel.StarListsResult result =
+                new StarBatchMoveViewModel.StarListsResult(1L, new ArrayList<>(), false);
+        callVoid(f, "onStarListsLoaded",
+                new Class<?>[]{StarBatchMoveViewModel.StarListsResult.class}, result);
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void onStarListsLoaded_assignDialogAlreadyOpenSkipsShow()
+            throws Exception {
+        // L912：assign_repo 框已开时不再重弹。
+        RepositoryFragment f = attachWithContent(repo());
+        StarBatchMoveViewModel vm = mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        mActivity.getSupportFragmentManager().beginTransaction()
+                .add(new androidx.fragment.app.Fragment(), "assign_repo").commitNow();
+        List<com.gh4a.fragment.UserListsGraphQL.UserList> lists = new ArrayList<>();
+        lists.add(new com.gh4a.fragment.UserListsGraphQL.UserList(
+                "l1", "L1", null, new ArrayList<>()));
+        StarBatchMoveViewModel.StarListsResult result =
+                new StarBatchMoveViewModel.StarListsResult(1L, lists, false);
+        callVoid(f, "onStarListsLoaded",
+                new Class<?>[]{StarBatchMoveViewModel.StarListsResult.class}, result);
+        idleMainLooper();
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void onStarListsLoaded_createDialogAlreadyOpenSkipsShow()
+            throws Exception {
+        // L913：repo_create 框已开时不再重弹。
+        RepositoryFragment f = attachWithContent(repo());
+        StarBatchMoveViewModel vm = mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        mActivity.getSupportFragmentManager().beginTransaction()
+                .add(new androidx.fragment.app.Fragment(), "repo_create").commitNow();
+        List<com.gh4a.fragment.UserListsGraphQL.UserList> lists = new ArrayList<>();
+        lists.add(new com.gh4a.fragment.UserListsGraphQL.UserList(
+                "l1", "L1", null, new ArrayList<>()));
+        StarBatchMoveViewModel.StarListsResult result =
+                new StarBatchMoveViewModel.StarListsResult(1L, lists, false);
+        callVoid(f, "onStarListsLoaded",
+                new Class<?>[]{StarBatchMoveViewModel.StarListsResult.class}, result);
+        idleMainLooper();
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void onStarListsLoaded_createAfterAssignDialogAlreadyOpenSkipsShow()
+            throws Exception {
+        // L914/L916：repo_create_after_assign 框已开时不再重弹。
+        RepositoryFragment f = attachWithContent(repo());
+        StarBatchMoveViewModel vm = mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        mActivity.getSupportFragmentManager().beginTransaction()
+                .add(new androidx.fragment.app.Fragment(), "repo_create_after_assign")
+                .commitNow();
+        List<com.gh4a.fragment.UserListsGraphQL.UserList> lists = new ArrayList<>();
+        lists.add(new com.gh4a.fragment.UserListsGraphQL.UserList(
+                "l1", "L1", null, new ArrayList<>()));
+        StarBatchMoveViewModel.StarListsResult result =
+                new StarBatchMoveViewModel.StarListsResult(1L, lists, false);
+        callVoid(f, "onStarListsLoaded",
+                new Class<?>[]{StarBatchMoveViewModel.StarListsResult.class}, result);
+        idleMainLooper();
+        assertEquals(0,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void onSingleOpChanged_nullViewModelIsNoop() throws Exception {
+        // L934：mMoveViewModel 为 null 时直接返回。
+        RepositoryFragment f = new RepositoryFragment();
+        StarBatchMoveViewModel.SingleOp op =
+                new StarBatchMoveViewModel.SingleOp(1L, true, R.string.app_name, null);
+        callVoid(f, "onSingleOpChanged",
+                new Class<?>[]{StarBatchMoveViewModel.SingleOp.class}, op);
+        assertEquals(null,
+                org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+    }
+
+    @Test
+    public void listIds_nullReturnsEmpty() throws Exception {
+        // L827：listIds(null) 得空表（生产里无 null 调用方，直接测私有方法）。
+        RepositoryFragment f = new RepositoryFragment();
+        Object ids = call(f, "listIds", new Class<?>[]{java.util.List.class},
+                (Object) null);
+        assertTrue(((java.util.List<?>) ids).isEmpty());
+    }
+
+    @Test
+    public void loadReadme_mapStageNotAdded_skipsEncodeDirect() throws Exception {
+        // L526（第 3 轮）：map 阶段 isAdded() 为假臂。直接调 map lambda——
+        // R1 的整链版可能空转：attach 后若已有同 id 加载在途，force=false
+        // 会复用在途 loader 不再订阅上游，map 根本不跑，verify(never) 是
+        // 空转通过。直接调 lambda 则必然执行：返回值 present 即证明跑过。
+        // mRef 置非空，避免 mRepository.defaultBranch() 在 bare fragment
+        // 上 NPE（mRepository 为 null）。
+        HttpImageGetter getter = mock(HttpImageGetter.class);
+        RepositoryFragment f = new RepositoryFragment();
+        setField(f, "mImageGetter", getter);
+        setField(f, "mRef", "main");
+        java.lang.reflect.Method lambda = readmeMapLambda();
+        Object result = lambda.invoke(f, new Object[]{"octo", "cat",
+                null, 1L, java.util.Optional.of("<p>hi</p>")});
+        assertTrue(((java.util.Optional<?>) result).isPresent());
+        org.mockito.Mockito.verify(getter, org.mockito.Mockito.never())
+                .encode(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    public void loadReadme_mapStageNullGetter_skipsEncodeDirect() throws Exception {
+        // L526（第 3 轮）：map 阶段 isAdded() 为真、mImageGetter 为 null 臂。
+        // 同上，直接调 lambda，避免整链版复用在途 loader 的空转。
+        RepositoryFragment f = attachWithContent(repo());
+        setField(f, "mImageGetter", null);
+        setField(f, "mRef", "main");
+        java.lang.reflect.Method lambda = readmeMapLambda();
+        Object result = lambda.invoke(f, new Object[]{"octo", "cat",
+                mActivity, 1L, java.util.Optional.of("<p>hi</p>")});
+        assertTrue(((java.util.Optional<?>) result).isPresent());
+    }
+
+    @Test
+    public void onCreateListNameConfirmed_unknownTagIsNoop() throws Exception {
+        // L844（第 3 轮）：tag 两个分支都不匹配时静默返回（else-if 链末尾
+        // fall-through）。TAG_CREATE_REPO 真臂与 AFTER_ASSIGN 真臂已有
+        // 既有测试覆盖。
+        RepositoryFragment f = attachWithContent(repo());
+        StarBatchMoveViewModel vm = mock(StarBatchMoveViewModel.class);
+        setField(f, "mMoveViewModel", vm);
+        callVoid(f, "onCreateListNameConfirmed",
+                new Class<?>[]{String.class, String.class, String.class, boolean.class},
+                "unknown_tag", "octo/cat", "New List", false);
+        org.mockito.Mockito.verifyNoInteractions(vm);
     }
 }

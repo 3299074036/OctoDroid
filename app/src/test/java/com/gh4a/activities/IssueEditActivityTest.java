@@ -2054,6 +2054,23 @@ public class IssueEditActivityTest {
         }
     }
 
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void onFocusChange_nonTitleView_leavesMarkdownButtonsUnchanged() {
+        // The focused view is not the title view: onFocusChange does nothing
+        // and the markdown buttons keep their visibility (L369 false side).
+        authorize();
+        IssueEditActivity activity = launch(IssueEditActivity.class,
+                IssueEditActivity.makeCreateIntent(appContext(), "o", "r"));
+        android.view.View buttons = (android.view.View) get(activity, "mMarkdownButtons");
+        int before = buttons.getVisibility();
+        activity.onFocusChange(new android.view.View(activity), true);
+        assertEquals(before, buttons.getVisibility());
+        activity.onFocusChange(new android.view.View(activity), false);
+        assertEquals(before, buttons.getVisibility());
+    }
+
 
 
 

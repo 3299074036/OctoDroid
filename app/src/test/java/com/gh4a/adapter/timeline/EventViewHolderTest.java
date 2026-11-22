@@ -712,4 +712,16 @@ public class EventViewHolderTest {
         h.itemView.findViewById(R.id.avatar_container).performClick();
         assertNull(AdapterTestSupport.shadowApp(context).getNextStartedActivity());
     }
+
+    @Test
+    public void bind_labeled_nullActorLogin_usesDeleted() {
+        IssueEvent e = event(IssueEventType.Labeled);
+        when(e.label()).thenReturn(Label.builder().name("bug").color("ff0000").build());
+        User actor = mock(User.class);
+        when(actor.login()).thenReturn(null);
+        when(e.actor()).thenReturn(actor);
+        EventViewHolder h = holder(false);
+        h.bind(item(e));
+        assertTrue(message(h).contains(context.getString(R.string.deleted)));
+    }
 }

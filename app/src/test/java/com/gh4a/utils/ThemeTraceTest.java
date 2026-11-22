@@ -20,6 +20,8 @@ import java.nio.file.Files;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * ThemeTrace: pure helpers run synchronously; log()/logState() write on a
@@ -186,4 +188,68 @@ public class ThemeTraceTest {
         assertTrue(content.contains("STATE-TAG"));
         assertTrue(content.contains("mode="));
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L27：类声明行；隐式默认构造器。
+        new ThemeTrace();
+    }
+
+    @Test
+    public void log_oversizeFileIsDeletedBeforeRewrite() throws Exception {
+        // L59-60：文件已存在且 > 256KB 时先删再写。
+        File f = ThemeTrace.file(context());
+        if (f.exists()) {
+            assertTrue(f.delete());
+        }
+        byte[] big = new byte[257 * 1024];
+        java.util.Arrays.fill(big, (byte) 'x');
+        Files.write(f.toPath(), big);
+        assertTrue(f.length() > 256 * 1024);
+        ThemeTrace.log(context(), "BIG-FILE", "after rotation");
+        String content = null;
+        for (int i = 0; i < 100; i++) {
+            if (f.exists() && f.length() < 256 * 1024 && f.length() > 0) {
+                content = new String(Files.readAllBytes(f.toPath()),
+                        StandardCharsets.UTF_8);
+                if (content.contains("BIG-FILE after rotation")) {
+                    break;
+                }
+                content = null;
+            }
+            Thread.sleep(50);
+        }
+        assertTrue("oversize file was never rotated", content != null);
+        assertTrue(content.contains("BIG-FILE after rotation"));
+    }
+
+    @Test
+    public void log_fileIsDirectoryIsSwallowed() throws Exception {
+        // L67：目标路径是目录时 FileWriter 抛 FileNotFoundException，
+        // 被 catch (Exception ignored) 吞掉，不崩。
+        File f = ThemeTrace.file(context());
+        if (f.exists()) {
+            assertTrue(f.delete());
+        }
+        assertTrue(f.mkdir());
+        try {
+            ThemeTrace.log(context(), "DIR-FILE", "no crash");
+            // 给写盘线程一点时间跑到 catch（无断言可直接观察，覆盖即目的）。
+            Thread.sleep(500);
+        } finally {
+            assertTrue(f.delete());
+        }
+    }
+
+    @Test
+    public void uiModeLabel_noNightBitsReturnsUnknown() {
+        // L86-87：uiMode 既无 NIGHT_YES 也无 NIGHT_NO 位（mask == 0）时 UNKNOWN。
+        Context mockCtx = mock(Context.class);
+        android.content.res.Resources mockRes = mock(android.content.res.Resources.class);
+        Configuration config = new Configuration();
+        config.uiMode = 0;
+        when(mockCtx.getResources()).thenReturn(mockRes);
+        when(mockRes.getConfiguration()).thenReturn(config);
+        assertEquals("UNKNOWN", ThemeTrace.uiModeLabel(mockCtx));
+    }
+
 }

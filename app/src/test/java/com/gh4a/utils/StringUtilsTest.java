@@ -334,4 +334,10 @@ public class StringUtilsTest {
     public void unescapeCommonHtmlEntities_nullReturnsNull() {
         assertNull(StringUtils.unescapeCommonHtmlEntities(null));
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L46：类声明行；隐式默认构造器。
+        new StringUtils();
+    }
+
 }

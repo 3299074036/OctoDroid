@@ -3,6 +3,7 @@ package com.gh4a.utils;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.provider.MediaStore;
@@ -19,6 +20,7 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.MockedStatic;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Shadows;
 import org.robolectric.shadows.ShadowContentResolver;
@@ -41,9 +43,12 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 /**
@@ -785,4 +790,140 @@ public class SettingsBackupManagerTest {
         assertEquals("abc", mContext.getSharedPreferences("drawer_config", Context.MODE_PRIVATE)
                 .getString("order", null));
     }
+    @Test
+    public void collectBackup_unsupportedValueTypeIsSkipped() throws JSONException {
+        // L328：默认 prefs 里 translation_ 键的值是 Double（putTypedValue
+        // 不支持的类型）时该键不进入备份；String 键正常进入。
+        SharedPreferences mockPrefs = mock(SharedPreferences.class);
+        Map<String, Object> map = new java.util.LinkedHashMap<>();
+        map.put("translation_foo", 3.14);
+        map.put("translation_provider", "google");
+        doReturn(map).when(mockPrefs).getAll();
+        when(mockPrefs.getString(any(), any()))
+                .thenAnswer(inv -> inv.getArgument(1));
+        SharedPreferences.Editor mockEditor = mock(SharedPreferences.Editor.class);
+        when(mockEditor.putString(any(), any())).thenReturn(mockEditor);
+        when(mockEditor.remove(any())).thenReturn(mockEditor);
+        when(mockPrefs.edit()).thenReturn(mockEditor);
+        Context wrapper = new ContextWrapper(mContext) {
+            @Override
+            public SharedPreferences getSharedPreferences(String name, int mode) {
+                if ((mContext.getPackageName() + "_preferences").equals(name)) {
+                    return mockPrefs;
+                }
+                return super.getSharedPreferences(name, mode);
+            }
+        };
+        JSONObject backup = SettingsBackupManager.collectBackup(wrapper);
+        JSONObject def = backup.getJSONObject("prefs").getJSONObject("default");
+        assertFalse(def.has("translation_foo"));
+        assertTrue(def.has("translation_provider"));
+    }
+
+    @Test
+    @org.robolectric.annotation.Config(sdk = 28)
+    public void writeBackupFile_preQ_writesToDownloadsDir() throws Exception {
+        // L357/L374-380：SDK 28 下走 pre-Q 文件分支，写进外部存储 Downloads 目录。
+        JSONObject backup = new JSONObject().put("app", "OctoDroid");
+        String fileName = SettingsBackupManager.writeBackupFile(mContext, backup);
+        assertTrue(fileName.startsWith("OctoDroid_backup_"));
+        assertTrue(fileName.endsWith(".json"));
+        java.io.File dir = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS);
+        assertTrue(new java.io.File(dir, fileName).exists());
+    }
+
+    @Test
+    @org.robolectric.annotation.Config(sdk = 28)
+    public void writeBackupFile_preQ_mkdirsFailureThrows() throws Exception {
+        // L375-376：Downloads 目录不存在且 mkdirs() 失败时抛 IOException。
+        // 用 mockStatic(Environment) 把 Downloads 目录指到一个真实文件之下
+        // （<临时文件>/Download）：父路径是文件时 mkdirs() 恒返回 false。
+        // 不用 chmod 拦：测试以 root 运行，权限位拦不住 mkdir。
+        JSONObject backup = new JSONObject().put("app", "OctoDroid");
+        java.io.File blocker = java.io.File.createTempFile("octo-block", ".tmp");
+        java.io.File badDir = new java.io.File(blocker, "Download");
+        try (MockedStatic<android.os.Environment> mocked =
+                mockStatic(android.os.Environment.class)) {
+            mocked.when(() -> android.os.Environment.getExternalStoragePublicDirectory(
+                    anyString())).thenReturn(badDir);
+            try {
+                SettingsBackupManager.writeBackupFile(mContext, backup);
+                fail("expected IOException");
+            } catch (IOException e) {
+                assertTrue(e.getMessage().contains("mkdirs failed"));
+            }
+        } finally {
+            blocker.delete();
+        }
+    }
+
+    @Test
+    @org.robolectric.annotation.Config(sdk = 28)
+    public void writeBackupFile_preQ_mkdirsCreatesMissingDir() throws Exception {
+        // L375：Downloads 目录不存在但 mkdirs() 成功时不抛错、正常写文件。
+        // 与 mkdirsFailureThrows 对偶：覆盖 !dir.exists() 为真且
+        // !dir.mkdirs() 为假的那条边（此前只有 exists 为真、mkdirs 为假
+        // 两条边被覆盖）。
+        JSONObject backup = new JSONObject().put("app", "OctoDroid");
+        java.io.File parent =
+                java.nio.file.Files.createTempDirectory("octo-dl-").toFile();
+        java.io.File missingDir = new java.io.File(parent, "Download");
+        assertFalse(missingDir.exists());
+        java.io.File written = null;
+        try (MockedStatic<android.os.Environment> mocked =
+                mockStatic(android.os.Environment.class)) {
+            mocked.when(() -> android.os.Environment.getExternalStoragePublicDirectory(
+                    anyString())).thenReturn(missingDir);
+            String name = SettingsBackupManager.writeBackupFile(mContext, backup);
+            assertTrue(name.startsWith("OctoDroid_backup_"));
+            written = new java.io.File(missingDir, name);
+            assertTrue(written.exists());
+            assertEquals(backup.toString(),
+                    new String(java.nio.file.Files.readAllBytes(written.toPath()),
+                            StandardCharsets.UTF_8));
+        } finally {
+            if (written != null) {
+                written.delete();
+            }
+            missingDir.delete();
+            parent.delete();
+        }
+    }
+
+    @Test
+    public void putCredentialPlaintext_nullPlaintextIsSkipped() throws Exception {
+        // L237：plaintext 为 null 时直接返回，不写键。生产路径上
+        // TranslationManager.getApiKey/getApiSecret 最低返回 ""，null 只在
+        // 防御性判空里出现；此处直接调私有方法覆盖 null 边。
+        JSONObject translation = new JSONObject();
+        invokePrivate("putCredentialPlaintext",
+                new Class<?>[]{JSONObject.class, String.class, String.class},
+                translation, "translation_api_key_youdao", null);
+        assertFalse(translation.has("translation_api_key_youdao"));
+    }
+
+    @Test
+    public void applyBackup_noApplicationInstance_stillApplies() throws Exception {
+        // L539：Gh4Application.get() 为 null 时跳过 rescheduleWorkers，
+        // 其余恢复照常完成并返回 true（通知渠道创建不依赖 Application 实例）。
+        java.lang.reflect.Field f =
+                Gh4Application.class.getDeclaredField("sInstance");
+        f.setAccessible(true);
+        Object old = f.get(null);
+        try {
+            f.set(null, null);
+            // 注意：类型码是 "i" 不是 "int"——jsonToPrefs 的 switch 只认
+            // "s"/"i"/"l"/"f"/"b"/"set"，第 1 轮误写 "int" 会被静默丢弃，
+            // applyBackup 返回 true 但 theme 写不进去（单跑 expected 2 / was -1）。
+            JSONObject prefs = new JSONObject();
+            prefs.put("Gh4a-pref", new JSONObject()
+                    .put("theme", holder("i", 2)));
+            assertTrue(SettingsBackupManager.applyBackup(mContext, backupWithPrefs(prefs)));
+            assertEquals(2, gh4aPrefs().getInt("theme", -1));
+        } finally {
+            f.set(null, old);
+        }
+    }
+
 }

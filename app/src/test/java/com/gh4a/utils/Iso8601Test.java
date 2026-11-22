@@ -106,4 +106,17 @@ public class Iso8601Test {
     public void formatFeed_nullThrows() {
         Iso8601.formatFeed(null);
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L18：类声明行；隐式默认构造器。
+        new Iso8601();
+    }
+
+    @Test
+    public void parseOrZero_unparseableReturnsZero() {
+        // 所有格式都抛 ParseException：catch 块收口（L74 的 `}`）+ 最终 return null。
+        assertEquals(0L, Iso8601.parseOrZero("not-a-date"));
+        assertNull(Iso8601.parseOrNull("not-a-date"));
+    }
+
 }

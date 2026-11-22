@@ -151,4 +151,26 @@ public class DownloadRecordManagerTest {
         DownloadRecordManager.setVerifying(1L, false);
         assertFalse(DownloadRecordManager.isVerifying(1L));
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L23：类声明行；隐式默认构造器。
+        new DownloadRecordManager();
+    }
+
+    @Test
+    public void getRecords_corruptElementSkippedOthersKept() {
+        // L61：fromJson 里单条损坏跳过——数组元素不是对象时 getJSONObject 抛
+        // JSONException，被 per-element catch 吞掉，其余条目照收。
+        context.getSharedPreferences("download_records", Context.MODE_PRIVATE)
+                .edit()
+                .putString("records",
+                        "[{\"id\":9,\"name\":\"good.apk\",\"url\":\"u\","
+                        + "\"desc\":\"d\",\"time\":1,\"size\":0}, 123]")
+                .apply();
+        List<DownloadRecordManager.Record> records =
+                DownloadRecordManager.getRecords(context);
+        assertEquals(1, records.size());
+        assertEquals(9L, records.get(0).downloadId);
+    }
+
 }

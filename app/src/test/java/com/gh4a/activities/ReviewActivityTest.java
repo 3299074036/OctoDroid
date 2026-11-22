@@ -249,4 +249,34 @@ public class ReviewActivityTest {
         }
     }
 
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void onOptionsItemSelected_shareAndBrowser_withNullReview_returnTrueWithoutCrash() {
+        // mReview == null: both menu actions take the null guard and return
+        // true without touching Uri.parse (L72/L79 first operand true).
+        try (ActivityController<ReviewActivity> c = launch(null)) {
+            ReviewActivity activity = c.setup().get();
+            androidx.appcompat.view.menu.MenuBuilder menu =
+                    new androidx.appcompat.view.menu.MenuBuilder(activity);
+            menu.add(0, R.id.share, 0, "Share");
+            menu.add(0, R.id.browser, 0, "Browser");
+            assertTrue(activity.onOptionsItemSelected(menu.findItem(R.id.share)));
+            assertTrue(activity.onOptionsItemSelected(menu.findItem(R.id.browser)));
+        }
+    }
+
+    @Test
+    public void navigateUp_withNullReviewId_noMarker() {
+        // mReview.id() == null: navigateUp carries no InitialCommentMarker
+        // (L100 ternary false side).
+        try (ActivityController<ReviewActivity> c =
+                launch(review(null, "https://github.com/o/r/pull/42"))) {
+            ReviewActivity activity = c.setup().get();
+            Intent up = activity.navigateUp();
+            assertNotNull(up);
+            assertNull(up.getParcelableExtra("initial_comment"));
+        }
+    }
+
 }

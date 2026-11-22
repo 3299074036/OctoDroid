@@ -5,22 +5,38 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.content.Intent;
+import android.view.MenuItem;
 
 import androidx.test.core.app.ApplicationProvider;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.MockedStatic;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.android.controller.ActivityController;
 
+import com.gh4a.Gh4Application;
 import com.gh4a.R;
+import com.gh4a.ServiceFactory;
+import com.gh4a.widget.ReactionBar;
 import com.meisolsson.githubsdk.model.ReleaseAsset;
+import com.meisolsson.githubsdk.service.repositories.RepositoryReleaseService;
+
+import io.reactivex.Single;
+import retrofit2.Response;
 import android.view.View;
 import android.widget.TextView;
 import com.meisolsson.githubsdk.model.Reactions;
@@ -33,7 +49,6 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import androidx.recyclerview.widget.RecyclerView;
-import com.gh4a.Gh4Application;
 import org.robolectric.Shadows;
 import org.robolectric.shadows.ShadowToast;
 
@@ -489,18 +504,23 @@ public class ReleaseInfoActivityTest {
 
     @Test
     public void onPrepareOptionsMenu_authorized_showsReactItem() throws Exception {
-        User user = mock(User.class);
-        when(user.login()).thenReturn("octocat");
-        when(user.id()).thenReturn(1L);
-        com.gh4a.Gh4Application.get().addAccount(user, "fake-token");
+        // Single addAccount is intermittently ineffective in a class run
+        // (secure-prefs backend jitter), which made this test fail in the
+        // chunk run while passing standalone -- use the authorize() retry
+        // loop (same as canAddReaction_authorizedWithNonDraftRelease_...)
+        // and assert authorization before exercising the menu.
+        authorize();
         try (ActivityController<ReleaseInfoActivity> c = launchById()) {
             ReleaseInfoActivity activity = c.setup().get();
+            assertTrue(Gh4Application.get().isAuthorized());
             setRelease(activity, mockRelease(false));
             androidx.appcompat.view.menu.MenuBuilder menu =
                     new androidx.appcompat.view.menu.MenuBuilder(activity);
             activity.onCreateOptionsMenu(menu);
             assertTrue(activity.onPrepareOptionsMenu(menu));
             assertTrue(menu.findItem(R.id.react).isVisible());
+        } finally {
+            Gh4Application.get().removeAccount("octocat");
         }
     }
 
@@ -531,12 +551,15 @@ public class ReleaseInfoActivityTest {
 
     @Test
     public void onOptionsItemSelected_reactionItem_withHelper_returnsTrue() throws Exception {
-        User user = mock(User.class);
-        when(user.login()).thenReturn("octocat");
-        when(user.id()).thenReturn(1L);
-        com.gh4a.Gh4Application.get().addAccount(user, "fake-token");
+        // Single addAccount is intermittently ineffective in a class run
+        // (secure-prefs backend jitter) -- this test failed in the round-2
+        // re-run while the same setup passed in the first run, so use the
+        // authorize() retry loop like the neighboring auth tests instead
+        // of relying on one addAccount (or on auth leaked from another test).
+        authorize();
         try (ActivityController<ReleaseInfoActivity> c = launchById()) {
             ReleaseInfoActivity activity = c.setup().get();
+            assertTrue(Gh4Application.get().isAuthorized());
             setRelease(activity, mockRelease(false));
             androidx.appcompat.view.menu.MenuBuilder menu =
                     new androidx.appcompat.view.menu.MenuBuilder(activity);
@@ -546,6 +569,8 @@ public class ReleaseInfoActivityTest {
             assertNotNull(heart);
             assertTrue(activity.onOptionsItemSelected(heart));
             org.robolectric.shadows.ShadowLooper.idleMainLooper();
+        } finally {
+            Gh4Application.get().removeAccount("octocat");
         }
     }
 
@@ -560,6 +585,140 @@ public class ReleaseInfoActivityTest {
                     new androidx.appcompat.view.menu.MenuBuilder(activity);
             menu.add(0, 999999, 0, "Unknown");
             assertFalse(activity.onOptionsItemSelected(menu.findItem(999999)));
+        }
+    }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    private static void setReactionMenuHelper(ReleaseInfoActivity activity,
+            ReactionBar.AddReactionMenuHelper helper) throws Exception {
+        Field f = ReleaseInfoActivity.class.getDeclaredField("mReactionMenuHelper");
+        f.setAccessible(true);
+        f.set(activity, helper);
+    }
+
+    private void authorize() {
+        // Retry loop (same as IssueEditActivityTest): a single addAccount is
+        // intermittently ineffective in the same class run (secure-prefs
+        // backend jitter).
+        Gh4Application app = Gh4Application.get();
+        for (int i = 0; i < 3
+                && (!app.isAuthorized() || !"octocat".equals(app.getAuthLogin())); i++) {
+            app.addAccount(User.builder().login("octocat").id(1L).build(), "tok");
+            ActivityTestHelper.idleMain(100);
+        }
+    }
+
+    @Test
+    public void onOptionsItemSelected_reactionHelperHandlesItem_returnsTrue()
+            throws Exception {
+        // mReactionMenuHelper non-null and onItemClick true: the item is
+        // consumed by the helper (L153 both operands true + L154).
+        try (ActivityController<ReleaseInfoActivity> c = launchById()) {
+            ReleaseInfoActivity activity = c.setup().get();
+            ReactionBar.AddReactionMenuHelper helper =
+                    mock(ReactionBar.AddReactionMenuHelper.class);
+            when(helper.onItemClick(any())).thenReturn(true);
+            setReactionMenuHelper(activity, helper);
+            assertTrue(activity.onOptionsItemSelected(mock(MenuItem.class)));
+        }
+    }
+
+    @Test
+    public void onOptionsItemSelected_reactionHelperIgnoresItem_fallsThrough()
+            throws Exception {
+        // mReactionMenuHelper non-null but onItemClick false: the item falls
+        // through to the browser/super handling (L153 second operand false).
+        try (ActivityController<ReleaseInfoActivity> c = launchById()) {
+            ReleaseInfoActivity activity = c.setup().get();
+            ReactionBar.AddReactionMenuHelper helper =
+                    mock(ReactionBar.AddReactionMenuHelper.class);
+            when(helper.onItemClick(any())).thenReturn(false);
+            setReactionMenuHelper(activity, helper);
+            androidx.appcompat.view.menu.MenuBuilder menu =
+                    new androidx.appcompat.view.menu.MenuBuilder(activity);
+            menu.add(0, 999999, 0, "Unknown");
+            assertFalse(activity.onOptionsItemSelected(menu.findItem(999999)));
+        }
+    }
+
+    @Test
+    public void onOptionsItemSelected_browser_nullHtmlUrl_returnsTrue() throws Exception {
+        // mRelease non-null but htmlUrl() null: the browser item is consumed
+        // without launching anything (L158 second operand true).
+        try (ActivityController<ReleaseInfoActivity> c = launchById()) {
+            ReleaseInfoActivity activity = c.setup().get();
+            Release r = mockRelease(false);
+            when(r.htmlUrl()).thenReturn(null);
+            setRelease(activity, r);
+            androidx.appcompat.view.menu.MenuBuilder menu =
+                    new androidx.appcompat.view.menu.MenuBuilder(activity);
+            activity.onCreateOptionsMenu(menu);
+            assertTrue(activity.onOptionsItemSelected(menu.findItem(R.id.browser)));
+            assertNull(Shadows.shadowOf(activity).getNextStartedActivity());
+        }
+    }
+
+    @Test
+    public void canAddReaction_authorizedWithNonDraftRelease_returnsTrue()
+            throws Exception {
+        // The only all-true path of L286: authorized + release present +
+        // not a draft. The authorized-but-draft / authorized-but-no-release
+        // sub-cases stay false.
+        authorize();
+        try (ActivityController<ReleaseInfoActivity> c = launchById()) {
+            ReleaseInfoActivity activity = c.setup().get();
+            assertTrue(Gh4Application.get().isAuthorized());
+            setRelease(activity, mockRelease(false));
+            assertTrue(activity.canAddReaction());
+            setRelease(activity, mockRelease(true));
+            assertFalse(activity.canAddReaction());
+            setRelease(activity, null);
+            assertFalse(activity.canAddReaction());
+        } finally {
+            Gh4Application.get().removeAccount("octocat");
+        }
+    }
+
+    @Test
+    public void onClick_unknownView_doesNothing() {
+        // View id matches no case in the switch: intent stays null and
+        // nothing is started (L336 default + L346 false side).
+        try (ActivityController<ReleaseInfoActivity> c = launchById()) {
+            ReleaseInfoActivity activity = c.setup().get();
+            activity.onClick(new View(activity));
+            assertNull(Shadows.shadowOf(activity).getNextStartedActivity());
+        }
+    }
+
+    @Test
+    public void loadRelease_mockedService_successFillsRelease() throws Exception {
+        // The loader's success consumer (L364-L367): the mocked service
+        // returns the release, onCreate's load fills mRelease, runs
+        // handleReleaseReady (title "v1.0") and shows the content.
+        // NB: mockRelease() itself stubs a mock, so it must be called
+        // BEFORE when(...) starts -- calling it inside thenReturn's
+        // argument nests one stubbing inside another and Mockito throws
+        // UnfinishedStubbingException.
+        Release release = mockRelease(false);
+        RepositoryReleaseService service = mock(RepositoryReleaseService.class);
+        when(service.getRelease(anyString(), anyString(), anyLong()))
+                .thenReturn(Single.just(Response.success(release)));
+        when(service.getRelaseByTagName(anyString(), anyString(), anyString()))
+                .thenReturn(Single.just(Response.success(release)));
+        try (MockedStatic<ServiceFactory> mocked =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            mocked.when(() -> ServiceFactory.get(
+                            eq(RepositoryReleaseService.class), anyBoolean()))
+                    .thenReturn(service);
+            try (ActivityController<ReleaseInfoActivity> c = launchById()) {
+                ReleaseInfoActivity activity = c.setup().get();
+                ActivityTestHelper.waitFor(
+                        () -> ActivityTestHelper.get(activity, "mRelease") != null, 10000);
+                assertNotNull(ActivityTestHelper.get(activity, "mRelease"));
+                assertEquals("v1.0",
+                        activity.getSupportActionBar().getTitle().toString());
+            }
         }
     }
 

@@ -262,6 +262,13 @@ public class HttpImageGetterTest {
         return f.get(getter);
     }
 
+    private static void setField(HttpImageGetter getter, String name, Object value)
+            throws Exception {
+        Field f = HttpImageGetter.class.getDeclaredField(name);
+        f.setAccessible(true);
+        f.set(getter, value);
+    }
+
     // ImageSpan 挂的始终是 PlaceholderDrawable（它包住加载图/已加载图/
     // 错误图）；run() 只换包住的内容，不换 span 上的对象，所以要拆包断言。
     private static Drawable unwrappedDrawable(ImageSpan span) {
@@ -1054,6 +1061,12 @@ public class HttpImageGetterTest {
         }
     }
 
+    // 注：L633-635（renderSvgToBitmap 的 catch，Bitmap.createBitmap 抛
+    // IllegalArgumentException 时吞掉）已试过用宽高为 0 的合法 SVG 触发，
+    // 但 Robolectric 的 ShadowBitmap 对 createBitmap(0, 0) 不抛异常，直接
+    // 返回 0x0 位图，测试环境下走不到该 catch，故不留测试、记不可达。
+    // （loadImage_svgZeroSizeRenderThrowsShowsError 已删，见第 2 轮报告。）
+
     // ---- 宽图降采样 ----
 
     // 最小 PNG 编码器：全黑 RGB 图（AWT 不在 Android 测试 classpath 内）
@@ -1209,4 +1222,150 @@ public class HttpImageGetterTest {
         assertTrue(((List<?>) getField(info, "mBitmaps")).isEmpty());
         getter.destroy();
     }
+    private static final String SVG_HEIGHT_ONLY =
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" height=\"10\">"
+                    + "<rect width=\"10\" height=\"10\" fill=\"red\"/></svg>";
+
+    @Test
+    @LooperMode(LooperMode.Mode.LEGACY)
+    public void asyncTask_nullDrawableIsSkipped() throws Exception {
+        // L449 false：mErrorDrawable 被置 null 且网络抛错时 loadImageForUrl
+        // 返回 null，doInBackground 跳过 addLoadedImage（不抛、不回调）。
+        HttpImageGetter getter = new HttpImageGetter(mContext);
+        try {
+            Field errField = HttpImageGetter.class.getDeclaredField("mErrorDrawable");
+            errField.setAccessible(true);
+            errField.set(getter, null);
+            when(mCall.execute()).thenThrow(new IOException("boom"));
+            Class<?> infoClass =
+                    Class.forName("com.gh4a.utils.HttpImageGetter$ObjectInfo");
+            Constructor<?> infoCtor =
+                    infoClass.getDeclaredConstructor(HttpImageGetter.class);
+            infoCtor.setAccessible(true);
+            Object info = infoCtor.newInstance(getter);
+            Class<?> phClass =
+                    Class.forName("com.gh4a.utils.HttpImageGetter$PlaceholderDrawable");
+            Constructor<?> phCtor = phClass.getDeclaredConstructor(
+                    String.class, infoClass, Drawable.class);
+            phCtor.setAccessible(true);
+            Drawable loading = (Drawable) field(getter, "mLoadingDrawable");
+            Object placeholder = phCtor.newInstance(
+                    "https://example.com/x.png", info, loading);
+            Class<?> taskClass =
+                    Class.forName("com.gh4a.utils.HttpImageGetter$ImageGetterAsyncTask");
+            Constructor<?> taskCtor = taskClass.getDeclaredConstructor(
+                    HttpImageGetter.class, infoClass);
+            taskCtor.setAccessible(true);
+            Object task = taskCtor.newInstance(getter, info);
+            java.lang.reflect.Method doInBackground = taskClass.getDeclaredMethod(
+                    "doInBackground", phClass.arrayType());
+            doInBackground.setAccessible(true);
+            Object params = java.lang.reflect.Array.newInstance(phClass, 1);
+            java.lang.reflect.Array.set(params, 0, placeholder);
+            assertNull(doInBackground.invoke(task, params));
+            Field loadedField = phClass.getDeclaredField("mLoadedImage");
+            loadedField.setAccessible(true);
+            assertNull(loadedField.get(placeholder));
+        } finally {
+            getter.destroy();
+        }
+    }
+
+    private Response realResponseWithBody(ResponseBody body) {
+        okhttp3.Request request = new okhttp3.Request.Builder()
+                .url("https://example.com/x.png").build();
+        return new Response.Builder().request(request)
+                .protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body).build();
+    }
+
+    @Test
+    public void loadImage_closeThrowsAfterValidPngStillReturnsBitmap() throws Exception {
+        // L523：try-with-resources 的 close() 在正常读完后抛错时被 catch 吞掉，
+        // 已解出的 bitmap 照常返回。
+        byte[] png = Base64.decode(PNG_1X1_BASE64, Base64.DEFAULT);
+        when(mBody.contentLength()).thenReturn((long) png.length);
+        when(mBody.contentType()).thenReturn(MediaType.parse("image/png"));
+        when(mBody.byteStream()).thenReturn(new ByteArrayInputStream(png));
+        doThrow(new IOException("close failed")).when(mBody).close();
+        when(mCall.execute()).thenReturn(realResponseWithBody(mBody));
+        HttpImageGetter getter = new HttpImageGetter(mContext);
+        try {
+            Drawable d = loadImage(getter, "https://example.com/x.png");
+            assertTrue(d instanceof BitmapDrawable);
+            assertNotNull(((BitmapDrawable) d).getBitmap());
+        } finally {
+            getter.destroy();
+        }
+    }
+
+    @Test
+    public void loadImage_byteStreamAndCloseThrowShowsError() throws Exception {
+        // L523：读流抛错且 close() 也抛错（后者被当作 suppressed 压住）时，
+        // catch 走完返回错误图。注意：ResponseBody.byteStream() 的签名里
+        // 不声明 IOException，Mockito 拒绝 thenThrow(IOException)；改成
+        // 返回一个 read()/close() 都抛 IOException 的真 InputStream，
+        // 走生产代码同一条读流路径。
+        when(mBody.contentLength()).thenReturn(10L);
+        when(mBody.contentType()).thenReturn(MediaType.parse("image/png"));
+        when(mBody.byteStream()).thenReturn(new InputStream() {
+            @Override
+            public int read() throws IOException {
+                throw new IOException("read failed");
+            }
+
+            @Override
+            public void close() throws IOException {
+                throw new IOException("close failed");
+            }
+        });
+        doThrow(new IOException("close failed")).when(mBody).close();
+        when(mCall.execute()).thenReturn(realResponseWithBody(mBody));
+        HttpImageGetter getter = new HttpImageGetter(mContext);
+        try {
+            assertSame(field(getter, "mErrorDrawable"),
+                    loadImage(getter, "https://example.com/x.png"));
+        } finally {
+            getter.destroy();
+        }
+    }
+
+    @Test
+    public void loadImage_svgHeightOnlyCoversNegativeWidth() throws Exception {
+        // L594：只有 height、没有 width 时 docWidth < 0 走宽高回退分支。
+        HttpImageGetter getter = new HttpImageGetter(mContext);
+        try {
+            Drawable d = loadSvg(getter, SVG_HEIGHT_ONLY);
+            assertTrue(d instanceof BitmapDrawable);
+            assertNotNull(((BitmapDrawable) d).getBitmap());
+        } finally {
+            getter.destroy();
+        }
+    }
+
+    // ---- 第 3 轮补缺口 ----
+
+    @Test
+    public void loadImage_gifZeroMaxWidthHalvesToZero() throws Exception {
+        // L509：mMaxWidth 为 0 时，GIF 宽高对半砍直到 width == 0 才停
+        // （width > 0 第二侧为假），setBounds(0, 0, 0, 0)。mMaxWidth 取自
+        // 屏幕尺寸、正常恒为正，此处反射置 0 只为覆盖该防御分支。
+        byte[] gif = Base64.decode(GIF_1X1_BASE64, Base64.DEFAULT);
+        stubBody(gif, "image/gif");
+        HttpImageGetter getter = new HttpImageGetter(mContext);
+        setField(getter, "mMaxWidth", 0);
+        try (MockedConstruction<GifDrawable> mocked = mockConstruction(
+                GifDrawable.class,
+                (mock, context) -> {
+                    when(mock.getIntrinsicWidth()).thenReturn(10);
+                    when(mock.getIntrinsicHeight()).thenReturn(10);
+                })) {
+            Drawable d = loadImage(getter, "https://example.com/x.gif");
+            assertSame(mocked.constructed().get(0), d);
+            verify(mocked.constructed().get(0)).setBounds(0, 0, 0, 0);
+        } finally {
+            getter.destroy();
+        }
+    }
+
 }

@@ -327,4 +327,33 @@ public class CustomTabsHelperTest {
         shadowPm.addResolveInfoForIntent(viewIntent(), info);
         assertNull(CustomTabsHelper.getPackageNameToUse(context));
     }
+    @Test
+    public void hasSpecialized_nullActivityInfoIsSkipped() {
+        // L129：filter 含 authority+path 但 activityInfo 为 null 的候选被
+        // continue 跳过，不抛 NPE、也不算专门处理。
+        PackageManager mockPm = mock(PackageManager.class);
+        ResolveInfo chrome = viewInfo("com.android.chrome");
+        ResolveInfo beta = viewInfo("com.chrome.beta");
+        when(mockPm.resolveActivity(any(Intent.class), eq(0)))
+                .thenReturn(chrome);
+        when(mockPm.queryIntentActivities(any(Intent.class), eq(0)))
+                .thenReturn(Arrays.asList(chrome, beta));
+        ResolveInfo service = new ResolveInfo();
+        service.serviceInfo = new ServiceInfo();
+        when(mockPm.resolveService(any(Intent.class), eq(0)))
+                .thenReturn(service);
+        ResolveInfo specialized = new ResolveInfo();
+        specialized.filter = new IntentFilter();
+        specialized.filter.addDataAuthority("example.com", null);
+        specialized.filter.addDataPath("/x", PatternMatcher.PATTERN_LITERAL);
+        specialized.activityInfo = null;
+        when(mockPm.queryIntentActivities(any(Intent.class),
+                eq(PackageManager.GET_RESOLVED_FILTER)))
+                .thenReturn(java.util.Collections.singletonList(specialized));
+        Context mockContext = mock(Context.class);
+        when(mockContext.getPackageManager()).thenReturn(mockPm);
+        assertEquals("com.android.chrome",
+                CustomTabsHelper.getPackageNameToUse(mockContext));
+    }
+
 }

@@ -2,7 +2,13 @@ package com.gh4a.activities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 import androidx.appcompat.view.menu.MenuBuilder;
 import static org.junit.Assert.assertNotNull;
@@ -12,10 +18,13 @@ import static org.junit.Assert.assertTrue;
 import android.content.Context;
 import android.content.Intent;
 
+import java.lang.reflect.Field;
+
 import androidx.test.core.app.ApplicationProvider;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.MockedStatic;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Shadows;
@@ -23,8 +32,13 @@ import org.robolectric.android.controller.ActivityController;
 import org.robolectric.shadows.ShadowActivity;
 
 import com.gh4a.R;
+import com.gh4a.ServiceFactory;
 import com.meisolsson.githubsdk.model.User;
 import com.meisolsson.githubsdk.model.UserType;
+import com.meisolsson.githubsdk.service.users.UserService;
+
+import io.reactivex.Single;
+import retrofit2.Response;
 
 @RunWith(RobolectricTestRunner.class)
 public class UserActivityTest {
@@ -339,6 +353,70 @@ public class UserActivityTest {
                     mock(com.gh4a.fragment.UserFragment.class);
             activity.onFragmentInstantiated(frag, 0);
             assertEquals(frag, a2GetField(activity, "mUserFragment"));
+        }
+    }
+
+    // ---- gap fixes (2026-11-22, group C, round 2) ----
+
+    @Test
+    public void loadUser_mockedService_successFillsUser() throws Exception {
+        // Mocked UserService returns the user: onCreate's loadUser success
+        // consumer fills mUser, invalidates tabs and shows the content
+        // (L156-L160). Previously the loader ran against the real service
+        // and only ever reached handleLoadFailure offline, so these lines
+        // were uncovered. The service mock is built before mocked.when(...)
+        // starts (stubbing inside thenReturn's argument would throw
+        // UnfinishedStubbingException -- same trap as the ReleaseInfo /
+        // NewsFeedFactory load tests fixed this round).
+        User user = User.builder().login("octocat").id(1L).name("The Octocat").build();
+        UserService userService = mock(UserService.class);
+        when(userService.getUser(anyString()))
+                .thenReturn(Single.just(Response.success(user)));
+        try (MockedStatic<ServiceFactory> mocked =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            mocked.when(() -> ServiceFactory.get(eq(UserService.class), anyBoolean()))
+                    .thenReturn(userService);
+            Intent intent = UserActivity.makeIntent(context(), "octocat");
+            try (ActivityController<UserActivity> c =
+                    Robolectric.buildActivity(UserActivity.class, intent)) {
+                UserActivity activity = c.setup().get();
+                ActivityTestHelper.waitFor(
+                        () -> ActivityTestHelper.get(activity, "mUser") != null, 10000);
+                assertSame(user, ActivityTestHelper.get(activity, "mUser"));
+            }
+        }
+    }
+
+    @Test
+    public void onFragmentInstantiated_positionOne_doesNotSetUserFragment() throws Exception {
+        // L103 false side: a non-zero position leaves mUserFragment
+        // untouched (the position-0 side is covered by the existing
+        // onFragmentInstantiated_positionZero_setsUserFragment).
+        Intent intent = UserActivity.makeIntent(context(), "octocat");
+        try (ActivityController<UserActivity> c =
+                Robolectric.buildActivity(UserActivity.class, intent)) {
+            UserActivity activity = c.setup().get();
+            com.gh4a.fragment.UserFragment frag =
+                    mock(com.gh4a.fragment.UserFragment.class);
+            activity.onFragmentInstantiated(frag, 1);
+            assertNull(a2GetField(activity, "mUserFragment"));
+        }
+    }
+
+    @Test
+    public void getActionBarTitle_nullLogin_returnsNull() throws Exception {
+        // mUserLogin null: the bot-suffix guard's first operand is false and
+        // getActionBarTitle returns null (L65). A null login cannot be
+        // launched directly (loadUser rejects a null @Path), so the field is
+        // nulled by reflection after a valid launch.
+        Intent intent = UserActivity.makeIntent(context(), "octocat");
+        try (ActivityController<UserActivity> c =
+                Robolectric.buildActivity(UserActivity.class, intent)) {
+            UserActivity activity = c.setup().get();
+            Field f = UserActivity.class.getDeclaredField("mUserLogin");
+            f.setAccessible(true);
+            f.set(activity, null);
+            assertNull(activity.getActionBarTitle());
         }
     }
 

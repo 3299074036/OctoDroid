@@ -605,4 +605,82 @@ public class SingleFactoryTest {
         assertNotNull(date);
         assertNotNull(transform.write(date));
     }
+    @Test
+    public void retrofitHelper_trendService_doubleCheckedLock_innerFalseReturnsPreset()
+            throws Exception {
+        // L185：内层 if (service == null) 的 false 分支——第二个线程已越过外层
+        // 检查后在 synchronized 内复读到非空。32 线程 hammer 在 11-21 实测中
+        // 没撞上（1.5 核上线程常被串行调度，外层检查已看到非空）；这里确定性
+        // 复现：测试线程先占住 RetrofitHelper.LOCK，工作线程在 trendService()
+        // 的 synchronized 处 BLOCKED（已越过外层检查），再把 sTrendService
+        // 置为预设值并放锁。
+        clearRetrofitHelperStatics();
+        Object preset = SingleFactory.trendService(new OkHttpClient());
+        Class<?> clazz = retrofitHelperClass();
+        Field lockField = clazz.getDeclaredField("LOCK");
+        lockField.setAccessible(true);
+        Object lock = lockField.get(null);
+        Field serviceField = clazz.getDeclaredField("sTrendService");
+        serviceField.setAccessible(true);
+        java.util.concurrent.atomic.AtomicReference<Object> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                result.set(callRetrofitHelper("trendService"));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        synchronized (lock) {
+            worker.start();
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (worker.getState() != Thread.State.BLOCKED
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(1);
+            }
+            assertEquals(Thread.State.BLOCKED, worker.getState());
+            serviceField.set(null, preset);
+        }
+        worker.join(10_000);
+        assertSame(preset, result.get());
+    }
+
+    @Test
+    public void retrofitHelper_feedService_doubleCheckedLock_innerFalseReturnsPreset()
+            throws Exception {
+        // L171：内层 if (service == null) 的 false 分支——与 trendService 同款
+        // 确定性复现（见上一个测试）。预设用 mock 的 GitHubFeedService（公开
+        // 拼装入口只有 trendService；feedService 的 Retrofit 由 initialize()
+        // 内部创建，这里只要一个身份可断言的实例）。
+        clearRetrofitHelperStatics();
+        Object preset = mock(GitHubFeedService.class);
+        Class<?> clazz = retrofitHelperClass();
+        Field lockField = clazz.getDeclaredField("LOCK");
+        lockField.setAccessible(true);
+        Object lock = lockField.get(null);
+        Field serviceField = clazz.getDeclaredField("sFeedService");
+        serviceField.setAccessible(true);
+        java.util.concurrent.atomic.AtomicReference<Object> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                result.set(callRetrofitHelper("feedService"));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        synchronized (lock) {
+            worker.start();
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (worker.getState() != Thread.State.BLOCKED
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(1);
+            }
+            assertEquals(Thread.State.BLOCKED, worker.getState());
+            serviceField.set(null, preset);
+        }
+        worker.join(10_000);
+        assertSame(preset, result.get());
+    }
+
 }

@@ -379,6 +379,56 @@ public class StarredRepositoryListFragmentTest {
     }
 
     @Test
+    public void loadOfficialLists_successAfterDetach_isIgnored() throws Exception {
+        // L219/L220：投递时 fragment 未 attach，成功回调直接返回。
+        // 注意：不能用 attach 后 remove 的写法——remove 走 onDestroyView，
+        // mListsDisposable.dispose() 把订阅 dispose 掉，回调根本跑不到，
+        // 断言空转通过。这里用从未 attach 的 fragment（mLogin 反射置入，
+        // 否则 fetchLists(null) 匹配不上 anyString() 的 stub），订阅保持
+        // 有效（SingleSubject 会把终态重放给晚订阅者），回调确实跑过。
+        io.reactivex.subjects.SingleSubject<
+                java.util.List<UserListsGraphQL.UserList>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        try (org.mockito.MockedStatic<UserListsGraphQL> mocked = mockFetchLists(subject)) {
+            StarredRepositoryListFragment f =
+                    StarredRepositoryListFragment.newInstance("alice");
+            setField(f, "mLogin", "alice");
+            callVoid(f, "loadOfficialLists", new Class<?>[]{});
+            assertFalse(f.isAdded());
+            subject.onSuccess(java.util.Arrays.asList(
+                    list("l1", "Group 1", java.util.Arrays.asList(listRepo("a/b")))));
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            Thread.sleep(100);
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            assertNull(field(f, "mOfficialLists"));
+            assertFalse((Boolean) field(f, "mListsFailed"));
+        }
+    }
+
+    @Test
+    public void loadOfficialLists_errorAfterDetach_isIgnored() throws Exception {
+        // L226/L227：投递时 fragment 未 attach，失败回调直接返回。
+        // 注意：同 successAfterDetach——attach 后 remove 会 dispose 掉订阅，
+        // 回调跑不到、断言空转；改用从未 attach 的 fragment。
+        io.reactivex.subjects.SingleSubject<
+                java.util.List<UserListsGraphQL.UserList>> subject =
+                io.reactivex.subjects.SingleSubject.create();
+        try (org.mockito.MockedStatic<UserListsGraphQL> mocked = mockFetchLists(subject)) {
+            StarredRepositoryListFragment f =
+                    StarredRepositoryListFragment.newInstance("alice");
+            setField(f, "mLogin", "alice");
+            callVoid(f, "loadOfficialLists", new Class<?>[]{});
+            assertFalse(f.isAdded());
+            subject.onError(new RuntimeException("no net"));
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            Thread.sleep(100);
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            assertNull(field(f, "mOfficialLists"));
+            assertFalse((Boolean) field(f, "mListsFailed"));
+        }
+    }
+
+    @Test
     public void showAssignToOfficialListsDialog_showsMultiChoiceDialog() throws Exception {
         StarredRepositoryListFragment f = attachWithHeader();
         setField(f, "mOfficialLists", java.util.Arrays.asList(
@@ -492,6 +542,23 @@ public class StarredRepositoryListFragmentTest {
         assertEquals(mActivity.getString(R.string.app_name),
                 org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
         assertEquals(null, field(f, "mOfficialLists"));
+    }
+
+    @Test
+    public void onSingleOpChanged_detachedFragment_isIgnored() throws Exception {
+        // L441：op 未消费但 fragment 已 detach，不弹 toast、不重拉。
+        StarredRepositoryListFragment f = attachWithHeader();
+        StarBatchMoveViewModel vm = mock(StarBatchMoveViewModel.class);
+        StarBatchMoveViewModel.SingleOp op = new StarBatchMoveViewModel.SingleOp(
+                1L, true, R.string.app_name, null);
+        when(vm.isSingleOpConsumed(op)).thenReturn(false);
+        setField(f, "mMoveViewModel", vm);
+        mActivity.getSupportFragmentManager().beginTransaction().remove(f).commitNow();
+        assertFalse(f.isAdded());
+        callVoid(f, "onSingleOpChanged",
+                new Class<?>[]{StarBatchMoveViewModel.SingleOp.class}, op);
+        org.mockito.Mockito.verify(vm, org.mockito.Mockito.never())
+                .markSingleOpConsumed(org.mockito.Mockito.any());
     }
 
     @Test

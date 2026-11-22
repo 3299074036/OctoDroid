@@ -9,6 +9,7 @@ import org.robolectric.RobolectricTestRunner;
 import java.io.IOException;
 
 import okhttp3.MediaType;
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
 import okhttp3.Request;
@@ -18,6 +19,9 @@ import okhttp3.ResponseBody;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * GoogleTranslator with a stubbed OkHttp interceptor: no real network.
@@ -138,4 +142,39 @@ public class GoogleTranslatorTest {
         assertEquals(5, new GoogleTranslator(fakeClient("", 200, new Captured()))
                 .getMaxParallelRequests());
     }
+    private static OkHttpClient fakeClientNullBody(int code, Captured cap) throws Exception {
+        // 与 Baidu/DeepL/Youdao 同款：不走拦截器（无 body 的 Response 会被
+        // 拦截器链先拦下抛 IllegalStateException），直接 mock OkHttpClient；
+        // 请求仍经 newCall 的 thenAnswer 捕获，供断言用。
+        OkHttpClient client = mock(OkHttpClient.class);
+        Call call = mock(Call.class);
+        Response nullBody = new Response.Builder()
+                .request(new Request.Builder().url("https://example.com/").build())
+                .protocol(Protocol.HTTP_1_1)
+                .code(code)
+                .message("OK")
+                .build();
+        when(client.newCall(any(Request.class))).thenAnswer(inv -> {
+            cap.request = inv.getArgument(0);
+            return call;
+        });
+        when(call.execute()).thenReturn(nullBody);
+        return client;
+    }
+
+    @Test
+    public void translate_nullBodyThrows() throws Exception {
+        // L35：200 但 body() == null 时同样抛 IOException。
+        Captured cap = new Captured();
+        GoogleTranslator t = new GoogleTranslator(fakeClientNullBody(200, cap));
+        try {
+            t.translate("Hello", "en", "zh-CN");
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertTrue(e.getMessage().contains("200"));
+        } catch (Exception e) {
+            fail("expected IOException, got " + e);
+        }
+    }
+
 }

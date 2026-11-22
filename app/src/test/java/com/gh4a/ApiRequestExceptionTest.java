@@ -6,13 +6,19 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
+import java.lang.reflect.Field;
+import java.util.Collections;
+
 import okhttp3.MediaType;
 import okhttp3.ResponseBody;
 import retrofit2.Response;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @RunWith(RobolectricTestRunner.class)
 public class ApiRequestExceptionTest {
@@ -181,5 +187,31 @@ public class ApiRequestExceptionTest {
         ApiRequestException e = ex(404, "{\"message\":\"Not Found\"}");
         assertEquals(e.getMessage(), e.getMessage());
         assertTrue(e instanceof RuntimeException);
+    }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void getMessage_nullReasonFieldError_skipped() throws Exception {
+        // formatFieldError's null-reason guard (L80-L81): a FieldError with
+        // a null reason contributes no error text, so the message is just
+        // "Validation Failed (422)". A null reason cannot be built through
+        // JSON (Moshi throws "Null reason" while parsing, see
+        // getMessage_nullReasonSkipped), so the mocked response is injected
+        // by replacing the final mResponse field.
+        ApiRequestException e = ex(422,
+                "{\"message\":\"Validation Failed\",\"errors\":["
+                        + "{\"resource\":\"Issue\",\"field\":\"title\",\"code\":\"invalid\"}]}");
+        assertNotNull(e.getResponse());
+        ClientErrorResponse mockedResponse = mock(ClientErrorResponse.class);
+        when(mockedResponse.message()).thenReturn("Validation Failed");
+        ClientErrorResponse.FieldError fieldError =
+                mock(ClientErrorResponse.FieldError.class);
+        when(fieldError.reason()).thenReturn(null);
+        when(mockedResponse.errors()).thenReturn(Collections.singletonList(fieldError));
+        Field f = ApiRequestException.class.getDeclaredField("mResponse");
+        f.setAccessible(true);
+        f.set(e, mockedResponse);
+        assertEquals("Validation Failed (422)", e.getMessage());
     }
 }

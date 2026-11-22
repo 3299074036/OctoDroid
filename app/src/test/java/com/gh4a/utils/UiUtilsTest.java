@@ -41,6 +41,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -557,4 +558,102 @@ public class UiUtilsTest {
         quoteCallback(view, new ArrayList<>())
                 .onDestroyActionMode(mock(android.view.ActionMode.class));
     }
+    @Test
+    public void classCanBeInstantiated() {
+        // L49：工具类默认构造。
+        assertNotNull(new UiUtils());
+    }
+
+    @Test
+    public void trySetListOverscrollColor_topOnlyEffectStillEnsuresBottom() throws Exception {
+        // L135：只有 mTopGlow 已创建、mBottomGlow 仍为 null 时，|| 的第二侧为真，
+        // 同样走 ensure 分支补齐 bottom。
+        RecyclerView rv = new RecyclerView(appContext());
+        java.lang.reflect.Method ensureTop =
+                RecyclerView.class.getDeclaredMethod("ensureTopGlow");
+        ensureTop.setAccessible(true);
+        ensureTop.invoke(rv);
+        UiUtils.trySetListOverscrollColor(rv, Color.GREEN);
+        assertNotNull(rv.getTag(R.id.EdgeColorHelper));
+    }
+
+    @Test
+    public void edgeColorHelper_applyColorNullIsNoop() throws Exception {
+        // L153：applyColor(null) 直接返回，不抛错。
+        Class<?> helperClass =
+                Class.forName("com.gh4a.utils.UiUtils$RecyclerViewEdgeColorHelper");
+        java.lang.reflect.Constructor<?> ctor =
+                helperClass.getDeclaredConstructor(RecyclerView.class);
+        ctor.setAccessible(true);
+        Object helper = ctor.newInstance(new RecyclerView(appContext()));
+        java.lang.reflect.Method applyColor =
+                helperClass.getDeclaredMethod("applyColor", android.widget.EdgeEffect.class);
+        applyColor.setAccessible(true);
+        applyColor.invoke(helper, (Object) null);
+    }
+
+    @Test
+    public void edgeColorHelper_ensureMethods_topSetBottomNullRefillsBoth() throws Exception {
+        // L161：sTopEnsureMethod 已有、sBottomEnsureMethod 为 null 时，&&
+        // 第二侧为假，走 try 块重新取两个方法并返回 true。直接置静态字段
+        // 构造“半初始化”态；finally 恢复成正常初始化态，不污染后续测试。
+        Class<?> helperClass =
+                Class.forName("com.gh4a.utils.UiUtils$RecyclerViewEdgeColorHelper");
+        java.lang.reflect.Field topField =
+                helperClass.getDeclaredField("sTopEnsureMethod");
+        topField.setAccessible(true);
+        java.lang.reflect.Field bottomField =
+                helperClass.getDeclaredField("sBottomEnsureMethod");
+        bottomField.setAccessible(true);
+        java.lang.reflect.Method ensureTop =
+                RecyclerView.class.getDeclaredMethod("ensureTopGlow");
+        ensureTop.setAccessible(true);
+        java.lang.reflect.Method ensureBottom =
+                RecyclerView.class.getDeclaredMethod("ensureBottomGlow");
+        ensureBottom.setAccessible(true);
+        topField.set(null, ensureTop);
+        bottomField.set(null, null);
+        try {
+            java.lang.reflect.Constructor<?> ctor =
+                    helperClass.getDeclaredConstructor(RecyclerView.class);
+            ctor.setAccessible(true);
+            Object helper = ctor.newInstance(new RecyclerView(appContext()));
+            java.lang.reflect.Method ensure =
+                    helperClass.getDeclaredMethod("ensureStaticMethodsAndFields");
+            ensure.setAccessible(true);
+            assertTrue((Boolean) ensure.invoke(helper));
+            assertNotNull(topField.get(null));
+            assertNotNull(bottomField.get(null));
+        } finally {
+            topField.set(null, ensureTop);
+            bottomField.set(null, ensureBottom);
+        }
+    }
+
+    @Test
+    public void setSelectableBackground_zeroResIdSetsNothing() {
+        // L236：obtainStyledAttributes 拿不到资源 id（0）时不设置背景。
+        View mockView = mock(View.class);
+        Context mockCtx = mock(Context.class);
+        android.content.res.TypedArray mockTa =
+                mock(android.content.res.TypedArray.class);
+        when(mockView.getContext()).thenReturn(mockCtx);
+        when(mockCtx.obtainStyledAttributes(any(int[].class))).thenReturn(mockTa);
+        when(mockTa.getResourceId(0, 0)).thenReturn(0);
+        UiUtils.setSelectableBackground(mockView);
+        verify(mockView, never()).setBackgroundResource(anyInt());
+        verify(mockTa).recycle();
+    }
+
+    @Test
+    public void withActivityIfAdded_addedButNoActivitySkipsAction() {
+        // L425：fragment 已附加但 getActivity() 为 null 时静默跳过，不调 action。
+        Fragment fragment = mock(Fragment.class);
+        when(fragment.isAdded()).thenReturn(true);
+        when(fragment.getActivity()).thenReturn(null);
+        AtomicBoolean called = new AtomicBoolean(false);
+        UiUtils.withActivityIfAdded(fragment, activity -> called.set(true));
+        assertFalse(called.get());
+    }
+
 }

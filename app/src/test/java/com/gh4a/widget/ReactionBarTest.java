@@ -838,6 +838,17 @@ public class ReactionBarTest {
     }
 
     @Test
+    public void setCallback_authorizedNullCallback_reactButtonGone() {
+        // L157 漏掉的最后一个组合：已登录 + callback 为 null
+        //（isUserLoggedIn true、callback != null false）。
+        FragmentActivity activity = activity();
+        setAuthorizedUser(activity, "me", 0L);
+        ReactionBar bar = bar(activity);
+        bar.setCallback(null, new TestItem("k"));
+        assertEquals(View.GONE, bar.findViewById(R.id.react).getVisibility());
+    }
+
+    @Test
     public void onClick_reactButton_createsAndShowsAddReactionPopup() throws Exception {
         FragmentActivity activity = activity();
         ReactionBar bar = bar(activity);
@@ -1223,6 +1234,10 @@ public class ReactionBarTest {
         TestItem item = new TestItem("k");
         AddReactionMenuHelper helper =
                 new AddReactionMenuHelper(activity, menu, cb, item, cache());
+        // reaction_menu.xml 里各 reaction 项默认 android:visible="false"，
+        // 不先把 plus_one 显示出来，下面的等待循环一次都不跑、断言空洞通过，
+        // 错误回调（投递到主线程）也等不到执行，L557-559 覆盖不到。
+        menu.findItem(R.id.plus_one).setVisible(true);
         helper.startLoadingIfNeeded();
         // The error path updates the menu: with no cached reactions the
         // reaction items are hidden again.
@@ -1278,5 +1293,121 @@ public class ReactionBarTest {
         helper.updateMenuItems();
         assertTrue(helper.onItemClick(menu.findItem(R.id.plus_one)));
         verify(cb).deleteReaction(item, 7L);
+    }
+
+    private int countSetReactionsNullCalls(Object mockAdapter) {
+        int count = 0;
+        for (org.mockito.invocation.Invocation inv :
+                org.mockito.Mockito.mockingDetails(mockAdapter).getInvocations()) {
+            if (inv.getMethod().getName().equals("setReactions")
+                    && inv.getArgument(0) == null) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    @Test
+    public void popup_show_sameContentTwice_skipsAdapterReset() throws Exception {
+        FragmentActivity activity = activity();
+        ReactionBar bar = bar(activity);
+        TestItem item = new TestItem("k");
+        ReactionDetailsCache cache = cache();
+        ReactionBar.Callback cb = callbackReturning(Arrays.asList(
+                reaction(1L, Reaction.CONTENT_PLUS_ONE, "alice", new Date())));
+        bar.setDetailsCache(cache);
+        bar.setCallback(cb, item);
+        bar.setReactions(reactions(1, 1));
+
+        bar.findViewById(R.id.plus_one).performClick();
+        Object popup = field(bar, "mPopup");
+        // Wait until the fetch populated the cache (details are non-null).
+        long deadline = System.currentTimeMillis() + 5000;
+        while (cache.getReactions(item) == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+            idleMainLooper();
+        }
+        assertNotNull(cache.getReactions(item));
+        ((androidx.appcompat.widget.ListPopupWindow) popup).dismiss();
+
+        // Swap the popup's adapter for a mock of the same (private) class so
+        // the setReactions(null) reset inside show() becomes observable.
+        Object realAdapter = field(popup, "mAdapter");
+        Object mockAdapter = org.mockito.Mockito.mock(realAdapter.getClass());
+        java.lang.reflect.Field adapterField =
+                popup.getClass().getDeclaredField("mAdapter");
+        adapterField.setAccessible(true);
+        adapterField.set(popup, mockAdapter);
+
+        // Same content again: the reset is skipped, only populateAdapter runs.
+        bar.findViewById(R.id.plus_one).performClick();
+        assertEquals(0, countSetReactionsNullCalls(mockAdapter));
+        ((androidx.appcompat.widget.ListPopupWindow) popup).dismiss();
+
+        // Different content: the reset runs exactly once.
+        bar.findViewById(R.id.heart).performClick();
+        assertEquals(1, countSetReactionsNullCalls(mockAdapter));
+    }
+
+    @Test
+    public void popupAdapter_ownRowClick_addError_dismissesPopup() throws Exception {
+        FragmentActivity activity = activity();
+        setAuthLogin(activity, "me", 0L);
+        ReactionBar bar = bar(activity);
+        TestItem item = new TestItem("k");
+        ReactionDetailsCache cache = cache();
+        ReactionBar.Callback cb = callbackReturning(Arrays.asList(
+                reaction(1L, Reaction.CONTENT_PLUS_ONE, "alice", new Date())));
+        when(cb.addReaction(item, Reaction.CONTENT_PLUS_ONE))
+                .thenReturn(Single.error(new RuntimeException("boom")));
+        bar.setDetailsCache(cache);
+        bar.setCallback(cb, item);
+        bar.setReactions(reactions(1, 0));
+
+        bar.findViewById(R.id.plus_one).performClick();
+        Object popup = field(bar, "mPopup");
+        BaseAdapter adapter = (BaseAdapter) field(popup, "mAdapter");
+        waitForAdapterLoaded(adapter);
+
+        ViewGroup parent = new android.widget.FrameLayout(activity);
+        View row = adapter.getView(2, null, parent);
+        row.performClick();
+        verify(cb).addReaction(item, Reaction.CONTENT_PLUS_ONE);
+
+        long deadline = System.currentTimeMillis() + 5000;
+        while (((androidx.appcompat.widget.ListPopupWindow) popup).isShowing()
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+            idleMainLooper();
+        }
+        assertFalse(((androidx.appcompat.widget.ListPopupWindow) popup).isShowing());
+    }
+
+    @Test
+    public void popupAdapter_onlyOwnReaction_noDividerRow() throws Exception {
+        FragmentActivity activity = activity();
+        setAuthLogin(activity, "me", 0L);
+        ReactionBar bar = bar(activity);
+        TestItem item = new TestItem("k");
+        ReactionDetailsCache cache = cache();
+        ReactionBar.Callback cb = callbackReturning(Collections.singletonList(
+                reaction(7L, Reaction.CONTENT_PLUS_ONE, "me", new Date())));
+        bar.setDetailsCache(cache);
+        bar.setCallback(cb, item);
+        bar.setReactions(reactions(1, 0));
+
+        bar.findViewById(R.id.plus_one).performClick();
+        Object popup = field(bar, "mPopup");
+        BaseAdapter adapter = (BaseAdapter) field(popup, "mAdapter");
+        waitForAdapterLoaded(adapter);
+
+        // No other users: no divider is added, the only row is the own user.
+        assertEquals(1, adapter.getCount());
+        assertEquals(0, adapter.getItemViewType(0));
+        assertEquals("me", ((User) adapter.getItem(0)).login());
+        ViewGroup parent = new android.widget.FrameLayout(activity);
+        View row = adapter.getView(0, null, parent);
+        assertEquals(activity.getString(R.string.remove_reaction),
+                ((TextView) row.findViewById(R.id.name)).getText().toString());
     }
 }

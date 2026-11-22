@@ -828,4 +828,50 @@ public class EventAdapterTest {
                 DeletePayload.builder().refType(ReferenceType.Repository).ref("x").build()));
         assertEquals("", title(h));
     }
+
+    @Test
+    public void bind_pullRequest_nullTitle_noDesc() {
+        PullRequest pr = mock(PullRequest.class);
+        when(pr.title()).thenReturn(null);
+        when(pr.commits()).thenReturn(null);
+        when(pr.additions()).thenReturn(null);
+        when(pr.deletions()).thenReturn(null);
+        EventAdapter.EventViewHolder h = bind(event(GitHubEventType.PullRequestEvent,
+                PullRequestPayload.builder().action(PullRequestPayload.Action.Opened)
+                        .number(9).pullRequest(pr).build()));
+        assertEquals(View.GONE, descVisibility(h));
+    }
+
+    @Test
+    public void bind_pullRequest_deletionsNull_titleOnly() {
+        PullRequest pr = mock(PullRequest.class);
+        when(pr.title()).thenReturn("Add feature");
+        when(pr.commits()).thenReturn(2);
+        when(pr.additions()).thenReturn(10);
+        when(pr.deletions()).thenReturn(null);
+        EventAdapter.EventViewHolder h = bind(event(GitHubEventType.PullRequestEvent,
+                PullRequestPayload.builder().action(PullRequestPayload.Action.Opened)
+                        .number(9).pullRequest(pr).build()));
+        assertEquals("Add feature", desc(h));
+    }
+
+    @Test
+    public void bind_push_nullCommits_noDesc() {
+        // Mockito 的 mock 默认对 List 返回空列表而不是 null，不显式 stub
+        // 的话本测试实际测的是空列表分支（与
+        // bind_push_emptyCommits_withRepo_noDesc 重复），L302 的
+        // commits == null 分支永远跑不到；必须把 commits() stub 成 null。
+        PushPayload payload = mock(PushPayload.class);
+        when(payload.commits()).thenReturn(null);
+        EventAdapter.EventViewHolder h = bind(event(GitHubEventType.PushEvent, payload));
+        assertEquals(View.GONE, descVisibility(h));
+    }
+
+    @Test
+    public void bind_statusEvent_emptyTitleNoDesc() {
+        EventAdapter.EventViewHolder h = bind(event(GitHubEventType.StatusEvent,
+                mock(GitHubPayload.class)));
+        assertEquals("", title(h));
+        assertEquals(View.GONE, descVisibility(h));
+    }
 }

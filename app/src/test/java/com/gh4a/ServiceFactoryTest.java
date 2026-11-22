@@ -10,6 +10,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.TimeUnit;
@@ -27,6 +28,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -315,6 +317,51 @@ public class ServiceFactoryTest {
         Response resp = cannedResponse(req, 200, null, "application/json");
         FakeChain chain = new FakeChain(req, resp);
         assertSame(resp, interceptor("UNKNOWN_EVENT_TYPE_INTERCEPTOR").intercept(chain));
+    }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void unknownEventInterceptor_bodyReadFails_failOpenReturnsResponse()
+            throws Exception {
+        // response.body().bytes() throws before rawBytes is assigned: the
+        // catch's `rawBytes != null` is false, so the original response is
+        // returned unchanged (L99 first operand false).
+        Request req = request("https://api.github.com/users/o/events");
+        ResponseBody body = mock(ResponseBody.class);
+        when(body.contentType()).thenReturn(JSON);
+        doThrow(new IOException("boom")).when(body).bytes();
+        Response resp = new Response.Builder()
+                .request(req).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body)
+                .build();
+        Response out = interceptor("UNKNOWN_EVENT_TYPE_INTERCEPTOR")
+                .intercept(new FakeChain(req, resp));
+        assertSame(resp, out);
+    }
+
+    @Test
+    public void unknownEventInterceptor_bodyNotArray_failOpenRebuildsBodyFromRawBytes()
+            throws Exception {
+        // rawBytes was read successfully, then new JSONArray(body) throws
+        // (the body is a JSON object, not an array): the catch's
+        // `rawBytes != null && response.body() != null` is true (L99 true
+        // side), so the response is rebuilt from the raw bytes instead of
+        // being returned as-is.
+        Request req = request("https://api.github.com/users/o/events");
+        String raw = "{\"not\":\"array\"}";
+        ResponseBody body = mock(ResponseBody.class);
+        when(body.contentType()).thenReturn(JSON);
+        when(body.bytes()).thenReturn(
+                raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Response resp = new Response.Builder()
+                .request(req).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body)
+                .build();
+        Response out = interceptor("UNKNOWN_EVENT_TYPE_INTERCEPTOR")
+                .intercept(new FakeChain(req, resp));
+        assertNotSame(resp, out);
+        assertEquals(raw, out.body().string());
     }
 
     // ---- ETAG / CACHE_MAX_AGE / CACHE_BYPASS / CACHE_STATUS ----

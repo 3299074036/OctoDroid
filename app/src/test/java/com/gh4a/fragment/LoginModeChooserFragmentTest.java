@@ -34,6 +34,7 @@ import org.mockito.MockedStatic;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Shadows;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -330,6 +331,27 @@ public class LoginModeChooserFragmentTest {
                 "replaceURLSpansIfNeeded", CharSequence.class);
         m.setAccessible(true);
         m.invoke(f, text);
+    }
+
+    @Test
+    public void wrappedEditor_getText_nullEditableReturnsNull() throws Exception {
+        // L239：mEditor.getText() 为 null 时返回 null。
+        LoginHostActivity activity = host();
+        LoginModeChooserFragment f = shown(activity);
+        Field tokenField = LoginModeChooserFragment.class.getDeclaredField("mToken");
+        tokenField.setAccessible(true);
+        Object wrappedEditor = tokenField.get(f);
+        assertNotNull(wrappedEditor);
+        Class<?> wrappedClass = wrappedEditor.getClass().getSuperclass();
+        Field editorField = wrappedClass.getDeclaredField("mEditor");
+        editorField.setAccessible(true);
+        com.google.android.material.textfield.TextInputEditText mockEditor =
+                mock(com.google.android.material.textfield.TextInputEditText.class);
+        when(mockEditor.getText()).thenReturn(null);
+        editorField.set(wrappedEditor, mockEditor);
+        Method getText = wrappedClass.getDeclaredMethod("getText");
+        getText.setAccessible(true);
+        assertNull(getText.invoke(wrappedEditor));
     }
 
     @Test

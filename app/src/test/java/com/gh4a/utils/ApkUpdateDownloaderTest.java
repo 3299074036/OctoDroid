@@ -531,4 +531,81 @@ public class ApkUpdateDownloaderTest {
                     started.getAction());
         }
     }
+    @Test
+    @org.robolectric.annotation.Config(sdk = 27)
+    public void checkSignature_prePUsesLegacySignatures() throws Exception {
+        // L154/L202：SDK < P 时只传 GET_SIGNATURES，getSignatures 直接取
+        // info.signatures（不走 signingInfo），签名一致即 MATCH。
+        Signature a = sig((byte) 1, (byte) 2, (byte) 3);
+        assertEquals(ApkUpdateDownloader.ApkSignatureCheck.MATCH,
+                checkWith(packageInfo("com.gh4a", new Signature[]{a}),
+                        packageInfo("com.gh4a", new Signature[]{a}), false, "com.gh4a"));
+    }
+
+    private void invokeInstallApk(Context ctx, File apkFile) throws Exception {
+        java.lang.reflect.Method m = ApkUpdateDownloader.class.getDeclaredMethod(
+                "installApk", Context.class, File.class);
+        m.setAccessible(true);
+        m.invoke(null, ctx, apkFile);
+    }
+
+    @Test
+    public void installApk_unknownSourcesSettingsMissingShowsToast() throws Exception {
+        // L212/L224-225：默认 canRequestPackageInstalls() 为假时走设置页分支；
+        // checkActivities(true) 后，无该设置页可解析时 startActivity 抛
+        // ActivityNotFoundException，被捕获后弹安装失败 toast。
+        Shadows.shadowOf((android.app.Application) context).checkActivities(true);
+        File apkFile = new File(context.getFilesDir(), "x.apk");
+        invokeInstallApk(context, apkFile);
+        assertEquals(context.getString(R.string.apk_install_failed),
+                ShadowToast.getTextOfLatestToast());
+    }
+
+    @Test
+    public void installApk_noInstallerShowsToast() throws Exception {
+        // L212/L238-239：允许未知来源安装时走安装 intent 分支；checkActivities(true)
+        // 后，测试环境无包安装器可解析，同样抛 ActivityNotFoundException 并弹失败 toast。
+        Shadows.shadowOf((android.app.Application) context).checkActivities(true);
+        Shadows.shadowOf(context.getPackageManager()).setCanRequestPackageInstalls(true);
+        File apkFile = new File(context.getFilesDir(), "y.apk");
+        try (FileWriter w = new FileWriter(apkFile)) {
+            w.write("x");
+        }
+        Uri fakeUri = Uri.parse("content://" + context.getPackageName()
+                + ".fileprovider/private_download/y.apk");
+        try (MockedStatic<androidx.core.content.FileProvider> mocked =
+                Mockito.mockStatic(androidx.core.content.FileProvider.class)) {
+            mocked.when(() -> androidx.core.content.FileProvider.getUriForFile(
+                    any(Context.class), anyString(), any(File.class))).thenReturn(fakeUri);
+            invokeInstallApk(context, apkFile);
+        }
+        assertEquals(context.getString(R.string.apk_install_failed),
+                ShadowToast.getTextOfLatestToast());
+    }
+
+    @Test
+    @org.robolectric.annotation.Config(sdk = 25)
+    public void installApk_preOInstallIntentShowsToast() throws Exception {
+        // L212 的 `SDK_INT >= O` 的 false 边：SDK 25 下跳过“未知来源设置页”
+        // 分支，直接走安装 intent；checkActivities(true) 后测试环境无包安装器
+        // 可解析，抛 ActivityNotFoundException 并弹失败 toast。
+        // （与 installApk_noInstallerShowsToast 同体，仅 SDK 不同。）
+        Shadows.shadowOf((android.app.Application) context).checkActivities(true);
+        Shadows.shadowOf(context.getPackageManager()).setCanRequestPackageInstalls(true);
+        File apkFile = new File(context.getFilesDir(), "y25.apk");
+        try (FileWriter w = new FileWriter(apkFile)) {
+            w.write("x");
+        }
+        Uri fakeUri = Uri.parse("content://" + context.getPackageName()
+                + ".fileprovider/private_download/y25.apk");
+        try (MockedStatic<androidx.core.content.FileProvider> mocked =
+                Mockito.mockStatic(androidx.core.content.FileProvider.class)) {
+            mocked.when(() -> androidx.core.content.FileProvider.getUriForFile(
+                    any(Context.class), anyString(), any(File.class))).thenReturn(fakeUri);
+            invokeInstallApk(context, apkFile);
+        }
+        assertEquals(context.getString(R.string.apk_install_failed),
+                ShadowToast.getTextOfLatestToast());
+    }
+
 }

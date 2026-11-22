@@ -613,4 +613,80 @@ public class BasePagerActivityTest {
         callPrivate(activity, "applyPagerTouchPaging",
                 new Class<?>[]{ViewPager.class}, new ViewPager(activity));
     }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+    // Note: L182/L210 (attach/detachTabRowSwipe guards) are already covered
+    // by the existing nullTabs/emptyTabStrip/nullPager tests; the gap list
+    // predates them. L365-L366/L372-L373/L398-L401 (ensureStaticFields
+    // failure paths) are unreachable: androidx ViewPager 1.0.0 does have
+    // mLeftEdge/mRightEdge, so the reflection never fails.
+
+    @Test
+    public void applyTabRowStyle_singleTabWhiteRow_noWhiteStyle() {
+        // One tab with whiteRow enabled: `mAdapter.getCount() > 1` is false,
+        // so the white style is not applied and nothing is captured
+        // (L221, the count operand). The error-visible operand is already
+        // covered by applyTabRowStyle_errorVisible_restoresOriginalStyle.
+        ActivityController<TestPagerActivity> controller =
+                Robolectric.buildActivity(TestPagerActivity.class);
+        TestPagerActivity activity = controller.get();
+        activity.whiteRow = true;
+        activity.tabCount = 1;
+        controller.create().start().resume();
+        activity.invalidateTabs();
+        assertFalse((Boolean) getField(activity, "mTabRowOriginalCaptured"));
+    }
+
+    @Test
+    public void edgeColorHelper_leftEffectSetRightNull_refetchesBoth() throws Exception {
+        // Mixed state (left effect present, right null): applyIfPossible
+        // takes the `||` second arm (L368) and re-fetches both effects from
+        // the ViewPager fields. The both-null and both-set cases are already
+        // covered by tryUpdatePagerColor_secondCall_reusesHelper.
+        TestPagerActivity activity = launch();
+        ViewPager pager = activity.getPager();
+        callPrivate(activity, "tryUpdatePagerColor", new Class<?>[0]);
+        Object helper = pager.getTag(R.id.EdgeColorHelper);
+        assertNotNull(helper);
+        Field left = helper.getClass().getDeclaredField("mLeftEffect");
+        left.setAccessible(true);
+        Field right = helper.getClass().getDeclaredField("mRightEffect");
+        right.setAccessible(true);
+        assertNotNull(left.get(helper));
+        right.set(helper, null);
+        Method setColor = helper.getClass().getMethod("setColor", int.class);
+        setColor.invoke(helper, 0xFF112233);
+        assertNotNull(left.get(helper));
+        assertNotNull(right.get(helper));
+    }
+
+    @Test
+    public void edgeColorHelper_ensureStaticFieldsMixed_reinitializes() throws Exception {
+        // Mixed static fields (left set, right null): ensureStaticFields
+        // must re-initialize both and return true (L389, the
+        // right-null arm). The both-set case is already covered by
+        // edgeColorHelper_ensureStaticFieldsTwice_returnsTrue.
+        TestPagerActivity activity = launch();
+        ViewPager pager = activity.getPager();
+        callPrivate(activity, "tryUpdatePagerColor", new Class<?>[0]);
+        Object helper = pager.getTag(R.id.EdgeColorHelper);
+        assertNotNull(helper);
+        Class<?> helperClass = helper.getClass();
+        Field leftField = helperClass.getDeclaredField("sLeftEffectField");
+        leftField.setAccessible(true);
+        Field rightField = helperClass.getDeclaredField("sRightEffectField");
+        rightField.setAccessible(true);
+        Method ensure = helperClass.getDeclaredMethod("ensureStaticFields");
+        ensure.setAccessible(true);
+        try {
+            leftField.set(null, ViewPager.class.getDeclaredField("mLeftEdge"));
+            rightField.set(null, null);
+            assertTrue((Boolean) ensure.invoke(helper));
+            assertNotNull(leftField.get(null));
+            assertNotNull(rightField.get(null));
+        } finally {
+            // Leave the statics in their normal initialized state.
+            ensure.invoke(helper);
+        }
+    }
 }

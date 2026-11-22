@@ -3,27 +3,47 @@ package com.gh4a.activities.home;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 import android.view.View;
 import android.widget.AdapterView;
+import android.widget.Spinner;
 
 import androidx.appcompat.view.menu.MenuBuilder;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.MockedStatic;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.android.controller.ActivityController;
+import org.robolectric.shadows.ShadowLooper;
 
 import com.gh4a.R;
+import com.gh4a.ServiceFactory;
 import com.gh4a.fragment.PrivateEventListFragment;
+import com.meisolsson.githubsdk.model.Page;
 import com.meisolsson.githubsdk.model.User;
+import com.meisolsson.githubsdk.service.organizations.OrganizationService;
+
+import io.reactivex.Single;
+import retrofit2.Response;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import android.content.Context;
 import androidx.test.core.app.ApplicationProvider;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 
 @RunWith(RobolectricTestRunner.class)
 public class NewsFeedFactoryTest {
@@ -324,6 +344,189 @@ public class NewsFeedFactoryTest {
             setField(factory, "mSelectedOrganization", org);
             factory.onItemSelected(null, null, 1, 1);
             assertEquals(org, getField(factory, "mSelectedOrganization"));
+        }
+    }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void onCreateOptionsMenu_scopesWithoutSelf_returnsFalse() throws Exception {
+        // mUserScopes set but mSelf null: the menu guard's second operand
+        // (L77) returns the base implementation, which is false.
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            NewsFeedFactory factory = new NewsFeedFactory(activity, "octocat");
+            setField(factory, "mUserScopes",
+                    Collections.singletonList(User.builder().login("org1").build()));
+            MenuBuilder menu = new MenuBuilder(activity);
+            assertFalse(factory.onCreateOptionsMenu(menu));
+        }
+    }
+
+    @Test
+    public void onCreateOptionsMenu_withSelectedOrg_selectsPositionPlusOne()
+            throws Exception {
+        // mSelectedOrganization is the second scope: selectedPosition is its
+        // index (1) and the spinner selects index + 1 (L83 true side).
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            NewsFeedFactory factory = new NewsFeedFactory(activity, "octocat");
+            User self = User.builder().login("octocat").build();
+            User org1 = User.builder().login("org1").build();
+            User org2 = User.builder().login("org2").build();
+            setField(factory, "mSelf", self);
+            setField(factory, "mUserScopes", Arrays.asList(org1, org2));
+            setField(factory, "mSelectedOrganization", org2);
+            MenuBuilder menu = new MenuBuilder(activity);
+            assertTrue(factory.onCreateOptionsMenu(menu));
+            Spinner spinner = (Spinner) menu.findItem(R.id.selector).getActionView();
+            assertNotNull(spinner);
+            assertEquals(2, spinner.getSelectedItemPosition());
+        }
+    }
+
+    @Test
+    public void onItemSelected_positionZeroWithNoSelection_isNoOp() throws Exception {
+        // Position 0 with no organization selected yet: both sides of the
+        // null comparison are null, so isSameUser is true via `==` and
+        // nothing changes (L115 first ternary arm).
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            NewsFeedFactory factory = new NewsFeedFactory(activity, "octocat");
+            setField(factory, "mUserScopes",
+                    Collections.singletonList(User.builder().login("org1").build()));
+            factory.onItemSelected(null, null, 0, 0);
+            assertNull(getField(factory, "mSelectedOrganization"));
+        }
+    }
+
+    @Test
+    public void userAdapter_getView_withConvertView_reusesView() throws Exception {
+        // Non-null convertView: getView reuses it instead of inflating
+        // (L175 false side).
+        Context context = ApplicationProvider.getApplicationContext();
+        User self = User.builder().login("octocat").build();
+        List<User> users = Arrays.asList(User.builder().login("org1").build());
+        Class<?> cls = Class.forName("com.gh4a.activities.home.NewsFeedFactory$UserAdapter");
+        java.lang.reflect.Constructor<?> ctor = cls.getDeclaredConstructor(
+                Context.class, User.class, List.class);
+        ctor.setAccessible(true);
+        Object adapter = ctor.newInstance(context, self, users);
+        android.widget.FrameLayout parent = new android.widget.FrameLayout(context);
+        android.widget.ImageView reused = new android.widget.ImageView(context);
+        android.view.View view = (android.view.View) cls.getMethod("getView", int.class,
+                android.view.View.class, android.view.ViewGroup.class)
+                .invoke(adapter, 0, reused, parent);
+        assertSame(reused, view);
+    }
+
+    @Test
+    public void userAdapter_getDropDownView_nullConvertView_inflates() throws Exception {
+        // Null convertView: getDropDownView inflates R.layout.user_type_popup
+        // (L188 true side + L189). The layout resolves
+        // ?attr/selectableItemBackground, so the adapter must be built with
+        // a themed Activity context -- the bare application context uses
+        // Theme.DeviceDefault and inflation fails with InflateException.
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            User self = User.builder().login("octocat").build();
+            List<User> users = Arrays.asList(User.builder().login("org1").build());
+            Class<?> cls = Class.forName("com.gh4a.activities.home.NewsFeedFactory$UserAdapter");
+            java.lang.reflect.Constructor<?> ctor = cls.getDeclaredConstructor(
+                    Context.class, User.class, List.class);
+            ctor.setAccessible(true);
+            Object adapter = ctor.newInstance(activity, self, users);
+            android.widget.FrameLayout parent = new android.widget.FrameLayout(activity);
+            android.view.View view = (android.view.View) cls.getMethod("getDropDownView",
+                    int.class, android.view.View.class, android.view.ViewGroup.class)
+                    .invoke(adapter, 0, null, parent);
+            assertNotNull(view);
+            android.widget.TextView nameView = view.findViewById(R.id.tv_title);
+            assertNotNull(nameView);
+            assertEquals("octocat", nameView.getText().toString());
+        }
+    }
+
+    private OrganizationService mockOrgService(Page<User> page) {
+        OrganizationService service = mock(OrganizationService.class);
+        when(service.getMyOrganizations(anyLong()))
+                .thenReturn(Single.just(Response.success(page)));
+        when(service.getUserPublicOrganizations(anyString(), anyLong()))
+                .thenReturn(Single.just(Response.success(page)));
+        return service;
+    }
+
+    private void waitForScopes(NewsFeedFactory factory, boolean expectNull) throws Exception {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            ShadowLooper.idleMainLooper();
+            List<User> scopes = getField(factory, "mUserScopes");
+            if ((scopes == null) == expectNull) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+    }
+
+    @Test
+    public void loadOrganizations_emptyResult_clearsScopes() throws Exception {
+        // The load callback with an empty result sets mUserScopes to null
+        // (L141 true side + L142).
+        Page<User> emptyPage = mock(Page.class);
+        when(emptyPage.items()).thenReturn(Collections.emptyList());
+        // NB: next() must be stubbed to null -- Mockito's default for
+        // Integer is 0, and PageIterator would treat that as "another page
+        // exists" and call the service forever (see the probe test).
+        when(emptyPage.next()).thenReturn(null);
+        // NB: mockOrgService() itself stubs a mock, so it must be called
+        // BEFORE mocked.when(...) starts -- calling it inside thenReturn's
+        // argument nests one stubbing inside another and Mockito throws
+        // UnfinishedStubbingException.
+        OrganizationService orgService = mockOrgService(emptyPage);
+        try (MockedStatic<ServiceFactory> mocked =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            mocked.when(() -> ServiceFactory.get(
+                            eq(OrganizationService.class), anyBoolean()))
+                    .thenReturn(orgService);
+            try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+                HomeActivity activity = c.setup().get();
+                NewsFeedFactory factory = new NewsFeedFactory(activity, "octocat");
+                setField(factory, "mUserScopes",
+                        Collections.singletonList(User.builder().login("org1").build()));
+                factory.onStartLoadingData();
+                waitForScopes(factory, true);
+                assertNull(getField(factory, "mUserScopes"));
+            }
+        }
+    }
+
+    @Test
+    public void loadOrganizations_nonEmptyResult_setsScopes() throws Exception {
+        // The load callback with organizations sets mUserScopes to the
+        // returned list (L141 false side + L142).
+        User org1 = User.builder().login("org1").build();
+        Page<User> page = mock(Page.class);
+        when(page.items()).thenReturn(Collections.singletonList(org1));
+        // NB: next() must be stubbed to null -- see
+        // loadOrganizations_emptyResult_clearsScopes.
+        when(page.next()).thenReturn(null);
+        // NB: see loadOrganizations_emptyResult_clearsScopes -- the service
+        // must be stubbed before mocked.when(...) starts, not inside
+        // thenReturn's argument (UnfinishedStubbingException otherwise).
+        OrganizationService orgService = mockOrgService(page);
+        try (MockedStatic<ServiceFactory> mocked =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            mocked.when(() -> ServiceFactory.get(
+                            eq(OrganizationService.class), anyBoolean()))
+                    .thenReturn(orgService);
+            try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+                HomeActivity activity = c.setup().get();
+                NewsFeedFactory factory = new NewsFeedFactory(activity, "octocat");
+                factory.onStartLoadingData();
+                waitForScopes(factory, false);
+                assertEquals(Collections.singletonList(org1),
+                        getField(factory, "mUserScopes"));
+            }
         }
     }
 

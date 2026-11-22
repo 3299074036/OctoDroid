@@ -1901,4 +1901,101 @@ public class MeFragmentTest {
         assertTrue(org.robolectric.shadows.ShadowDialog.getShownDialogs().size()
                 > before);
     }
+
+    // ---- 2026-11-22 缺口补全：restore 回调 / loadUser 回调 / 未读计数回调 /
+    // 深色模式 scheduled 档 ----
+
+    private static Method lambdaMethod(String prefix, Class<?> paramType)
+            throws Exception {
+        for (Method m : MeFragment.class.getDeclaredMethods()) {
+            if (m.getName().startsWith(prefix)
+                    && m.getParameterCount() == 1
+                    && m.getParameterTypes()[0] == paramType) {
+                m.setAccessible(true);
+                return m;
+            }
+        }
+        throw new AssertionError(
+                "no lambda " + prefix + "(" + paramType.getName() + ")");
+    }
+
+    @Test
+    public void restoreLauncher_callbackDetachedWithUri_isNoop() throws Exception {
+        // L91：uri 非空但 fragment 已 detached → isAdded() 为假，不弹窗。
+        MeFragment f = new MeFragment();
+        int before = org.robolectric.shadows.ShadowDialog.getShownDialogs().size();
+        lambdaMethod("lambda$new", android.net.Uri.class)
+                .invoke(f, android.net.Uri.parse("content://x/backup.json"));
+        assertEquals(before,
+                org.robolectric.shadows.ShadowDialog.getShownDialogs().size());
+    }
+
+    @Test
+    public void loadUser_successDetached_isNoop() throws Exception {
+        // L202：成功回调到达时 fragment 已 detached → 直接返回，不填头部。
+        MeFragment f = new MeFragment();
+        User u = user("octo", "Octo Cat", new java.util.Date(1700000000000L),
+                5, 2, 6, 7, UserType.User);
+        lambdaMethod("lambda$loadUser", User.class).invoke(f, u);
+        assertNull(field(f, "mUser"));
+    }
+
+    @Test
+    public void loadUser_errorDetached_isNoop() throws Exception {
+        // L220：失败回调到达时 fragment 已 detached → 直接返回，不走兜底填充。
+        MeFragment f = new MeFragment();
+        lambdaMethod("lambda$loadUser", Throwable.class)
+                .invoke(f, new RuntimeException("boom"));
+        assertNull(field(f, "mUser"));
+    }
+
+    @Test
+    public void loadUnreadNotificationCount_successDetached_isNoop() throws Exception {
+        // L339：计数回调到达时 fragment 已 detached → 直接返回。
+        MeFragment f = new MeFragment();
+        lambdaMethod("lambda$loadUnreadNotificationCount",
+                NotificationListLoadResult.class)
+                .invoke(f, new NotificationListLoadResult(Collections.emptyList()));
+    }
+
+    @Test
+    public void loadUnreadNotificationCount_successNullView_isNoop() throws Exception {
+        // L339：已 attach（CREATED）但视图未建，mNotificationsValueView 为空 → 返回。
+        // 若守卫失效，回调会走到 setText("›") 而 NPE。
+        MeFragment f = attach(new MeFragment());
+        assertNull(field(f, "mNotificationsValueView"));
+        lambdaMethod("lambda$loadUnreadNotificationCount",
+                NotificationListLoadResult.class)
+                .invoke(f, new NotificationListLoadResult(Collections.emptyList()));
+    }
+
+    @Test
+    public void loadUnreadNotificationCount_errorKeepsChevron() throws Exception {
+        // L361：通知计数拉取失败时空的 error 消费者跑过，保持原来的“›”。
+        mSingleFactoryMock.when(() -> SingleFactory.getNotifications(false, false, false))
+                .thenReturn(Single.error(new RuntimeException("boom")));
+        MeFragment f = attachResumed(null);
+        Thread.sleep(500);
+        idleMain();
+        TextView valueView = (TextView) field(f, "mNotificationsValueView");
+        assertNotNull(valueView);
+        assertEquals("›", valueView.getText().toString());
+    }
+
+    @Test
+    public void showDarkModeDialog_scheduledModeChecksFirst() throws Exception {
+        // L680：mode 为 scheduled 时 checked 也取 0（与 system 同值，但分支不同）。
+        // prefs 写 scheduled 会被监听立即迁移成 system（见
+        // darkModeSummary_scheduledValueMigratesToSystem），故直接挡 getMode。
+        MeFragment f = attachResumed(null);
+        try (MockedStatic<DarkModeScheduler> mocked =
+                     mockStatic(DarkModeScheduler.class, CALLS_REAL_METHODS)) {
+            mocked.when(() -> DarkModeScheduler.getMode(any()))
+                    .thenReturn(DarkModeScheduler.MODE_SCHEDULED);
+            int before = org.robolectric.shadows.ShadowDialog.getShownDialogs().size();
+            callVoid(f, "showDarkModeDialog", new Class<?>[]{});
+            assertTrue(org.robolectric.shadows.ShadowDialog.getShownDialogs().size()
+                    > before);
+        }
+    }
 }

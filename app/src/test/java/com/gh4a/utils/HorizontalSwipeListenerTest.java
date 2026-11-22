@@ -238,4 +238,33 @@ public class HorizontalSwipeListenerTest {
         assertEquals(0, cb.left);
         assertEquals(0, cb.right);
     }
+    @Test
+    public void pointerDownWithoutTracking_isIgnored() {
+        // L52：未按下（mTracking false）时收到 ACTION_POINTER_DOWN，
+        // && 的第二操作数为假，不改变任何状态、不回调。
+        CountingCallback cb = new CountingCallback();
+        HorizontalSwipeListener l = new HorizontalSwipeListener(cb);
+        l.handle(multi(MotionEvent.ACTION_POINTER_DOWN
+                | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                new float[][]{{0, 0, 100}, {1, 500, 100}}));
+        assertEquals(0, cb.left);
+        assertEquals(0, cb.right);
+        // 之后正常按下/松手仍能切 Tab，证明状态未被污染。
+        l.handle(down(500, 100));
+        l.handle(up(0, 100));
+        assertEquals(1, cb.left);
+    }
+
+    @Test
+    public void pointerUpWithoutTracking_isIgnored() {
+        // L54：未按下（mTracking false）时收到 ACTION_POINTER_UP，不做任何事。
+        CountingCallback cb = new CountingCallback();
+        HorizontalSwipeListener l = new HorizontalSwipeListener(cb);
+        l.handle(multi(MotionEvent.ACTION_POINTER_UP
+                | (0 << MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                new float[][]{{0, 0, 100}}));
+        assertEquals(0, cb.left);
+        assertEquals(0, cb.right);
+    }
+
 }

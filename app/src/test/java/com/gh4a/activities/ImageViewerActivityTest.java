@@ -32,10 +32,16 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.when;
+
+import com.gh4a.ServiceFactory;
+import org.mockito.MockedStatic;
 
 @RunWith(RobolectricTestRunner.class)
 public class ImageViewerActivityTest {
@@ -527,5 +533,45 @@ public class ImageViewerActivityTest {
         java.lang.reflect.Constructor<?> ctor = cls.getDeclaredConstructor();
         ctor.setAccessible(true);
         return ctor.newInstance();
+    }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+    // Note: L360 (downsampling while-loop) is already covered by the
+    // existing hugeImage (width side) and tallImage (height side) tests.
+    // L115-L117 (non-null ActionBar), L229-L230/L234-L235 (30s takeover
+    // timeout / InterruptedException) and L370-L371 (null bitmap) are
+    // unreachable in Robolectric; see the report.
+
+    @Test
+    public void loadImage_mockedClient_successShowsImage() throws Exception {
+        // End-to-end success through loadImage's worker thread: the mocked
+        // HTTP client returns a PNG, downloadAndDecodeImage succeeds and
+        // the assignment at L180 runs, so the image view becomes VISIBLE.
+        Bitmap source = Bitmap.createBitmap(64, 32, Bitmap.Config.ARGB_8888);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        assertTrue(source.compress(Bitmap.CompressFormat.PNG, 100, bytes));
+        okhttp3.Call call = mock(okhttp3.Call.class);
+        when(call.execute()).thenReturn(new okhttp3.Response.Builder()
+                .request(new okhttp3.Request.Builder().url("https://example.com/x.png").build())
+                .protocol(okhttp3.Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(okhttp3.ResponseBody.create(
+                        okhttp3.MediaType.parse("image/png"), bytes.toByteArray()))
+                .build());
+        okhttp3.OkHttpClient client = mock(okhttp3.OkHttpClient.class);
+        when(client.newCall(any())).thenReturn(call);
+        try (MockedStatic<ServiceFactory> mocked =
+                mockStatic(ServiceFactory.class, CALLS_REAL_METHODS)) {
+            mocked.when(() -> ServiceFactory.getImageHttpClient()).thenReturn(client);
+            ImageViewerActivity activity =
+                    launch(ImageViewerActivity.class, intent("https://example.com/x.png"));
+            waitFor(() -> activity.findViewById(R.id.image_view).getVisibility()
+                            == View.VISIBLE, 10000);
+            assertEquals(View.VISIBLE,
+                    activity.findViewById(R.id.image_view).getVisibility());
+            assertEquals(View.GONE,
+                    activity.findViewById(R.id.progress_bar).getVisibility());
+        }
     }
 }

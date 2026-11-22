@@ -37,6 +37,7 @@ import io.reactivex.Single;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
@@ -804,6 +805,33 @@ public class EditorBottomSheetTest {
         sheet.setCommentText("hello", false);
         sheet.onRestoreInstanceState(android.view.View.BaseSavedState.EMPTY_STATE);
         assertEquals("hello", basicEditor().getText().toString());
+    }
+
+    @Test
+    public void updateSendButtonState_nullBasicEditorText_disablesSendButton() throws Exception {
+        CommentEditor mockEditor = mock(CommentEditor.class);
+        when(mockEditor.getEditableText()).thenReturn(null);
+        Field f = EditorBottomSheet.class.getDeclaredField("mBasicEditor");
+        f.setAccessible(true);
+        f.set(sheet, mockEditor);
+        Method update = EditorBottomSheet.class.getDeclaredMethod("updateSendButtonState");
+        update.setAccessible(true);
+        update.invoke(sheet);
+        assertFalse(sendButton().isEnabled());
+    }
+
+    @Test
+    public void saveInstanceState_nullBasicEditorText_savesNullCommentText() throws Exception {
+        CommentEditor mockEditor = mock(CommentEditor.class);
+        when(mockEditor.getText()).thenReturn(null);
+        Field f = EditorBottomSheet.class.getDeclaredField("mBasicEditor");
+        f.setAccessible(true);
+        f.set(sheet, mockEditor);
+        Parcelable state = sheet.onSaveInstanceState();
+        Class<?> ssClass = Class.forName("com.gh4a.widget.EditorBottomSheet$SavedState");
+        Field commentTextField = ssClass.getDeclaredField("commentText");
+        commentTextField.setAccessible(true);
+        assertNull(commentTextField.get(state));
     }
 
     // ---------- pager adapter ----------

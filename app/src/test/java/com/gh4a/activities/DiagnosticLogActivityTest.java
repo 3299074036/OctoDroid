@@ -100,6 +100,21 @@ public class DiagnosticLogActivityTest {
         assertTrue(Pattern.matches("\\d{2}:\\d{2}:\\d{2}", shortName));
     }
 
+    // ---- gap fixes (2026-11-22, group C) ----
+    // Note: L461 (try-with-resources close) is already covered by the
+    // existing saveToDownloads_emptyFile_savesEmptyAndShowsSavedToast test;
+    // the gap list predates it.
+
+    @Test
+    public void crashTimeFromName_nullName_fallsBackToCurrentTime() {
+        // Null name: name.startsWith throws NPE inside the try, the catch
+        // swallows it and the current time is returned (L334).
+        DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);
+        String time = (String) call(activity, "crashTimeFromName",
+                new Class<?>[]{String.class}, new Object[]{null});
+        assertTrue(Pattern.matches("\\d{2}:\\d{2}:\\d{2}", time));
+    }
+
     @Test
     public void loadCrashEntry_exceptionLineBecomesDetail() throws Exception {
         DiagnosticLogActivity activity = launch(DiagnosticLogActivity.class);

@@ -8,6 +8,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 
 import androidx.core.view.ViewCompat;
 import androidx.core.widget.NestedScrollView;
@@ -30,6 +31,7 @@ import java.lang.reflect.Method;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -248,5 +250,87 @@ public class MarkdownPreviewWebViewTest {
         Field themeField = MarkdownPreviewWebView.class.getDeclaredField("mCssTheme");
         themeField.setAccessible(true);
         assertEquals(WebViewerActivity.DARK_CSS_THEME, themeField.get(view));
+    }
+
+    @Test
+    public void constructor_editMode_skipsInit() {
+        FragmentActivity activity = activity();
+        MarkdownPreviewWebView view = new MarkdownPreviewWebView(activity) {
+            @Override
+            public boolean isInEditMode() {
+                return true;
+            }
+        };
+        assertNull(Shadows.shadowOf(view).getWebViewClient());
+        assertNull(Shadows.shadowOf(view).getLastLoadDataWithBaseURL());
+    }
+
+    @Test
+    public void onTouchEvent_nestedScrollParent_consumesScroll() {
+        FragmentActivity activity = activity();
+        NestedScrollView scrollView = new NestedScrollView(activity);
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        MarkdownPreviewWebView view = preview(activity);
+        view.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 500));
+        View filler = new View(activity);
+        filler.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 1500));
+        content.addView(view);
+        content.addView(filler);
+        scrollView.addView(content);
+        activity.setContentView(scrollView);
+        scrollView.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY));
+        scrollView.layout(0, 0, 1080, 1920);
+        long now = android.os.SystemClock.uptimeMillis();
+        view.onTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 10, 100, 0));
+        view.onTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_MOVE, 10, 80, 0));
+        // The parent consumed the scroll: the pre-scroll branch and the
+        // post-scroll branch both ran.
+        assertTrue(scrollView.getScrollY() > 0);
+        view.onTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_UP, 10, 80, 0));
+    }
+
+    // NestedScrollView 的 onNestedPreScroll 只把预滚动继续往上转发、自己在
+    // post-scroll 阶段才消费，所以上面那个测试里 dispatchNestedPreScroll
+    // 恒返回 false，L117 的 true 分支与 L119-122 从未跑到（scrollY>0 来自
+    // post-scroll 的 L127-131）。用一个直接消费预滚动的父容器，才能走到
+    // WebView 自己的预滚动处理。
+    private static class ConsumingNestedScrollView extends NestedScrollView {
+        ConsumingNestedScrollView(FragmentActivity activity) {
+            super(activity);
+        }
+
+        @Override
+        public void onNestedPreScroll(View target, int dx, int dy,
+                int[] consumed, int type) {
+            consumed[1] += dy;
+        }
+    }
+
+    @Test
+    public void onTouchEvent_consumingParent_preScrollAdjustsLastY() throws Exception {
+        FragmentActivity activity = activity();
+        ConsumingNestedScrollView scrollView = new ConsumingNestedScrollView(activity);
+        MarkdownPreviewWebView view = preview(activity);
+        view.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 500));
+        scrollView.addView(view);
+        activity.setContentView(scrollView);
+        scrollView.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY));
+        scrollView.layout(0, 0, 1080, 1920);
+        long now = android.os.SystemClock.uptimeMillis();
+        view.onTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 10, 100, 0));
+        view.onTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_MOVE, 10, 80, 0));
+        // 预滚动消费了全部 delta（20）：L117 的 true 分支跑到，mLastY 被改写
+        // 为 eventY - mScrollOffset[1] == 80；没跑到的话 mLastY 仍是 DOWN
+        // 时的 100。
+        Field lastY = MarkdownPreviewWebView.class.getDeclaredField("mLastY");
+        lastY.setAccessible(true);
+        assertEquals(80, lastY.getInt(view));
+        view.onTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_UP, 10, 80, 0));
     }
 }

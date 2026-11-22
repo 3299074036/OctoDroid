@@ -69,6 +69,20 @@ public class PagedDataBaseFragmentTest {
     }
 
     @Test
+    public void copyCurrentItems_nullAdapter_returnsEmpty() throws Exception {
+        // L152：mAdapter 为 null 时不进循环，返回空列表（load() 的 scan 种子；
+        // 有 adapter 时拷贝内容的臂由各子类的 load 流程覆盖）。
+        CollaboratorListFragment f = new CollaboratorListFragment();
+        java.lang.reflect.Method m =
+                PagedDataBaseFragment.class.getDeclaredMethod("copyCurrentItems");
+        m.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.List<?> items = (java.util.List<?>) m.invoke(f);
+        assertNotNull(items);
+        assertTrue(items.isEmpty());
+    }
+
+    @Test
     public void disposeCurrentSubscription_withoutSubscription_doesNothing() {
         new CollaboratorListFragment().disposeCurrentSubscription();
     }
@@ -928,5 +942,19 @@ public class PagedDataBaseFragmentTest {
         LoadTestFragment f = new LoadTestFragment();
         invoke(f, PagedDataBaseFragment.class, "retryFailedPage",
                 new Class<?>[0], new Object[0]);
+    }
+
+    @Test
+    public void copyCurrentItems_withAdapter_returnsCurrentItems() throws Exception {
+        // L152：mAdapter 非空时返回当前 adapter 内容的拷贝。
+        LoadTestFragment f = new LoadTestFragment();
+        Page<String> page1 = stringPage(Arrays.asList("a", "b"), null);
+        f.pages.put(1, Single.just(Response.success(page1)));
+        FragmentTestHelper.attach(f);
+        waitForCount(f, 2);
+        @SuppressWarnings("unchecked")
+        List<String> copy = (List<String>) invoke(f, PagedDataBaseFragment.class,
+                "copyCurrentItems", new Class<?>[0], new Object[0]);
+        assertEquals(Arrays.asList("a", "b"), copy);
     }
 }

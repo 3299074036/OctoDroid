@@ -266,6 +266,25 @@ public class DownloadListFragmentTest {
                 ShadowToast.getTextOfLatestToast());
     }
 
+    /** getExternalFilesDir() 返回 null 的宿主（外置存储未挂载）。 */
+    public static class NullExternalDirActivity extends FragmentActivity {
+        @Override
+        public java.io.File getExternalFilesDir(String type) {
+            return null;
+        }
+    }
+
+    @Test
+    public void onItemClick_nullExternalDir_fallsBackToPublicDirAndShowsOpenFailedToast() {
+        // L123/L126：dir == null → file == null → 走公共目录回落，仍无文件则 toast。
+        NoLoad f = new NoLoad();
+        FragmentTestHelper.attachTo(NullExternalDirActivity.class, f);
+        f.onItemClick(new Item(record(11L, "a.apk"),
+                DownloadManager.STATUS_SUCCESSFUL));
+        assertEquals(f.getString(R.string.download_open_failed),
+                ShadowToast.getTextOfLatestToast());
+    }
+
     @Test
     public void onItemLongClick_removesRecordShowsToastAndReturnsTrue() {
         NoLoad f = attached();

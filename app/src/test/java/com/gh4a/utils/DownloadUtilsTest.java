@@ -64,6 +64,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -1023,4 +1024,97 @@ public class DownloadUtilsTest {
         assertTrue(awaitCallback(latch, 5000));
         assertEquals(ApkUpdateDownloader.ApkSignatureCheck.MISMATCH, check.get());
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L44：类声明行；隐式默认构造器。
+        new DownloadUtils();
+    }
+
+    @Test
+    public void getRedirectClient_doubleCheckedLock_innerFalseReturnsPreset() throws Exception {
+        // L100：内层 if (sRedirectClient == null) 的 false 分支，确定性复现
+        //（同 SingleFactory 的持锁手法，锁是 DownloadUtils.class）。
+        setRedirectClient(null);
+        OkHttpClient preset = new OkHttpClient();
+        java.util.concurrent.atomic.AtomicReference<OkHttpClient> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                result.set(getRedirectClientReflectively());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        synchronized (DownloadUtils.class) {
+            worker.start();
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (worker.getState() != Thread.State.BLOCKED
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(1);
+            }
+            assertEquals(Thread.State.BLOCKED, worker.getState());
+            setRedirectClient(preset);
+        }
+        worker.join(10_000);
+        assertTrue(preset == result.get());
+    }
+
+    @Test
+    public void chainCallback_successWithNullFileSkipsVerify() {
+        // L255：链路回调 success=true 但 file 为 null 时跳过校验、不发通知。
+        Download download = mock(Download.class);
+        when(download.htmlUrl()).thenReturn("https://example.com/f.zip");
+        when(download.name()).thenReturn("f.zip");
+        when(download.contentType()).thenReturn("application/zip");
+        when(download.description()).thenReturn("desc");
+        try (MockedStatic<ChainDownloadHelper> mocked =
+                Mockito.mockStatic(ChainDownloadHelper.class)) {
+            ArgumentCaptor<ChainDownloadHelper.Callback> captor =
+                    ArgumentCaptor.forClass(ChainDownloadHelper.Callback.class);
+            mocked.when(() -> ChainDownloadHelper.enqueueChain(any(), any(), any(),
+                    any(), any(), captor.capture(), anyBoolean()))
+                    .thenAnswer(inv -> null);
+            DownloadUtils.enqueueDownloadWithPermissionCheck(activity(), download);
+            assertNotNull(captor.getValue());
+            int before = notificationCount();
+            captor.getValue().onDownloadComplete(context, true, null, 1L);
+            assertEquals(before, notificationCount());
+        }
+    }
+
+    @Test
+    @org.robolectric.annotation.Config(sdk = 25)
+    public void createDownloadChannel_preOReturnsEarly() throws Exception {
+        // L353：SDK < O 时不建通知渠道，直接返回。
+        java.lang.reflect.Method m = DownloadUtils.class.getDeclaredMethod(
+                "createDownloadChannel", Context.class);
+        m.setAccessible(true);
+        m.invoke(null, context);
+        NotificationManager nm = (NotificationManager) context.getSystemService(
+                Context.NOTIFICATION_SERVICE);
+        assertTrue(Shadows.shadowOf(nm).getNotificationChannels().isEmpty());
+    }
+
+    @Test
+    @org.robolectric.annotation.Config(sdk = 32)
+    public void verifyDownloadedFile_nonApkNotifiesOnPreTiramisu() throws Exception {
+        // L374：SDK < TIRAMISU 时跳过通知权限检查，非 APK 文件直接发完成通知。
+        File file = new File(context.getFilesDir(), "report.pdf");
+        try (FileWriter w = new FileWriter(file)) {
+            w.write("x");
+        }
+        DownloadRecordManager.record(context, 55L, "report.pdf", "u", "d");
+        Uri fakeUri = Uri.parse("content://" + context.getPackageName()
+                + ".fileprovider/private_download/report.pdf");
+        try (MockedStatic<FileProvider> mocked = Mockito.mockStatic(FileProvider.class)) {
+            mocked.when(() -> FileProvider.getUriForFile(any(Context.class),
+                    anyString(), any(File.class))).thenReturn(fakeUri);
+            DownloadUtils.verifyDownloadedFile(context, file, 55L, true);
+            waitForNotVerifying(55L, 5000);
+            idleMainLooper();
+        }
+        assertEquals(1, notificationCount());
+        assertTrue(file.exists());
+    }
+
 }

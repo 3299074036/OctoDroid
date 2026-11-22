@@ -395,6 +395,54 @@ public class DiffViewHolderTest {
     }
 
     @Test
+    public void bind_textSizeNegative_usesDefaultMultiplier() {
+        android.content.SharedPreferences prefs = context.getSharedPreferences(
+                SettingsFragment.PREF_NAME, Context.MODE_PRIVATE);
+        float initial = hunkView(holder()).getTextSize();
+        prefs.edit().putInt(SettingsFragment.KEY_TEXT_SIZE, -1).apply();
+        try {
+            DiffViewHolder h = holder();
+            h.bind(diffItem("@@ -10,2 +20,5 @@ func()\n-old\n+new\n ctx", 3, "a.java"));
+            assertEquals(initial, hunkView(h).getTextSize(), 0.001f);
+        } finally {
+            prefs.edit().remove(SettingsFragment.KEY_TEXT_SIZE).apply();
+        }
+    }
+
+    @Test
+    public void popupMenu_share_rightLineNumber_usesRFragment() {
+        DiffViewHolder h = holder();
+        h.bind(diffItem("@@ -10,2 +20,5 @@ func()\n-old\n+new\n ctx", 3, "a.java"));
+        android.view.MenuItem viewInFileItem = mock(android.view.MenuItem.class);
+        try (MockedConstruction<PopupMenu> mocked = mockConstruction(PopupMenu.class,
+                menuInitializer(menuWithViewInFileItem(viewInFileItem)))) {
+            // spans[0] is the left number of "-old"; spans[1] is the right
+            // number of "+new" (right line 20: extractDiffHunkLineNumbers
+            // returns start - 1, so +20 becomes 19 and "+new" bumps it to
+            // 20), so sharing it must build a fragment with the "R" marker.
+            android.text.Spanned text = (android.text.Spanned) hunkView(h).getText();
+            android.text.style.ClickableSpan[] spans = text.getSpans(0, text.length(),
+                    android.text.style.ClickableSpan.class);
+            assertTrue(spans.length >= 2);
+            spans[1].onClick(hunkView(h));
+            PopupMenu.OnMenuItemClickListener listener = captureListener(mocked);
+            MenuItem share = mock(MenuItem.class);
+            when(share.getItemId()).thenReturn(R.id.share);
+            assertTrue(listener.onMenuItemClick(share));
+        }
+        android.content.Intent chooser =
+                AdapterTestSupport.shadowApp(context).getNextStartedActivity();
+        assertTrue(chooser != null);
+        assertEquals(android.content.Intent.ACTION_CHOOSER, chooser.getAction());
+        android.content.Intent send =
+                chooser.getParcelableExtra(android.content.Intent.EXTRA_INTENT);
+        assertTrue(send != null);
+        String sharedText = send.getStringExtra(android.content.Intent.EXTRA_TEXT);
+        assertTrue(sharedText != null);
+        assertTrue(sharedText.contains("discussion-diff-11R20"));
+    }
+
+    @Test
     public void diffLineSpan_drawBackground_allLines() throws Exception {
         DiffViewHolder h = holder();
         String chunk = "@@ -10,3 +20,3 @@ func()\n-old\n+new\n ctx\n+more";

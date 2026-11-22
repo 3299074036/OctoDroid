@@ -30,6 +30,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @RunWith(RobolectricTestRunner.class)
@@ -47,6 +48,12 @@ public class FindActionModeCallbackTest {
         Field f = FindActionModeCallback.class.getDeclaredField("mEditText");
         f.setAccessible(true);
         return (EditText) f.get(cb);
+    }
+
+    private void setEditText(FindActionModeCallback cb, EditText editText) throws Exception {
+        Field f = FindActionModeCallback.class.getDeclaredField("mEditText");
+        f.setAccessible(true);
+        f.set(cb, editText);
     }
 
     private TextView matchesView(FindActionModeCallback cb) throws Exception {
@@ -370,5 +377,29 @@ public class FindActionModeCallbackTest {
         EditText editText = editText(cb);
         assertTrue(editText.requestFocus());
         cb.showSoftInput();
+    }
+
+    @Test
+    public void showSoftInput_mockEditTextFocusTrue_showsIme() throws Exception {
+        FragmentActivity activity = activity();
+        FindActionModeCallback cb = callback(activity);
+        EditText mockEdit = mock(EditText.class);
+        when(mockEdit.requestFocus()).thenReturn(true);
+        when(mockEdit.getContext()).thenReturn(activity);
+        when(mockEdit.getWindowToken()).thenReturn(mock(android.os.IBinder.class));
+        setEditText(cb, mockEdit);
+        cb.showSoftInput();
+        verify(mockEdit).requestFocus();
+    }
+
+    @Test
+    public void showSoftInput_mockEditTextFocusFalse_skipsIme() throws Exception {
+        FragmentActivity activity = activity();
+        FindActionModeCallback cb = callback(activity);
+        EditText mockEdit = mock(EditText.class);
+        when(mockEdit.requestFocus()).thenReturn(false);
+        setEditText(cb, mockEdit);
+        cb.showSoftInput();
+        verify(mockEdit).requestFocus();
     }
 }

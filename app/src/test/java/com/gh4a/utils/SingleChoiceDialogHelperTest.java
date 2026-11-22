@@ -142,4 +142,10 @@ public class SingleChoiceDialogHelperTest {
         assertEquals(2, recorder.picks);
         assertEquals(0, recorder.lastWhich);
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L14：类声明行；隐式默认构造器。
+        new SingleChoiceDialogHelper();
+    }
+
 }

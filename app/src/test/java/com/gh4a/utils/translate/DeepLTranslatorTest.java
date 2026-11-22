@@ -7,6 +7,7 @@ import org.robolectric.RobolectricTestRunner;
 import java.io.IOException;
 
 import okhttp3.FormBody;
+import okhttp3.Call;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -19,6 +20,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * DeepLTranslator with a stubbed OkHttp interceptor: no real network,
@@ -192,4 +196,63 @@ public class DeepLTranslatorTest {
         assertEquals("DeepL", new DeepLTranslator(
                 fakeClient(OK_BODY, 200, new Captured()), "test-key").getName());
     }
+    private static OkHttpClient fakeClientNullBody() throws Exception {
+        // OkHttp 的拦截器链不允许拦截器返回无 body 的 Response（会先抛
+        // IllegalStateException，异常在翻译器代码之前就抛了），所以不走拦截器：
+        // 直接 mock OkHttpClient，让 newCall 返回的 Call.execute() 给出无 body 的 Response。
+        OkHttpClient client = mock(OkHttpClient.class);
+        Call call = mock(Call.class);
+        Response nullBody = new Response.Builder()
+                .request(new Request.Builder().url("https://example.com/").build())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .build();
+        when(client.newCall(any(Request.class))).thenReturn(call);
+        when(call.execute()).thenReturn(nullBody);
+        return client;
+    }
+
+    @Test
+    public void translate_nullBodyThrows() throws Exception {
+        // L52：200 但 body 为 null 时抛错（含状态码）。
+        DeepLTranslator t = new DeepLTranslator(fakeClientNullBody(), "test-key");
+        try {
+            t.translate("Hello", "auto", "zh");
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertTrue(e.getMessage().contains("200"));
+        } catch (Exception e) {
+            fail("expected IOException, got " + e);
+        }
+    }
+
+    @Test
+    public void translate_missingTranslationsThrows() {
+        // L58：body 里没有 translations 数组时抛“空结果”错。
+        DeepLTranslator t = new DeepLTranslator(
+                fakeClient("{}", 200, new Captured()), "test-key");
+        try {
+            t.translate("Hello", "auto", "zh");
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertTrue(e.getMessage().contains("empty result"));
+        } catch (Exception e) {
+            fail("expected IOException, got " + e);
+        }
+    }
+
+    @Test
+    public void translate_nullOrEmptyTargetLangMapsToZh() throws Exception {
+        // L70-71：目标语言为 null 或空串时 mapLang 返回 "ZH"。
+        Captured cap = new Captured();
+        DeepLTranslator t = new DeepLTranslator(
+                fakeClient("{\"translations\":[{\"text\":\"你好\"}]}", 200, cap),
+                "test-key");
+        assertEquals("你好", t.translate("Hello", "auto", null));
+        assertEquals("ZH", formValue(cap.request, "target_lang"));
+        assertEquals("你好", t.translate("Hello", "auto", ""));
+        assertEquals("ZH", formValue(cap.request, "target_lang"));
+    }
+
 }

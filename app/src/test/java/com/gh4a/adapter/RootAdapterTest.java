@@ -132,6 +132,50 @@ public class RootAdapterTest {
     }
 
     @Test
+    public void refreshItem_withHeader_noCrash() {
+        adapter.setHeaderView(new View(context));
+        adapter.add("a");
+        adapter.refreshItem("a");
+    }
+
+    // No isFiltered override: exercises the base implementation, which
+    // keeps every item.
+    static class PlainAdapter extends RootAdapter<String, VH> {
+        PlainAdapter(Context context) {
+            super(context);
+        }
+
+        @Override
+        protected VH onCreateViewHolder(LayoutInflater inflater, ViewGroup parent, int viewType) {
+            return new VH(new TextView(mContext));
+        }
+
+        @Override
+        protected void onBindViewHolder(VH holder, String item) {
+            holder.text.setText(item);
+        }
+    }
+
+    @Test
+    public void filter_baseIsFiltered_keepsAllItems() throws Exception {
+        // Control: the filtering machinery settles in this environment
+        // (the overridden isFiltered drops everything for "zzz").
+        adapter.addAll(Arrays.asList("apple", "banana", "apricot"));
+        adapter.getFilter().filter("zzz");
+        waitForCount(0);
+
+        PlainAdapter plain = new PlainAdapter(context);
+        plain.addAll(Arrays.asList("apple", "banana", "apricot"));
+        plain.getFilter().filter("zzz");
+        Thread.sleep(500);
+        Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        assertEquals(3, plain.getCount());
+        assertEquals("apple", plain.getItem(0));
+        assertEquals("banana", plain.getItem(1));
+        assertEquals("apricot", plain.getItem(2));
+    }
+
+    @Test
     public void headerFooter_countsAndViewTypes() {
         adapter.add("a");
         adapter.add("x-special");

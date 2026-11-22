@@ -388,4 +388,56 @@ public class ThreadTranslateControllerTest {
                     eq(host.context), eq("deepl"), eq(host.items), any());
         }
     }
+    @Test
+    public void onNewItems_noProviderYetIgnored() {
+        // L154：线程模式已开、列表非空，但 runWithDefaultProvider 的回调
+        // 还没跑（provider 未选定）时 mBatchProvider 为 null，直接返回。
+        FakeHost host = new FakeHost();
+        host.items = Collections.singletonList(item(1, "<p>one</p>"));
+        ThreadTranslateController c = new ThreadTranslateController(host);
+        try (MockedStatic<TranslationUiHelper> mocked =
+                Mockito.mockStatic(TranslationUiHelper.class)) {
+            mocked.when(() -> TranslationUiHelper.runWithDefaultProvider(any(), any()))
+                    .thenReturn(true);
+            c.toggle();
+            c.onNewItems(Collections.singletonList(item(2, "<p>two</p>")));
+            verify(host.translator, never()).translateAllWithProvider(
+                    any(), any(), any(), any());
+        }
+    }
+
+    @Test
+    public void onNewItems_nullContextIgnored() {
+        // L160-161：线程模式已开且 provider 已定，但 host 的 context
+        // 为 null 时直接返回，不调翻译。
+        FakeHost host = new FakeHost();
+        host.items = Collections.singletonList(item(1, "<p>one</p>"));
+        ThreadTranslateController c = new ThreadTranslateController(host);
+        try (MockedStatic<TranslationUiHelper> mocked = stubDefaultProvider("google")) {
+            c.toggle();
+            Mockito.clearInvocations(host.translator);
+            host.context = null;
+            c.onNewItems(Collections.singletonList(item(2, "<p>two</p>")));
+            verify(host.translator, never()).translateAllWithProvider(
+                    any(), any(), any(), any());
+        }
+    }
+
+    @Test
+    public void onNewItems_nullTranslatorIgnored() {
+        // L160-161：同上，translator 为 null 时直接返回。
+        FakeHost host = new FakeHost();
+        host.items = Collections.singletonList(item(1, "<p>one</p>"));
+        ThreadTranslateController c = new ThreadTranslateController(host);
+        try (MockedStatic<TranslationUiHelper> mocked = stubDefaultProvider("google")) {
+            c.toggle();
+            CommentTranslator mockTranslator = host.translator;
+            Mockito.clearInvocations(mockTranslator);
+            host.translator = null;
+            c.onNewItems(Collections.singletonList(item(2, "<p>two</p>")));
+            verify(mockTranslator, never()).translateAllWithProvider(
+                    any(), any(), any(), any());
+        }
+    }
+
 }

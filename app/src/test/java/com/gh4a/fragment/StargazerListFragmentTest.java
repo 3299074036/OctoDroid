@@ -403,6 +403,87 @@ public class StargazerListFragmentTest {
     }
 
     @Test
+    public void toggleStarringState_successAfterDetach_isIgnored() throws Exception {
+        // L158/L159：投递时 fragment 已 detach，成功回调直接返回。
+        setAuthorized();
+        installTrampolineSchedulers();
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            StarringService service = mockService(true);
+            io.reactivex.subjects.SingleSubject<retrofit2.Response<Void>> subject =
+                    io.reactivex.subjects.SingleSubject.create();
+            when(service.unstarRepository(anyString(), anyString())).thenReturn(subject);
+            mocked.when(() -> ServiceFactory.get(eq(StarringService.class), anyBoolean()))
+                    .thenReturn(service);
+            StargazerListFragment f = attach(StargazerListFragment.newInstance("octo", "cat"));
+            setField(f, "mIsStarring", Boolean.TRUE);
+            android.view.MenuItem item = mock(android.view.MenuItem.class);
+            when(item.getItemId()).thenReturn(android.view.Menu.FIRST);
+            assertTrue(f.onOptionsItemSelected(item));
+            assertEquals(Boolean.TRUE, field(f, "mStarringInFlight"));
+            mActivity.getSupportFragmentManager().beginTransaction().remove(f).commitNow();
+            assertFalse(f.isAdded());
+            subject.onSuccess(retrofit2.Response.success(null));
+            assertEquals(Boolean.FALSE, field(f, "mStarringInFlight"));
+            assertEquals(Boolean.TRUE, field(f, "mIsStarring"));
+        } finally {
+            resetSchedulers();
+        }
+    }
+
+    @Test
+    public void toggleStarringState_successWithNullState_skipsToggle() throws Exception {
+        // L161：投递时 mIsStarring 已被置 null，不翻转、不碰菜单。
+        setAuthorized();
+        installTrampolineSchedulers();
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            StarringService service = mockService(true);
+            io.reactivex.subjects.SingleSubject<retrofit2.Response<Void>> subject =
+                    io.reactivex.subjects.SingleSubject.create();
+            when(service.unstarRepository(anyString(), anyString())).thenReturn(subject);
+            mocked.when(() -> ServiceFactory.get(eq(StarringService.class), anyBoolean()))
+                    .thenReturn(service);
+            StargazerListFragment f = attach(StargazerListFragment.newInstance("octo", "cat"));
+            setField(f, "mIsStarring", Boolean.TRUE);
+            android.view.MenuItem item = mock(android.view.MenuItem.class);
+            when(item.getItemId()).thenReturn(android.view.Menu.FIRST);
+            assertTrue(f.onOptionsItemSelected(item));
+            setField(f, "mIsStarring", null);
+            subject.onSuccess(retrofit2.Response.success(null));
+            assertEquals(Boolean.FALSE, field(f, "mStarringInFlight"));
+            assertNull(field(f, "mIsStarring"));
+        } finally {
+            resetSchedulers();
+        }
+    }
+
+    @Test
+    public void toggleStarringState_errorAfterDetach_isIgnored() throws Exception {
+        // L167/L168：投递时 fragment 已 detach，失败回调直接返回。
+        setAuthorized();
+        installTrampolineSchedulers();
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            StarringService service = mockService(true);
+            io.reactivex.subjects.SingleSubject<retrofit2.Response<Void>> subject =
+                    io.reactivex.subjects.SingleSubject.create();
+            when(service.unstarRepository(anyString(), anyString())).thenReturn(subject);
+            mocked.when(() -> ServiceFactory.get(eq(StarringService.class), anyBoolean()))
+                    .thenReturn(service);
+            StargazerListFragment f = attach(StargazerListFragment.newInstance("octo", "cat"));
+            setField(f, "mIsStarring", Boolean.TRUE);
+            android.view.MenuItem item = mock(android.view.MenuItem.class);
+            when(item.getItemId()).thenReturn(android.view.Menu.FIRST);
+            assertTrue(f.onOptionsItemSelected(item));
+            mActivity.getSupportFragmentManager().beginTransaction().remove(f).commitNow();
+            assertFalse(f.isAdded());
+            subject.onError(new RuntimeException("boom"));
+            assertEquals(Boolean.FALSE, field(f, "mStarringInFlight"));
+            assertEquals(Boolean.TRUE, field(f, "mIsStarring"));
+        } finally {
+            resetSchedulers();
+        }
+    }
+
+    @Test
     public void onOptionsItemSelected_unknownItemReturnsFalse() {
         StargazerListFragment f = attach(StargazerListFragment.newInstance("octo", "cat"));
         android.view.MenuItem item = mock(android.view.MenuItem.class);

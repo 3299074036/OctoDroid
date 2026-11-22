@@ -201,4 +201,46 @@ public class DownloadListAdapterTest {
         assertEquals(DownloadManager.STATUS_FAILED,
                 DownloadListAdapter.queryStatus(mockContext, 42L));
     }
+
+    @Test
+    public void queryStatus_nullDownloadManager_returnsFailed() {
+        Context mockContext = mock(Context.class);
+        when(mockContext.getSystemService(Context.DOWNLOAD_SERVICE)).thenReturn(null);
+        assertEquals(DownloadManager.STATUS_FAILED,
+                DownloadListAdapter.queryStatus(mockContext, 42L));
+    }
+
+    @Test
+    public void queryStatus_readThrowsAndCloseThrows_returnsFailed() {
+        // try-with-resources: the read failure is the primary exception and
+        // the close failure is attached as suppressed; both are swallowed.
+        Context mockContext = mock(Context.class);
+        DownloadManager dm = mock(DownloadManager.class);
+        Cursor cursor = mock(Cursor.class);
+        when(mockContext.getSystemService(Context.DOWNLOAD_SERVICE)).thenReturn(dm);
+        when(dm.query(any(DownloadManager.Query.class))).thenReturn(cursor);
+        when(cursor.moveToFirst()).thenReturn(true);
+        when(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)).thenReturn(0);
+        when(cursor.getInt(0)).thenThrow(new RuntimeException("read boom"));
+        doThrow(new RuntimeException("close boom")).when(cursor).close();
+        assertEquals(DownloadManager.STATUS_FAILED,
+                DownloadListAdapter.queryStatus(mockContext, 42L));
+    }
+
+    @Test
+    public void queryStatus_readThrows_closeOk_returnsFailed() {
+        // try-with-resources：读失败是主异常、close() 正常时不产生 suppressed，
+        // 同样吞掉返回 STATUS_FAILED（与 close 也抛的组合互补，补 L82 分支）。
+        Context mockContext = mock(Context.class);
+        DownloadManager dm = mock(DownloadManager.class);
+        Cursor cursor = mock(Cursor.class);
+        when(mockContext.getSystemService(Context.DOWNLOAD_SERVICE)).thenReturn(dm);
+        when(dm.query(any(DownloadManager.Query.class))).thenReturn(cursor);
+        when(cursor.moveToFirst()).thenReturn(true);
+        when(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)).thenReturn(0);
+        when(cursor.getInt(0)).thenThrow(new RuntimeException("read boom"));
+        // close() 不 stub：mock 默认无操作，即正常关闭。
+        assertEquals(DownloadManager.STATUS_FAILED,
+                DownloadListAdapter.queryStatus(mockContext, 42L));
+    }
 }

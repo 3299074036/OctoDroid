@@ -461,6 +461,116 @@ public class WatcherListFragmentTest {
     }
 
     @Test
+    public void toggleWatchingState_successAfterDetach_isIgnored() throws Exception {
+        // L169/L170：投递时 fragment 已 detach，成功回调直接返回。
+        setAuthorized();
+        installTrampolineSchedulers();
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            WatchingService service = mockService(true);
+            io.reactivex.subjects.SingleSubject<retrofit2.Response<Void>> subject =
+                    io.reactivex.subjects.SingleSubject.create();
+            when(service.deleteRepositorySubscription(anyString(), anyString()))
+                    .thenReturn(subject);
+            mocked.when(() -> ServiceFactory.get(eq(WatchingService.class), anyBoolean()))
+                    .thenReturn(service);
+            WatcherListFragment f = attach(WatcherListFragment.newInstance("octo", "cat"));
+            setField(f, "mIsWatching", Boolean.TRUE);
+            android.view.MenuItem item = mock(android.view.MenuItem.class);
+            when(item.getItemId()).thenReturn(android.view.Menu.FIRST);
+            assertTrue(f.onOptionsItemSelected(item));
+            assertEquals(Boolean.TRUE, field(f, "mWatchingInFlight"));
+            mActivity.getSupportFragmentManager().beginTransaction().remove(f).commitNow();
+            assertFalse(f.isAdded());
+            subject.onSuccess(retrofit2.Response.success(null));
+            assertEquals(Boolean.FALSE, field(f, "mWatchingInFlight"));
+            assertEquals(Boolean.TRUE, field(f, "mIsWatching"));
+        } finally {
+            resetSchedulers();
+        }
+    }
+
+    @Test
+    public void toggleWatchingState_successWithNullState_skipsUpdate() throws Exception {
+        // L172：投递时 mIsWatching 已被置 null，不更新、不碰菜单。
+        setAuthorized();
+        installTrampolineSchedulers();
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            WatchingService service = mockService(true);
+            io.reactivex.subjects.SingleSubject<retrofit2.Response<Void>> subject =
+                    io.reactivex.subjects.SingleSubject.create();
+            when(service.deleteRepositorySubscription(anyString(), anyString()))
+                    .thenReturn(subject);
+            mocked.when(() -> ServiceFactory.get(eq(WatchingService.class), anyBoolean()))
+                    .thenReturn(service);
+            WatcherListFragment f = attach(WatcherListFragment.newInstance("octo", "cat"));
+            setField(f, "mIsWatching", Boolean.TRUE);
+            android.view.MenuItem item = mock(android.view.MenuItem.class);
+            when(item.getItemId()).thenReturn(android.view.Menu.FIRST);
+            assertTrue(f.onOptionsItemSelected(item));
+            setField(f, "mIsWatching", null);
+            subject.onSuccess(retrofit2.Response.success(null));
+            assertEquals(Boolean.FALSE, field(f, "mWatchingInFlight"));
+            assertNull(field(f, "mIsWatching"));
+        } finally {
+            resetSchedulers();
+        }
+    }
+
+    @Test
+    public void toggleWatchingState_errorAttached_reportsFailure() throws Exception {
+        // L177/L178/L181/L182/L183：挂载态失败回调走 handleActionFailure。
+        setAuthorized();
+        installTrampolineSchedulers();
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            WatchingService service = mockService(true);
+            io.reactivex.subjects.SingleSubject<retrofit2.Response<Void>> subject =
+                    io.reactivex.subjects.SingleSubject.create();
+            when(service.deleteRepositorySubscription(anyString(), anyString()))
+                    .thenReturn(subject);
+            mocked.when(() -> ServiceFactory.get(eq(WatchingService.class), anyBoolean()))
+                    .thenReturn(service);
+            WatcherListFragment f = attach(WatcherListFragment.newInstance("octo", "cat"));
+            setField(f, "mIsWatching", Boolean.TRUE);
+            android.view.MenuItem item = mock(android.view.MenuItem.class);
+            when(item.getItemId()).thenReturn(android.view.Menu.FIRST);
+            assertTrue(f.onOptionsItemSelected(item));
+            subject.onError(new RuntimeException("boom"));
+            assertEquals(Boolean.FALSE, field(f, "mWatchingInFlight"));
+            assertEquals(Boolean.TRUE, field(f, "mIsWatching"));
+        } finally {
+            resetSchedulers();
+        }
+    }
+
+    @Test
+    public void toggleWatchingState_errorAfterDetach_isIgnored() throws Exception {
+        // L178/L179：投递时 fragment 已 detach，失败回调直接返回。
+        setAuthorized();
+        installTrampolineSchedulers();
+        try (MockedStatic<ServiceFactory> mocked = mockStatic(ServiceFactory.class)) {
+            WatchingService service = mockService(true);
+            io.reactivex.subjects.SingleSubject<retrofit2.Response<Void>> subject =
+                    io.reactivex.subjects.SingleSubject.create();
+            when(service.deleteRepositorySubscription(anyString(), anyString()))
+                    .thenReturn(subject);
+            mocked.when(() -> ServiceFactory.get(eq(WatchingService.class), anyBoolean()))
+                    .thenReturn(service);
+            WatcherListFragment f = attach(WatcherListFragment.newInstance("octo", "cat"));
+            setField(f, "mIsWatching", Boolean.TRUE);
+            android.view.MenuItem item = mock(android.view.MenuItem.class);
+            when(item.getItemId()).thenReturn(android.view.Menu.FIRST);
+            assertTrue(f.onOptionsItemSelected(item));
+            mActivity.getSupportFragmentManager().beginTransaction().remove(f).commitNow();
+            assertFalse(f.isAdded());
+            subject.onError(new RuntimeException("boom"));
+            assertEquals(Boolean.FALSE, field(f, "mWatchingInFlight"));
+            assertEquals(Boolean.TRUE, field(f, "mIsWatching"));
+        } finally {
+            resetSchedulers();
+        }
+    }
+
+    @Test
     public void onRefresh_reloadsWatchingStateAndPage() throws Exception {
         setAuthorized();
         installTrampolineSchedulers();

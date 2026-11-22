@@ -172,4 +172,70 @@ public class StarGroupManagerTest {
         assertEquals("Good", groups.get(0));
         assertEquals("AlsoGood", groups.get(1));
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L27：类声明行；隐式默认构造器。
+        new StarGroupManager();
+    }
+
+    @Test
+    public void getRepos_skipsNonObjectElements() {
+        // L140：数组里的非对象元素 optJSONObject 得 null，跳过。
+        mContext.getSharedPreferences("star_groups_alice", Context.MODE_PRIVATE)
+                .edit().putString("members", "{\"Work\": [\"junk\", {\"fullName\": \"o/r\", \"description\": \"d\"}]}").apply();
+        List<StarGroupManager.StarRepo> repos =
+                StarGroupManager.getRepos(mContext, "alice", "Work");
+        assertEquals(1, repos.size());
+        assertEquals("o/r", repos.get(0).fullName);
+        assertEquals("d", repos.get(0).description);
+    }
+
+    @Test
+    public void assignRepo_skipsNonArrayGroup() {
+        // L156-157：某组的值不是数组时 optJSONArray 得 null，continue。
+        mContext.getSharedPreferences("star_groups_alice", Context.MODE_PRIVATE)
+                .edit().putString("members", "{\"G\": \"not-an-array\"}").apply();
+        StarGroupManager.assignRepo(mContext, "alice", "G", "o/r", "d");
+        assertEquals("G", StarGroupManager.findGroupFor(mContext, "alice", "o/r"));
+        assertEquals(1, StarGroupManager.getRepos(mContext, "alice", "G").size());
+    }
+
+    @Test
+    public void assignRepo_skipsNonObjectElementsWhileMoving() {
+        // L161：移动时旧组数组里的非对象元素 optJSONObject 得 null，跳过；
+        // 匹配的对象正常移走。
+        mContext.getSharedPreferences("star_groups_alice", Context.MODE_PRIVATE)
+                .edit().putString("members", "{\"A\": [\"junk\", {\"fullName\": \"o/r\", \"description\": \"d\"}]}").apply();
+        StarGroupManager.assignRepo(mContext, "alice", "B", "o/r", "d2");
+        assertTrue(StarGroupManager.getRepos(mContext, "alice", "A").isEmpty());
+        List<StarGroupManager.StarRepo> repos =
+                StarGroupManager.getRepos(mContext, "alice", "B");
+        assertEquals(1, repos.size());
+        assertEquals("d2", repos.get(0).description);
+    }
+
+    @Test
+    public void assignRepo_nullGroupIsIgnoredWithoutCrash() {
+        // L171-172：group 为 null 时 members.put(null, array) 抛 JSONException，
+        // 被 catch 吞掉；仓库不会落入任何组。
+        StarGroupManager.assignRepo(mContext, "alice", null, "o/r", "d");
+        assertNull(StarGroupManager.findGroupFor(mContext, "alice", "o/r"));
+    }
+
+    @Test
+    public void findGroupFor_skipsNonArrayGroup() {
+        // L190-191：某组的值不是数组时 continue，不崩。
+        mContext.getSharedPreferences("star_groups_alice", Context.MODE_PRIVATE)
+                .edit().putString("members", "{\"G\": \"not-an-array\"}").apply();
+        assertNull(StarGroupManager.findGroupFor(mContext, "alice", "o/r"));
+    }
+
+    @Test
+    public void findGroupFor_skipsNonObjectElements() {
+        // L195：数组里的非对象元素跳过，匹配的对象正常命中。
+        mContext.getSharedPreferences("star_groups_alice", Context.MODE_PRIVATE)
+                .edit().putString("members", "{\"G\": [\"junk\", {\"fullName\": \"o/r\", \"description\": \"d\"}]}").apply();
+        assertEquals("G", StarGroupManager.findGroupFor(mContext, "alice", "o/r"));
+    }
+
 }

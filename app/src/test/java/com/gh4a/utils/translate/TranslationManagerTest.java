@@ -551,4 +551,162 @@ public class TranslationManagerTest {
         assertEquals(2, providers.size());
         assertTrue(providers.contains("youdao"));
     }
+    private static Object invokePrivate(String name, Class<?>[] types, Object... args)
+            throws Exception {
+        java.lang.reflect.Method m =
+                TranslationManager.class.getDeclaredMethod(name, types);
+        m.setAccessible(true);
+        return m.invoke(null, args);
+    }
+
+    private static String encryptWithKey(javax.crypto.SecretKey key, String plain)
+            throws Exception {
+        byte[] iv = new byte[12];
+        new java.security.SecureRandom().nextBytes(iv);
+        javax.crypto.Cipher cipher =
+                javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key,
+                new javax.crypto.spec.GCMParameterSpec(128, iv));
+        byte[] ct = cipher.doFinal(plain.getBytes(
+                java.nio.charset.StandardCharsets.UTF_8));
+        byte[] out = new byte[iv.length + ct.length];
+        System.arraycopy(iv, 0, out, 0, iv.length);
+        System.arraycopy(ct, 0, out, iv.length, ct.length);
+        return "v1:" + b64(out);
+    }
+
+    @Test
+    public void getExistingCredKey_noAliasReturnsNull() throws Exception {
+        // L105-106：fake keystore 已装但别名不存在 → containsAlias 为假 → null。
+        installFakeKeyStore();
+        assertNull(invokePrivate("getExistingCredKey", new Class<?>[0]));
+    }
+
+    @Test
+    public void getExistingCredKey_nonSecretKeyReturnsNull() throws Exception {
+        // L109：别名下是 PublicKey 不是 SecretKey → 三元取 else → null。
+        installFakeKeyStore();
+        FakeKeyStoreSpi.put("translation-cred-key",
+                mock(java.security.PublicKey.class));
+        assertNull(invokePrivate("getExistingCredKey", new Class<?>[0]));
+    }
+
+    @Test
+    public void getExistingCredKey_noProviderReturnsNull() throws Exception {
+        // L110-111：未装任何 AndroidKeyStore provider 时 getInstance 抛
+        // 异常，被 catch 吞掉 → null。
+        assertNull(Security.getProvider("AndroidKeyStore"));
+        assertNull(invokePrivate("getExistingCredKey", new Class<?>[0]));
+    }
+
+    @Test
+    public void getCredential_ciphertextInDefaultPrefs_decryptsInPlace() throws Exception {
+        // L157/L160-163：默认 prefs 里的密文能解开时就地转明文写回并返回明文。
+        installFakeKeyStore();
+        byte[] raw = new byte[16];
+        new java.security.SecureRandom().nextBytes(raw);
+        javax.crypto.SecretKey key =
+                new javax.crypto.spec.SecretKeySpec(raw, "AES");
+        FakeKeyStoreSpi.put("translation-cred-key", key);
+        defPrefs().edit().putString(
+                TranslationManager.apiKeyPrefKey("deepl"),
+                encryptWithKey(key, "plain-key")).apply();
+        assertEquals("plain-key", TranslationManager.getApiKey(context(), "deepl"));
+        assertEquals("plain-key", defPrefs().getString(
+                TranslationManager.apiKeyPrefKey("deepl"), ""));
+    }
+
+    @Test
+    public void getCredential_emptyPlaintextCiphertextIsDiscarded() throws Exception {
+        // L161：密文解出来是空串时走 `!decrypted.isEmpty()` 的 false 边：删键、
+        // 返回 ""。空明文的 GCM 密文是 12 字节 IV + 16 字节 tag（28 字节），
+        // decryptCredential 能正常解出 ""（非 null），正好命中该边；null 侧
+        // 已由无密钥/篡改测试覆盖。
+        installFakeKeyStore();
+        byte[] raw = new byte[16];
+        new java.security.SecureRandom().nextBytes(raw);
+        javax.crypto.SecretKey key =
+                new javax.crypto.spec.SecretKeySpec(raw, "AES");
+        FakeKeyStoreSpi.put("translation-cred-key", key);
+        defPrefs().edit().putString(
+                TranslationManager.apiKeyPrefKey("deepl"),
+                encryptWithKey(key, "")).apply();
+        assertEquals("", TranslationManager.getApiKey(context(), "deepl"));
+        assertFalse(defPrefs().contains(TranslationManager.apiKeyPrefKey("deepl")));
+    }
+
+    @Test
+    public void getCredential_ciphertextWithoutKeyIsDiscarded() {
+        // L131-132 + L165-166：默认 prefs 里的密文无密钥可解时丢弃该键、返回 ""。
+        removeFakeKeyStore();
+        byte[] garbage = new byte[32];
+        new java.security.SecureRandom().nextBytes(garbage);
+        defPrefs().edit().putString(
+                TranslationManager.apiKeyPrefKey("deepl"), "v1:" + b64(garbage)).apply();
+        assertEquals("", TranslationManager.getApiKey(context(), "deepl"));
+        assertFalse(defPrefs().contains(TranslationManager.apiKeyPrefKey("deepl")));
+    }
+
+    @Test
+    public void decryptCredential_tamperedCiphertextReturnsNull() throws Exception {
+        // L139-140：密文被篡改时 doFinal 抛 AEADBadTagException，被 catch
+        // 吞掉 → null；getCredential 走丢弃分支。
+        installFakeKeyStore();
+        byte[] raw = new byte[16];
+        new java.security.SecureRandom().nextBytes(raw);
+        javax.crypto.SecretKey key =
+                new javax.crypto.spec.SecretKeySpec(raw, "AES");
+        FakeKeyStoreSpi.put("translation-cred-key", key);
+        byte[] iv = new byte[12];
+        new java.security.SecureRandom().nextBytes(iv);
+        javax.crypto.Cipher cipher =
+                javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key,
+                new javax.crypto.spec.GCMParameterSpec(128, iv));
+        byte[] ct = cipher.doFinal("plain-key".getBytes(
+                java.nio.charset.StandardCharsets.UTF_8));
+        byte[] out = new byte[iv.length + ct.length];
+        System.arraycopy(iv, 0, out, 0, iv.length);
+        System.arraycopy(ct, 0, out, iv.length, ct.length);
+        // 损坏密文段最后一个字节（GCM tag 区），解密必失败。
+        out[out.length - 1] ^= 0x01;
+        defPrefs().edit().putString(
+                TranslationManager.apiKeyPrefKey("deepl"), "v1:" + b64(out)).apply();
+        assertEquals("", TranslationManager.getApiKey(context(), "deepl"));
+        assertFalse(defPrefs().contains(TranslationManager.apiKeyPrefKey("deepl")));
+    }
+
+    @Test
+    public void migrate_emptyPlaintextDecryptionIsDiscarded() throws Exception {
+        // L247：密文解出来是空明文（12 字节 IV + 16 字节空明文 tag = 28 字节）
+        // 时按“解不开”丢弃，不写入默认 prefs。
+        installFakeKeyStore();
+        byte[] raw = new byte[16];
+        new java.security.SecureRandom().nextBytes(raw);
+        javax.crypto.SecretKey key =
+                new javax.crypto.spec.SecretKeySpec(raw, "AES");
+        FakeKeyStoreSpi.put("translation-cred-key", key);
+        securePrefs().edit().putString(
+                TranslationManager.apiKeyPrefKey("youdao"),
+                encryptWithKey(key, "")).apply();
+        TranslationManager.migrateCredentialsFromSecurePrefs(context());
+        assertFalse(securePrefs().contains(TranslationManager.apiKeyPrefKey("youdao")));
+        assertFalse(defPrefs().contains(TranslationManager.apiKeyPrefKey("youdao")));
+        assertEquals("", TranslationManager.getApiKey(context(), "youdao"));
+    }
+
+    @Test
+    public void getProviderDisplayName_itemsShorterThanValuesFallsThrough() {
+        // L304：values 比 items 长时循环因 i < items.length 退出，返回 provider 本身。
+        Context mockCtx = mock(Context.class);
+        android.content.res.Resources mockRes = mock(android.content.res.Resources.class);
+        when(mockCtx.getResources()).thenReturn(mockRes);
+        when(mockRes.getStringArray(com.gh4a.R.array.translation_provider_values))
+                .thenReturn(new String[]{"google", "youdao"});
+        when(mockRes.getStringArray(com.gh4a.R.array.translation_provider_items))
+                .thenReturn(new String[]{"Google"});
+        assertEquals("youdao",
+                TranslationManager.getProviderDisplayName(mockCtx, "youdao"));
+    }
+
 }

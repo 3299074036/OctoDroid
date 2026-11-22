@@ -813,4 +813,28 @@ public class ReadmeTranslatorTest {
         // Stale fail entry: (T,F) arm, probe runs again instead of fail-fast.
         assertEquals(2, fake.calls.get());
     }
+    @Test
+    public void translate_hangulNonLetterCountsAsTranslatable() throws Exception {
+        // U+D7A4：HANGUL_SYLLABLES 块内但不是 letter（isLetter 为假），
+        // 显式块检查把它标为可翻译；CJK/扩展 A 的同款分支不可达（块内字符
+        // 全是 letter，isLetter 先返回 true）。
+        PrefixTranslator fake = new PrefixTranslator();
+        Outcome out = new Outcome();
+        new ReadmeTranslator(fake, "auto", "zz-hangul")
+                .translate("\uD7A4", out.callback());
+        assertTrue("timed out", await(out));
+        assertTrue(fake.seen.contains("\uD7A4"));
+    }
+
+    @Test
+    public void translate_emojiEntityDecoded() throws Exception {
+        // &#128512;（U+1F600）：有效码位且大于 0xDFFF，解成 emoji 字符再翻译。
+        PrefixTranslator fake = new PrefixTranslator();
+        Outcome out = new Outcome();
+        new ReadmeTranslator(fake, "auto", "zz-emoji")
+                .translate("a &#128512; b", out.callback());
+        assertTrue("timed out", await(out));
+        assertTrue(fake.seen.contains("a \uD83D\uDE00 b"));
+    }
+
 }

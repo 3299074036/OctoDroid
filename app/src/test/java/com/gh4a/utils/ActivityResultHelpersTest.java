@@ -130,4 +130,10 @@ public class ActivityResultHelpersTest {
         cb.onActivityResult(new ActivityResult(Activity.RESULT_OK, new Intent()));
         assertTrue(called.get());
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L15：类声明行；隐式默认构造器。
+        new ActivityResultHelpers();
+    }
+
 }

@@ -730,4 +730,40 @@ public class IssueLabelListActivityTest {
             assertTrue(adapter(activity).getItem(1).isEditing);
         }
     }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void applyPendingEditedLabel_skipsNamelessNewAndNonMatchingItems()
+            throws Exception {
+        // The pending label matches nothing: the loop visits a nameless item
+        // (itemBase.name() null, L286 third operand false), a non-matching
+        // named item (equals false) and a newly-added item (newlyAdded,
+        // first operand false) without starting any edit.
+        IssueLabelService svc = mock(IssueLabelService.class);
+        Label nameless = mock(Label.class);
+        when(nameless.name()).thenReturn(null);
+        when(nameless.color()).thenReturn("ffffff");
+        stubLabels(svc, nameless, Label.builder().name("bug").color("d73a4a").build());
+        try (MockedStatic<ServiceFactory> mocked = Mockito.mockStatic(ServiceFactory.class)) {
+            mocked.when(() -> ServiceFactory.getForFullPagedLists(IssueLabelService.class, false))
+                    .thenReturn(svc);
+            IssueLabelListActivity activity = controller(IssueLabelListActivity.class, intent(false))
+                    .create().start().resume().get();
+            waitFor(() -> adapter(activity).getCount() == 2, 10000);
+            assertEquals(2, adapter(activity).getCount());
+            IssueLabelAdapter.EditableLabel fresh = activity.addOrGetNewLabelItem();
+            assertTrue(fresh.newlyAdded);
+            assertEquals(3, adapter(activity).getCount());
+            Label ghost = Label.builder().name("zzz").color("000000").build();
+            IssueLabelAdapter.EditableLabel pending =
+                    new IssueLabelAdapter.EditableLabel(ghost);
+            pending.editedName = "zzz2";
+            set(activity, "mPendingEditingLabel", pending);
+            call(activity, "applyPendingEditedLabel", new Class<?>[0]);
+            assertNull(get(activity, "mPendingEditingLabel"));
+            assertNull(get(activity, "mActionMode"));
+            assertFalse(adapter(activity).getItem(1).isEditing);
+        }
+    }
 }

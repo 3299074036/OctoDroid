@@ -15,6 +15,7 @@ import java.util.Collections;
 import io.reactivex.Single;
 import io.reactivex.observers.TestObserver;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
@@ -176,4 +177,68 @@ public class NotificationCountProviderTest {
             mocked.verify(() -> SingleFactory.getNotifications(false, false, false), times(2));
         }
     }
+    @Test
+    public void getInstance_createsInstanceWhenStaticResetToNull() throws Exception {
+        // L54：sInstance 为 null 时走同步块内新建分支。
+        java.lang.reflect.Field f =
+                NotificationCountProvider.class.getDeclaredField("sInstance");
+        f.setAccessible(true);
+        f.set(null, null);
+        NotificationCountProvider created = NotificationCountProvider.getInstance();
+        assertNotNull(created);
+        assertSame(created, NotificationCountProvider.getInstance());
+    }
+
+    @Test
+    public void getInstance_doubleCheckedLock_innerFalseReturnsPreset() throws Exception {
+        // L54 内层 if (instance == null) 的 false 分支——工作线程已越过外层
+        // 检查后在 synchronized 内复读到非空（与 SingleFactory 趋势服务同款
+        // 确定性技术）。finally 里把 sInstance 清回 null，让后续测试重建。
+        java.lang.reflect.Field f =
+                NotificationCountProvider.class.getDeclaredField("sInstance");
+        f.setAccessible(true);
+        NotificationCountProvider preset = NotificationCountProvider.getInstance();
+        f.set(null, null);
+        java.util.concurrent.atomic.AtomicReference<NotificationCountProvider> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread worker = new Thread(
+                () -> result.set(NotificationCountProvider.getInstance()));
+        try {
+            synchronized (NotificationCountProvider.class) {
+                worker.start();
+                long deadline = System.currentTimeMillis() + 10_000;
+                while (worker.getState() != Thread.State.BLOCKED
+                        && System.currentTimeMillis() < deadline) {
+                    Thread.sleep(1);
+                }
+                assertEquals(Thread.State.BLOCKED, worker.getState());
+                f.set(null, preset);
+            }
+            worker.join(10_000);
+            assertSame(preset, result.get());
+        } finally {
+            f.set(null, null);
+        }
+    }
+
+    @Test
+    public void getNotifications_staleCacheRefetches() throws Exception {
+        // L70：缓存存在但已过 TTL（now - mCachedAt >= TTL_MS）时重新拉取。
+        NotificationListLoadResult stale = result();
+        NotificationListLoadResult fresh = result();
+        NotificationCountProvider provider = NotificationCountProvider.getInstance();
+        setField(provider, "mCachedResult", stale);
+        setField(provider, "mCachedAt", System.currentTimeMillis() - 121_000L);
+        try (MockedStatic<SingleFactory> mocked = mockStatic(SingleFactory.class)) {
+            mocked.when(() -> SingleFactory.getNotifications(false, false, false))
+                    .thenReturn(Single.just(fresh));
+            TestObserver<NotificationListLoadResult> obs =
+                    provider.getNotifications().test();
+            obs.assertValue(fresh);
+            obs.assertComplete();
+            mocked.verify(() -> SingleFactory.getNotifications(false, false, false),
+                    times(1));
+        }
+    }
+
 }

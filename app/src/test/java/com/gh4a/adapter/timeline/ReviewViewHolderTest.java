@@ -360,6 +360,78 @@ public class ReviewViewHolderTest {
     }
 
     @Test
+    public void bind_detailsSameFileTwoHunks_bothOutdated_strikesThroughFile() {
+        // (acc=true, cur=true): first hunk outdated, second outdated.
+        TimelineItem.TimelineReview item =
+                new TimelineItem.TimelineReview(review(ReviewState.Approved, "body", 1L, null));
+        GitHubFile file = mock(GitHubFile.class);
+        when(file.patch()).thenReturn("@@ -1 +1 @@");
+        ReviewComment c1 = AdapterTestSupport.reviewComment(10L, null, null, null, null, null,
+                null, "a.java", null, null, "abc", 1);
+        ReviewComment c2 = AdapterTestSupport.reviewComment(11L, null, null,
+                new Date(System.currentTimeMillis() - 1000L), null, null, null, "a.java",
+                null, null, "abc", 2);
+        item.addComment(c1, file, true);
+        item.addComment(c2, file, true);
+        ReviewViewHolder h = holder(true);
+        h.bind(item);
+        android.view.ViewGroup container =
+                h.itemView.findViewById(R.id.details_container);
+        assertEquals(1, container.getChildCount());
+        assertEquals("2",
+                ((TextView) container.getChildAt(0).findViewById(R.id.tv_file_comments))
+                        .getText().toString());
+        TextView tvFile = container.getChildAt(0).findViewById(R.id.tv_file);
+        assertTrue((tvFile.getPaintFlags() & android.graphics.Paint.STRIKE_THRU_TEXT_FLAG) != 0);
+    }
+
+    @Test
+    public void bind_detailsSameFileTwoHunks_firstOutdatedSecondCurrent_noStrikethrough() {
+        // (acc=true, cur=false): first hunk outdated, second current.
+        TimelineItem.TimelineReview item =
+                new TimelineItem.TimelineReview(review(ReviewState.Approved, "body", 1L, null));
+        GitHubFile file = mock(GitHubFile.class);
+        when(file.patch()).thenReturn("@@ -1 +1 @@");
+        ReviewComment c1 = AdapterTestSupport.reviewComment(10L, null, null, null, null, null,
+                null, "a.java", null, null, "abc", 1);
+        ReviewComment c2 = AdapterTestSupport.reviewComment(11L, null, null,
+                new Date(System.currentTimeMillis() - 1000L), null, null, 2, "a.java",
+                null, null, "abc", 2);
+        item.addComment(c1, file, true);
+        item.addComment(c2, file, true);
+        ReviewViewHolder h = holder(true);
+        h.bind(item);
+        android.view.ViewGroup container =
+                h.itemView.findViewById(R.id.details_container);
+        assertEquals(1, container.getChildCount());
+        TextView tvFile = container.getChildAt(0).findViewById(R.id.tv_file);
+        assertEquals(0, tvFile.getPaintFlags() & android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
+    }
+
+    @Test
+    public void bind_detailsSameFileTwoHunks_firstCurrentSecondOutdated_noStrikethrough() {
+        // (acc=false, cur=true): first hunk current, second outdated.
+        TimelineItem.TimelineReview item =
+                new TimelineItem.TimelineReview(review(ReviewState.Approved, "body", 1L, null));
+        GitHubFile file = mock(GitHubFile.class);
+        when(file.patch()).thenReturn("@@ -1 +1 @@");
+        ReviewComment c1 = AdapterTestSupport.reviewComment(10L, null, null, null, null, null,
+                1, "a.java", null, null, "abc", 1);
+        ReviewComment c2 = AdapterTestSupport.reviewComment(11L, null, null,
+                new Date(System.currentTimeMillis() - 1000L), null, null, null, "a.java",
+                null, null, "abc", 2);
+        item.addComment(c1, file, true);
+        item.addComment(c2, file, true);
+        ReviewViewHolder h = holder(true);
+        h.bind(item);
+        android.view.ViewGroup container =
+                h.itemView.findViewById(R.id.details_container);
+        assertEquals(1, container.getChildCount());
+        TextView tvFile = container.getChildAt(0).findViewById(R.id.tv_file);
+        assertEquals(0, tvFile.getPaintFlags() & android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
+    }
+
+    @Test
     public void onMenuItemClick_share_nullReview_returnsTrue() {
         ReviewViewHolder h = holder(true);
         // never bound: ivMenu has no review tag

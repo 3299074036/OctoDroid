@@ -303,4 +303,22 @@ public class SearchAdapterTest {
         assertEquals(0, ((android.text.Spanned) tvMatch.getText())
                 .getSpans(0, 11, android.text.style.StyleSpan.class).length);
     }
+
+    @Test
+    public void codeBind_matchStartBeyondText_noBoldSpan() {
+        SearchAdapter.CodeSearchAdapter a = codeAdapter();
+        SearchAdapter.CodeSearchAdapter.ViewHolder h =
+                a.onCreateViewHolder(inflater, parent, 2);
+        TextMatch bad = mock(TextMatch.class);
+        when(bad.fragment()).thenReturn("hello world");
+        TextMatch.MatchItem i1 = mock(TextMatch.MatchItem.class);
+        when(i1.getStartPos()).thenReturn(20);
+        when(i1.getEndPos()).thenReturn(25);
+        when(bad.matches()).thenReturn(java.util.Collections.singletonList(i1));
+        a.onBindViewHolder(h, code("src/Main.java", Collections.singletonList(bad)));
+        ViewGroup container = h.itemView.findViewById(R.id.matches_container);
+        TextView tvMatch = container.getChildAt(0).findViewById(R.id.tv_match);
+        assertEquals(0, ((android.text.Spanned) tvMatch.getText())
+                .getSpans(0, 11, android.text.style.StyleSpan.class).length);
+    }
 }

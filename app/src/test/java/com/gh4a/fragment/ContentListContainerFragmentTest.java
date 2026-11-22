@@ -1230,4 +1230,33 @@ public class ContentListContainerFragmentTest {
         Optional<Map<String, String>> result = parse(text);
         assertEquals("o/r.name", result.get().get("a"));
     }
+
+    @Test
+    public void addFragmentForTopOfStack_nullPath_skipsBackStack() throws Exception {
+        // L304：栈顶为 null（损坏的恢复状态）时不进 back stack。
+        // 注意：子列表 path 不是 null——ContentListFragment.newInstance
+        // 把 null 归一化为 ""（ContentListFragment.java:135），故断言 ""。
+        RepositoryContentService service = serviceReturning(new ArrayList<>());
+        try (MockedStatic<ServiceFactory> services = mockContentService(service)) {
+            ContentListContainerFragment f =
+                    ContentListContainerFragment.newInstance(repo(), "main", null);
+            attach(f);
+            waitForContents(f);
+            int backStackBefore =
+                    f.getChildFragmentManager().getBackStackEntryCount();
+            dirStack(f).push(null);
+            Method m = ContentListContainerFragment.class
+                    .getDeclaredMethod("addFragmentForTopOfStack");
+            m.setAccessible(true);
+            m.invoke(f);
+            f.getChildFragmentManager().executePendingTransactions();
+            idleMain();
+            assertEquals(backStackBefore,
+                    f.getChildFragmentManager().getBackStackEntryCount());
+            ContentListFragment child =
+                    (ContentListFragment) field(f, "mContentListFragment");
+            assertNotNull(child);
+            assertEquals("", child.getPath());
+        }
+    }
 }

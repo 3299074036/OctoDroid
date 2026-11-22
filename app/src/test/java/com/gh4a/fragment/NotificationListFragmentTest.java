@@ -1371,6 +1371,28 @@ public class NotificationListFragmentTest {
     }
 
     @Test
+    public void scrollToInitialNotification_nullRepoHeader_skipsAndScrolls() throws Exception {
+        // L364：第一组仓库为 null：循环里 repo == null 跳过，继续匹配 o/r。
+        List<NotificationThread> threads = new ArrayList<>();
+        threads.add(thread("1", true, null, new Date(1700000001000L)));
+        for (int i = 2; i <= 21; i++) {
+            threads.add(thread(String.valueOf(i), true, repo("o/r")));
+        }
+        try (MockedStatic<SingleFactory> paged = mockPaged(
+                Observable.just(threads))) {
+            NotificationListFragment f = NotificationListFragment.newInstance();
+            Intent intent = new Intent()
+                    .putExtra(NotificationListFragment.EXTRA_INITIAL_REPO_OWNER, "o")
+                    .putExtra(NotificationListFragment.EXTRA_INITIAL_REPO_NAME, "r");
+            attachWithIntent(f, intent);
+            waitForLoad(f);
+            idleForMs(700);
+            assertEquals(2, firstVisiblePosition(f));
+            assertEquals(23, ((NotificationAdapter) field(f, "mAdapter")).getCount());
+        }
+    }
+
+    @Test
     public void loadNotifications_secondPage_appendsItems() throws Exception {
         NotificationThread t1 = thread("1", true, repo("o/r1"));
         NotificationThread t2 = thread("2", true, repo("o/r2"));

@@ -262,4 +262,135 @@ public class UpdateCheckUiTest {
             mocked.verify(() -> UpdateChecker.check(any(), any()), Mockito.times(0));
         }
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L15：类声明行；隐式默认构造器。
+        new UpdateCheckUi();
+    }
+
+    private static void setActivityFlag(BaseActivity act, String field, boolean value)
+            throws Exception {
+        java.lang.reflect.Field f =
+                android.app.Activity.class.getDeclaredField(field);
+        f.setAccessible(true);
+        f.setBoolean(act, value);
+    }
+
+    @Test
+    public void safeDismiss_dismissThrowingIsSwallowed() throws Exception {
+        // L22：dialog.dismiss() 抛 IllegalArgumentException 时吞掉，不崩。
+        AlertDialog throwing = Mockito.mock(AlertDialog.class);
+        Mockito.doThrow(new IllegalArgumentException("window detached"))
+                .when(throwing).dismiss();
+        java.lang.reflect.Method m = UpdateCheckUi.class
+                .getDeclaredMethod("safeDismiss", AlertDialog.class);
+        m.setAccessible(true);
+        m.invoke(null, throwing);
+        Mockito.verify(throwing).dismiss();
+    }
+
+    @Test
+    public void checkManually_finishingActivitySuppressesResult() throws Exception {
+        // L47：isFinishing() 为真时 onResult 只 dismiss 进度条，不弹结果。
+        BaseActivity act = activity();
+        try (MockedStatic<UpdateChecker> mocked = Mockito.mockStatic(UpdateChecker.class)) {
+            AtomicReference<UpdateChecker.Callback> cb = stubCheck(mocked);
+            UpdateCheckUi.checkManually(act);
+            setActivityFlag(act, "mFinished", true);
+            assertTrue(act.isFinishing());
+            cb.get().onResult(true, "9.9.9", "notes", "https://example.test/app.apk");
+            assertNoDialogShowing();
+            assertNull(ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void checkManually_destroyedActivitySuppressesResult() throws Exception {
+        // L47：isDestroyed() 为真时 onResult 只 dismiss 进度条，不弹结果。
+        BaseActivity act = activity();
+        try (MockedStatic<UpdateChecker> mocked = Mockito.mockStatic(UpdateChecker.class)) {
+            AtomicReference<UpdateChecker.Callback> cb = stubCheck(mocked);
+            UpdateCheckUi.checkManually(act);
+            setActivityFlag(act, "mDestroyed", true);
+            assertTrue(act.isDestroyed());
+            cb.get().onResult(true, "9.9.9", "notes", "https://example.test/app.apk");
+            assertNoDialogShowing();
+            assertNull(ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void checkManually_cancelledProgressSuppressesError() {
+        // L69：已取消时 onError 不弹失败 toast。
+        BaseActivity act = activity();
+        try (MockedStatic<UpdateChecker> mocked = Mockito.mockStatic(UpdateChecker.class)) {
+            AtomicReference<UpdateChecker.Callback> cb = stubCheck(mocked);
+            UpdateCheckUi.checkManually(act);
+            AlertDialog progress = (AlertDialog) ShadowAlertDialog.getShownDialogs().get(0);
+            progress.cancel();
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            cb.get().onError("boom");
+            assertNoDialogShowing();
+            assertNull(ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void checkManually_finishingActivitySuppressesError() throws Exception {
+        // L69：isFinishing() 为真时 onError 不弹失败 toast。
+        BaseActivity act = activity();
+        try (MockedStatic<UpdateChecker> mocked = Mockito.mockStatic(UpdateChecker.class)) {
+            AtomicReference<UpdateChecker.Callback> cb = stubCheck(mocked);
+            UpdateCheckUi.checkManually(act);
+            setActivityFlag(act, "mFinished", true);
+            cb.get().onError("boom");
+            assertNoDialogShowing();
+            assertNull(ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void checkManually_destroyedActivitySuppressesError() throws Exception {
+        // L69：isDestroyed() 为真时 onError 不弹失败 toast。
+        BaseActivity act = activity();
+        try (MockedStatic<UpdateChecker> mocked = Mockito.mockStatic(UpdateChecker.class)) {
+            AtomicReference<UpdateChecker.Callback> cb = stubCheck(mocked);
+            UpdateCheckUi.checkManually(act);
+            setActivityFlag(act, "mDestroyed", true);
+            cb.get().onError("boom");
+            assertNoDialogShowing();
+            assertNull(ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void checkAutomatically_finishingActivityStaysSilent() throws Exception {
+        // L93：自动检查回调里 isFinishing() 为真时不弹窗。
+        BaseActivity act = activity();
+        try (MockedStatic<UpdateChecker> mocked = Mockito.mockStatic(UpdateChecker.class)) {
+            mocked.when(() -> UpdateChecker.shouldAutoCheck(any())).thenReturn(true);
+            AtomicReference<UpdateChecker.Callback> cb = stubCheck(mocked);
+            UpdateCheckUi.checkAutomatically(act);
+            setActivityFlag(act, "mFinished", true);
+            cb.get().onResult(true, "9.9.9", "notes", "https://example.test/app.apk");
+            assertNoDialogShowing();
+            assertNull(ShadowToast.getTextOfLatestToast());
+        }
+    }
+
+    @Test
+    public void checkAutomatically_destroyedActivityStaysSilent() throws Exception {
+        // L93：自动检查回调里 isDestroyed() 为真时不弹窗。
+        BaseActivity act = activity();
+        try (MockedStatic<UpdateChecker> mocked = Mockito.mockStatic(UpdateChecker.class)) {
+            mocked.when(() -> UpdateChecker.shouldAutoCheck(any())).thenReturn(true);
+            AtomicReference<UpdateChecker.Callback> cb = stubCheck(mocked);
+            UpdateCheckUi.checkAutomatically(act);
+            setActivityFlag(act, "mDestroyed", true);
+            cb.get().onResult(true, "9.9.9", "notes", "https://example.test/app.apk");
+            assertNoDialogShowing();
+            assertNull(ShadowToast.getTextOfLatestToast());
+        }
+    }
+
 }

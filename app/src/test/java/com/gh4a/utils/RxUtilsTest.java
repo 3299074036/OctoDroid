@@ -1,10 +1,28 @@
 package com.gh4a.utils;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.view.View;
+
+import androidx.coordinatorlayout.widget.CoordinatorLayout;
+import androidx.fragment.app.FragmentActivity;
+
 import com.gh4a.ApiRequestException;
+import com.gh4a.R;
+import com.google.android.material.snackbar.Snackbar;
 import com.meisolsson.githubsdk.model.Page;
 import com.meisolsson.githubsdk.model.SearchPage;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
+import org.robolectric.Robolectric;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Shadows;
+import org.robolectric.shadows.ShadowLooper;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -14,6 +32,8 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.reactivex.Single;
+import io.reactivex.observers.TestObserver;
+import io.reactivex.subjects.SingleSubject;
 import okhttp3.MediaType;
 import okhttp3.Protocol;
 import okhttp3.Request;
@@ -22,8 +42,17 @@ import retrofit2.Response;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.withSettings;
 
 /**
  * B 组试点：RxUtils。纯 Single 变换走纯 JVM 测试（不加 Robolectric）。
@@ -31,6 +60,7 @@ import static org.junit.Assert.fail;
  * wrapWithErrorSnackbar 需 Activity、主线程调度与 Snackbar，
  * 待 Mockito（Activity mock）后补。
  */
+@RunWith(RobolectricTestRunner.class)
 public class RxUtilsTest {
 
     private static ApiRequestException apiError(int status) {
@@ -257,4 +287,258 @@ public class RxUtilsTest {
         assertEquals(404, result.code());
         assertTrue(result.errorBody() != null);
     }
+    // ---- wrapWithProgressDialog ----
+
+    @Test
+    public void classCanBeInstantiated() {
+        // L44：工具类默认构造。
+        assertNotNull(new RxUtils());
+    }
+
+    @Test
+    public void progressDialog_finishingActivitySkipsDialog() {
+        // L151-152：isFinishing() 为真时 showDialog 直接返回，不建 fragment；
+        // hideDialog 里 mFragment 为 null。
+        FragmentActivity activity =
+                Robolectric.buildActivity(FragmentActivity.class).setup().get();
+        activity.finish();
+        Single.just(1)
+                .compose(RxUtils.wrapWithProgressDialog(activity, R.string.app_name))
+                .test()
+                .assertValue(1)
+                .assertComplete();
+        assertNull(activity.getSupportFragmentManager()
+                .findFragmentByTag("progressdialog"));
+    }
+
+    @Test
+    public void progressDialog_destroyedActivitySkipsDialog() {
+        // L151-152：isDestroyed() 为真时同样跳过。
+        org.robolectric.android.controller.ActivityController<FragmentActivity> controller =
+                Robolectric.buildActivity(FragmentActivity.class).setup();
+        FragmentActivity activity = controller.get();
+        activity.finish();
+        controller.destroy();
+        assertTrue(activity.isDestroyed());
+        Single.just(1)
+                .compose(RxUtils.wrapWithProgressDialog(activity, R.string.app_name))
+                .test()
+                .assertValue(1)
+                .assertComplete();
+        assertNull(activity.getSupportFragmentManager()
+                .findFragmentByTag("progressdialog"));
+    }
+
+    @Test
+    public void progressDialog_showsAndDismissesDialog() {
+        // L165：dialog 正常弹出并挂到 activity 后，成功时 hideDialog 走
+        // dismissAllowingStateLoss 分支。
+        FragmentActivity activity =
+                Robolectric.buildActivity(FragmentActivity.class).setup().get();
+        SingleSubject<Integer> subject = SingleSubject.create();
+        TestObserver<Integer> to = subject
+                .compose(RxUtils.wrapWithProgressDialog(activity, R.string.app_name))
+                .test();
+        ShadowLooper.idleMainLooper();
+        activity.getSupportFragmentManager().executePendingTransactions();
+        assertNotNull(activity.getSupportFragmentManager()
+                .findFragmentByTag("progressdialog"));
+        subject.onSuccess(1);
+        ShadowLooper.idleMainLooper();
+        activity.getSupportFragmentManager().executePendingTransactions();
+        assertNull(activity.getSupportFragmentManager()
+                .findFragmentByTag("progressdialog"));
+        to.assertValue(1).assertComplete();
+    }
+
+    @Test
+    public void progressDialog_destroyedWithoutFinishSkipsDialog() {
+        // L151：isDestroyed() 为真、isFinishing() 为假时，|| 第二侧为真，
+        // showDialog 同样直接返回。第 1 轮的 destroyed 测试是 finish() +
+        // destroy()（isFinishing() 先为真，只走了第一侧）；此处只 destroy()
+        // 不 finish()，覆盖 isDestroyed() 单独为真的边。
+        org.robolectric.android.controller.ActivityController<FragmentActivity> controller =
+                Robolectric.buildActivity(FragmentActivity.class).setup();
+        FragmentActivity activity = controller.get();
+        controller.destroy();
+        assertTrue(activity.isDestroyed());
+        assertFalse(activity.isFinishing());
+        Single.just(1)
+                .compose(RxUtils.wrapWithProgressDialog(activity, R.string.app_name))
+                .test()
+                .assertValue(1)
+                .assertComplete();
+        assertNull(activity.getSupportFragmentManager()
+                .findFragmentByTag("progressdialog"));
+    }
+
+    @Test
+    public void progressDialog_detachedFragmentSkipsDismiss() {
+        // L165：dialog 已弹出、mFragment 非 null，但 activity 已销毁导致
+        // mFragment.getActivity() 为 null 时，hideDialog 跳过 dismiss。
+        org.robolectric.android.controller.ActivityController<FragmentActivity> controller =
+                Robolectric.buildActivity(FragmentActivity.class).setup();
+        FragmentActivity activity = controller.get();
+        SingleSubject<Integer> subject = SingleSubject.create();
+        TestObserver<Integer> to = subject
+                .compose(RxUtils.wrapWithProgressDialog(activity, R.string.app_name))
+                .test();
+        ShadowLooper.idleMainLooper();
+        activity.getSupportFragmentManager().executePendingTransactions();
+        androidx.fragment.app.Fragment fragment = activity.getSupportFragmentManager()
+                .findFragmentByTag("progressdialog");
+        assertNotNull(fragment);
+        controller.destroy();
+        assertTrue(activity.isDestroyed());
+        assertNull(fragment.getActivity());
+        subject.onSuccess(1);
+        ShadowLooper.idleMainLooper();
+        to.assertValue(1).assertComplete();
+    }
+
+    // ---- wrapWithErrorSnackbar：Snackbar.make 是静态方法，第 1 轮用的
+    // mockConstruction 拦不到它——真实 make() 在 Robolectric 下 inflate
+    // design_layout_snackbar_include 时抛 InflateException（当前主题解不出
+    // TextView 的 textAppearance 属性），6 个测试全在订阅时就收到该异常
+    // 而终止。改用 mockStatic(Snackbar.class) 直接 stub 住 make() 返回
+    // RETURNS_SELF 的 mock，彻底绕开 inflate；生产回调逻辑（addCallback /
+    // setAction 的监听器）照常用 ArgumentCaptor 抓出来跑。 ----
+
+    /** mockStatic(Snackbar.make) + RETURNS_SELF mock 的组合夹具。 */
+    private static final class SnackbarFixture implements AutoCloseable {
+        final MockedStatic<Snackbar> mockedStatic;
+        final Snackbar snackbar;
+
+        SnackbarFixture() {
+            snackbar = mock(Snackbar.class, withSettings().defaultAnswer(RETURNS_SELF));
+            mockedStatic = mockStatic(Snackbar.class);
+            mockedStatic.when(() -> Snackbar.make(any(View.class),
+                            any(CharSequence.class), eq(Snackbar.LENGTH_LONG)))
+                    .thenReturn(snackbar);
+        }
+
+        @Override
+        public void close() {
+            mockedStatic.close();
+        }
+    }
+
+    private static TestObserver<Integer> subscribeErrorWithMockedSnackbar(
+            Context context, Throwable error) {
+        CoordinatorLayout root = new CoordinatorLayout(context);
+        TestObserver<Integer> to = Single.<Integer>error(error)
+                .compose(RxUtils.wrapWithErrorSnackbar(context, root, "load failed"))
+                .test();
+        to.assertNotTerminated();
+        return to;
+    }
+
+    @Test
+    public void errorSnackbar_dismissSwipePropagatesError() {
+        Context context = RuntimeEnvironment.getApplication();
+        TestObserver<Integer> to;
+        Snackbar.BaseCallback<Snackbar> callback;
+        try (SnackbarFixture fixture = new SnackbarFixture()) {
+            to = subscribeErrorWithMockedSnackbar(context, new IOException("net down"));
+            callback = captureCallbackFrom(fixture.snackbar);
+        }
+        // L197 SWIPE 分支：retryProcessor.onError，Single 传回原错误。
+        callback.onDismissed(null, Snackbar.BaseCallback.DISMISS_EVENT_SWIPE);
+        to.assertError(IOException.class);
+    }
+
+    @Test
+    public void errorSnackbar_dismissTimeoutPropagatesError() {
+        Context context = RuntimeEnvironment.getApplication();
+        TestObserver<Integer> to;
+        Snackbar.BaseCallback<Snackbar> callback;
+        try (SnackbarFixture fixture = new SnackbarFixture()) {
+            to = subscribeErrorWithMockedSnackbar(context, new IOException("net down"));
+            callback = captureCallbackFrom(fixture.snackbar);
+        }
+        // L197 TIMEOUT 分支。
+        callback.onDismissed(null, Snackbar.BaseCallback.DISMISS_EVENT_TIMEOUT);
+        to.assertError(IOException.class);
+    }
+
+    @Test
+    public void errorSnackbar_dismissActionPropagatesError() {
+        Context context = RuntimeEnvironment.getApplication();
+        TestObserver<Integer> to;
+        Snackbar.BaseCallback<Snackbar> callback;
+        try (SnackbarFixture fixture = new SnackbarFixture()) {
+            to = subscribeErrorWithMockedSnackbar(context, new IOException("net down"));
+            callback = captureCallbackFrom(fixture.snackbar);
+        }
+        // L197 ACTION 分支（点“复制”后 snackbar 以 ACTION 消失，同样传回错误）。
+        callback.onDismissed(null, Snackbar.BaseCallback.DISMISS_EVENT_ACTION);
+        to.assertError(IOException.class);
+    }
+
+    @Test
+    public void errorSnackbar_dismissManualKeepsPending() {
+        Context context = RuntimeEnvironment.getApplication();
+        TestObserver<Integer> to;
+        Snackbar.BaseCallback<Snackbar> callback;
+        try (SnackbarFixture fixture = new SnackbarFixture()) {
+            to = subscribeErrorWithMockedSnackbar(context, new IOException("net down"));
+            callback = captureCallbackFrom(fixture.snackbar);
+        }
+        // L197 条件全假：不触发 retryProcessor，Single 保持挂起。
+        callback.onDismissed(null, Snackbar.BaseCallback.DISMISS_EVENT_MANUAL);
+        to.assertNotTerminated();
+    }
+
+    private static Snackbar.BaseCallback<Snackbar> captureCallbackFrom(
+            Snackbar mockSnackbar) {
+        ArgumentCaptor<Snackbar.BaseCallback> captor =
+                ArgumentCaptor.forClass(Snackbar.BaseCallback.class);
+        verify(mockSnackbar).addCallback(captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    public void errorSnackbar_apiErrorCopyActionCopiesMessage() {
+        // L221：ApiRequestException 的“复制”动作把错误信息写进剪贴板。
+        Context context = RuntimeEnvironment.getApplication();
+        CoordinatorLayout root = new CoordinatorLayout(context);
+        try (SnackbarFixture fixture = new SnackbarFixture()) {
+            subscribeErrorWithMockedSnackbar(context, apiError(404));
+            Snackbar mockSnackbar = fixture.snackbar;
+            ArgumentCaptor<View.OnClickListener> actionCaptor =
+                    ArgumentCaptor.forClass(View.OnClickListener.class);
+            verify(mockSnackbar).setAction(
+                    eq(R.string.snackbar_copy_error_msg_action), actionCaptor.capture());
+            actionCaptor.getValue().onClick(mock(View.class));
+        }
+        ClipboardManager cm = (ClipboardManager) context.getSystemService(
+                Context.CLIPBOARD_SERVICE);
+        ClipData clip = cm.getPrimaryClip();
+        assertNotNull(clip);
+        assertEquals("GitHub error", clip.getDescription().getLabel().toString());
+        assertNotNull(clip.getItemAt(0).getText());
+    }
+
+    @Test
+    public void errorSnackbar_otherErrorCopyActionCopiesStackTrace() {
+        // L229：非网络/非 API 错误的“复制”动作把堆栈写进剪贴板。
+        Context context = RuntimeEnvironment.getApplication();
+        CoordinatorLayout root = new CoordinatorLayout(context);
+        try (SnackbarFixture fixture = new SnackbarFixture()) {
+            subscribeErrorWithMockedSnackbar(context, new RuntimeException("boom"));
+            Snackbar mockSnackbar = fixture.snackbar;
+            ArgumentCaptor<View.OnClickListener> actionCaptor =
+                    ArgumentCaptor.forClass(View.OnClickListener.class);
+            verify(mockSnackbar).setAction(
+                    eq(R.string.snackbar_copy_error_log_action), actionCaptor.capture());
+            actionCaptor.getValue().onClick(mock(View.class));
+        }
+        ClipboardManager cm = (ClipboardManager) context.getSystemService(
+                Context.CLIPBOARD_SERVICE);
+        ClipData clip = cm.getPrimaryClip();
+        assertNotNull(clip);
+        assertEquals("OctoDroid error", clip.getDescription().getLabel().toString());
+        assertTrue(clip.getItemAt(0).getText().toString().contains("boom"));
+    }
+
 }

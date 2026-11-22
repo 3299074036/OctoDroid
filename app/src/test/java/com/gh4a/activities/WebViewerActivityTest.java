@@ -639,4 +639,18 @@ public class WebViewerActivityTest {
         }
     }
 
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void handlePrintRequest_baseReturnsFalse() {
+        // The base handlePrintRequest (L543) returns false: subclasses that
+        // do not override it (Wiki/Gist/Diff viewers) fall through to the
+        // WebView print path in doPrint. TestWebViewerActivity does not
+        // override it, so this call executes the base method.
+        try (ActivityController<TestWebViewerActivity> c = launch()) {
+            TestWebViewerActivity activity = c.setup().get();
+            assertFalse(activity.handlePrintRequest());
+        }
+    }
+
 }

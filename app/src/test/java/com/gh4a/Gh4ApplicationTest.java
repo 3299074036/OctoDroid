@@ -33,6 +33,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -1747,6 +1748,117 @@ public class Gh4ApplicationTest {
         clearAccountState();
         app().setActiveLogin("anyone");
         assertNull(app().getAuthLogin());
+    }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void rxHandler_undeliverableNullCause_forwardsOriginal() {
+        // UndeliverableException with a null cause: cause == null, so the
+        // handler must forward the exception itself (L1026 ternary false side).
+        UndeliverableException e = new UndeliverableException((Throwable) null);
+        Throwable forwarded = runWithCapturingHandler(() -> rxAccept(e));
+        assertSame(e, forwarded);
+    }
+
+    @Test
+    public void onConfigurationChanged_belowN_usesDeprecatedLocale() throws Exception {
+        // SDK < N: onConfigurationChanged must use the deprecated
+        // Configuration.locale field (L262 false side + L265).
+        Field sdkInt = android.os.Build.VERSION.class.getField("SDK_INT");
+        sdkInt.setAccessible(true);
+        int original = sdkInt.getInt(null);
+        try {
+            sdkInt.setInt(null, 23);
+            Configuration config = new Configuration();
+            config.locale = Locale.US;
+            app().onConfigurationChanged(config);
+            assertNotNull(app().getPrettyTimeInstance());
+        } finally {
+            sdkInt.setInt(null, original);
+        }
+    }
+
+    @Test
+    public void deletePrefsFile_belowN_deletesExistingFile() throws Exception {
+        // SDK < N: deletePrefsFile must remove the prefs XML file itself
+        // (L629 false side + L632-L635). Seed the file through the real
+        // SharedPreferences API; if Robolectric keeps it in memory only,
+        // create the file directly so the exists()/delete() path still runs.
+        SharedPreferences seeded =
+                app().getSharedPreferences("gap-delete-me", Context.MODE_PRIVATE);
+        seeded.edit().putString("x", "y").commit();
+        File f = new File(app().getApplicationInfo().dataDir
+                + "/shared_prefs/gap-delete-me.xml");
+        if (!f.exists()) {
+            f.getParentFile().mkdirs();
+            assertTrue(f.createNewFile());
+        }
+        assertTrue(f.exists());
+        Field sdkInt = android.os.Build.VERSION.class.getField("SDK_INT");
+        sdkInt.setAccessible(true);
+        int original = sdkInt.getInt(null);
+        try {
+            sdkInt.setInt(null, 23);
+            callPrivate(app(), "deletePrefsFile",
+                    new Class<?>[]{String.class}, "gap-delete-me");
+            assertFalse(f.exists());
+        } finally {
+            sdkInt.setInt(null, original);
+            f.delete();
+        }
+    }
+
+    @Test
+    public void deletePrefsFile_belowN_missingFile_noCrash() throws Exception {
+        // SDK < N, prefs file does not exist: f.exists() is false (L634
+        // false side) -- nothing to delete, no crash. Mirror of
+        // deletePrefsFile_belowN_deletesExistingFile, which covers the
+        // true side.
+        File f = new File(app().getApplicationInfo().dataDir
+                + "/shared_prefs/gap-delete-missing.xml");
+        if (f.exists()) {
+            assertTrue(f.delete());
+        }
+        Field sdkInt = android.os.Build.VERSION.class.getField("SDK_INT");
+        sdkInt.setAccessible(true);
+        int original = sdkInt.getInt(null);
+        try {
+            sdkInt.setInt(null, 23);
+            callPrivate(app(), "deletePrefsFile",
+                    new Class<?>[]{String.class}, "gap-delete-missing");
+            assertFalse(f.exists());
+        } finally {
+            sdkInt.setInt(null, original);
+        }
+    }
+
+    @Test
+    public void onCreateLegacyMigration_version2_nonSystemTheme_skipsThemeReset() {
+        // Version 2 with an int user id and a non-system theme: the <3 block
+        // converts the id to long, and the <4 block's theme reset is skipped
+        // because the stored theme (light = 1) is not the system value 2
+        // (L147 false side).
+        clearAccountState();
+        SavedAppState saved = saveAppState();
+        try {
+            prefs().edit()
+                    .putInt(constString("KEY_VERSION"), 2)
+                    .putStringSet(constString("KEY_ALL_LOGINS"),
+                            new HashSet<String>() {{ add("v2-user"); }})
+                    .putInt(constString("KEY_PREFIX_USER_ID") + "v2-user", 77)
+                    .putInt(SettingsFragment.KEY_THEME, 1)
+                    .apply();
+            Gh4Application manual = manualOnCreate();
+            assertEquals(4, prefs().getInt(constString("KEY_VERSION"), -1));
+            assertEquals(77L, prefs().getLong(
+                    constString("KEY_PREFIX_USER_ID") + "v2-user", -1L));
+            assertEquals(1, prefs().getInt(SettingsFragment.KEY_THEME, -1));
+            assertNull(manual.getAuthLogin());
+        } finally {
+            restoreAppState(saved);
+            clearAccountState();
+        }
     }
 
 }

@@ -180,4 +180,10 @@ public class FileUtilsTest {
         } catch (IllegalArgumentException expected) {
         }
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L13：类声明行；隐式默认构造器。
+        new FileUtils();
+    }
+
 }

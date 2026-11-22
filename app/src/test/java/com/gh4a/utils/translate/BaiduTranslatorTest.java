@@ -7,6 +7,7 @@ import org.robolectric.RobolectricTestRunner;
 import java.io.IOException;
 
 import okhttp3.FormBody;
+import okhttp3.Call;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -18,6 +19,9 @@ import okhttp3.ResponseBody;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * BaiduTranslator with a stubbed OkHttp interceptor: no real network,
@@ -201,4 +205,130 @@ public class BaiduTranslatorTest {
                 fakeClient(OK_BODY, 200, new Captured()), "test-appid", "test-key")
                 .getMaxParallelRequests());
     }
+    private static OkHttpClient fakeClientNullBody() throws Exception {
+        // OkHttp 的拦截器链不允许拦截器返回无 body 的 Response（会先抛
+        // IllegalStateException，异常在翻译器代码之前就抛了），所以不走拦截器：
+        // 直接 mock OkHttpClient，让 newCall 返回的 Call.execute() 给出无 body 的 Response。
+        OkHttpClient client = mock(OkHttpClient.class);
+        Call call = mock(Call.class);
+        Response nullBody = new Response.Builder()
+                .request(new Request.Builder().url("https://example.com/").build())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .build();
+        when(client.newCall(any(Request.class))).thenReturn(call);
+        when(call.execute()).thenReturn(nullBody);
+        return client;
+    }
+
+    @Test
+    public void translate_nullBodyThrows() throws Exception {
+        // L65：200 但 body 为 null 时抛错（含状态码）。
+        BaiduTranslator t = new BaiduTranslator(
+                fakeClientNullBody(), "test-appid", "test-key");
+        try {
+            t.translate("Hello", "en", "zh-CN");
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertTrue(e.getMessage().contains("200"));
+        } catch (Exception e) {
+            fail("expected IOException, got " + e);
+        }
+    }
+
+    @Test
+    public void translate_emptyResultsThrows() {
+        // L74：body 里没有 trans_result 数组时抛“空结果”错。
+        BaiduTranslator t = new BaiduTranslator(
+                fakeClient("{}", 200, new Captured()), "test-appid", "test-key");
+        try {
+            t.translate("Hello", "en", "zh-CN");
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertTrue(e.getMessage().contains("empty result"));
+        } catch (Exception e) {
+            fail("expected IOException, got " + e);
+        }
+    }
+
+    @Test
+    public void translate_backToBackSecondCallThrottles() throws Exception {
+        // L96-98：两次连续调用之间不足 1.1 秒时第二次走 Thread.sleep 节流，
+        // 两次都返回正确结果。
+        BaiduTranslator t = new BaiduTranslator(
+                fakeClient(OK_BODY, 200, new Captured()), "test-appid", "test-key");
+        assertEquals("你好", t.translate("Hello", "en", "zh-CN"));
+        assertEquals("你好", t.translate("Hello", "en", "zh-CN"));
+    }
+
+    @Test
+    public void translate_elapsedPastIntervalSkipsThrottle() throws Exception {
+        // L96 的 false 边：上次请求已是 5 秒前，elapsed >= MIN_INTERVAL_MS
+        //（1100），不 sleep 直接发请求。直接反射置 sLastRequestMs——Robolectric
+        // 下 SystemClock.elapsedRealtime() 被冻结，不置它时 elapsed 恒为 0，
+        // false 边永远走不到（这就是第 1 轮背靠背测试只覆盖了 true 边的原因）。
+        // 墙钟断言证明没走 sleep 分支（一次节流 sleep 约 1100ms）。
+        java.lang.reflect.Field f =
+                BaiduTranslator.class.getDeclaredField("sLastRequestMs");
+        f.setAccessible(true);
+        f.setLong(null, android.os.SystemClock.elapsedRealtime() - 5000);
+        BaiduTranslator t = new BaiduTranslator(
+                fakeClient(OK_BODY, 200, new Captured()), "test-appid", "test-key");
+        long start = System.nanoTime();
+        assertEquals("你好", t.translate("Hello", "en", "zh-CN"));
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        assertTrue("throttle sleep taken unexpectedly, took " + elapsedMs + "ms",
+                elapsedMs < 1000);
+    }
+
+    @Test
+    public void translate_throttleInterruptedRestoresFlag() throws Exception {
+        // L99-100：节流 sleep 被打断时 catch 里恢复中断标志，翻译照常完成。
+        BaiduTranslator t = new BaiduTranslator(
+                fakeClient(OK_BODY, 200, new Captured()), "test-appid", "test-key");
+        t.translate("Hello", "en", "zh-CN");
+        java.util.concurrent.atomic.AtomicReference<Throwable> thrown =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean interruptedFlag =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        Thread worker = new Thread(() -> {
+            try {
+                t.translate("Hello", "en", "zh-CN");
+            } catch (Throwable e) {
+                thrown.set(e);
+            } finally {
+                interruptedFlag.set(Thread.currentThread().isInterrupted());
+            }
+        });
+        worker.start();
+        Thread.sleep(200);
+        worker.interrupt();
+        worker.join(5000);
+        assertEquals(null, thrown.get());
+        assertTrue(interruptedFlag.get());
+    }
+
+    @Test
+    public void translate_nullOrEmptyTargetLangMapsToZh() throws Exception {
+        // L108-109：目标语言为 null 或空串时 mapLang 返回 "zh"。
+        Captured cap = new Captured();
+        BaiduTranslator t = new BaiduTranslator(
+                fakeClient(OK_BODY, 200, cap), "test-appid", "test-key");
+        assertEquals("你好", t.translate("Hello", "en", null));
+        assertEquals("zh", formValue(cap.request, "to"));
+        assertEquals("你好", t.translate("Hello", "en", ""));
+        assertEquals("zh", formValue(cap.request, "to"));
+    }
+
+    @Test
+    public void translate_singleCharLangIsKeptAsIs() throws Exception {
+        // L121：单字符语言码不做截取，原样送出。
+        Captured cap = new Captured();
+        BaiduTranslator t = new BaiduTranslator(
+                fakeClient(OK_BODY, 200, cap), "test-appid", "test-key");
+        assertEquals("你好", t.translate("Hello", "en", "x"));
+        assertEquals("x", formValue(cap.request, "to"));
+    }
+
 }

@@ -5,7 +5,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import android.content.Context;
@@ -292,6 +294,32 @@ public class RepositoryFactoryTest {
             }
             f.prepareToolDrawerMenu(menu);
             assertNotNull(menu);
+        }
+    }
+
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void onFragmentInstantiated_orderOnly_doesNotApplySort() throws Exception {
+        // Only the sort order pref is set (no direction): the restore guard
+        // requires both, so setSortOrder is never called (L146, the
+        // order-set/dir-null edge).
+        prefs().edit()
+                .remove("home_repo_list_filter")
+                .remove("home_repo_list_sort_order")
+                .remove("home_repo_list_sort_dir")
+                .putString("home_repo_list_sort_order", "full_name")
+                .apply();
+        try (ActivityController<HomeActivity> c = HomeActivityTestHelper.launchHome()) {
+            HomeActivity activity = c.setup().get();
+            RepositoryListContainerFragment fragment =
+                    mock(RepositoryListContainerFragment.class);
+            factory(activity).onFragmentInstantiated(fragment, 0);
+            verify(fragment, never()).setSortOrder(anyString(), anyString());
+        } finally {
+            prefs().edit()
+                    .remove("home_repo_list_sort_order")
+                    .apply();
         }
     }
 }

@@ -164,4 +164,35 @@ public class SettingsActivityTest {
         }
     }
 
+    // ---- gap fixes (2026-11-22, group C) ----
+    // Note: no try-with-resources here on purpose: the controller is
+    // destroyed manually before the posted runnable runs, and closing it
+    // again would re-run destroy().
+
+    @Test
+    public void onThemeChanged_afterDestroy_doesNotRecreate() {
+        // The activity is destroyed before the posted recreate runs:
+        // isDestroyed() is true, so recreate() is skipped (L64 first
+        // operand false). The finishing case is already covered by
+        // onThemeChanged_afterFinish_doesNotRecreate.
+        ActivityController<SettingsActivity> c = launch();
+        SettingsActivity activity = c.setup().get();
+        activity.onThemeChanged();
+        c.pause().stop().destroy();
+        ShadowLooper.idleMainLooper();
+        assertTrue(activity.isDestroyed());
+    }
+
+    @Test
+    public void onFontScaleChanged_afterDestroy_doesNotRecreate() {
+        // Same destroyed-before-runnable case for the font-scale path
+        // (L80 first operand false).
+        ActivityController<SettingsActivity> c = launch();
+        SettingsActivity activity = c.setup().get();
+        activity.onFontScaleChanged();
+        c.pause().stop().destroy();
+        ShadowLooper.idleMainLooper();
+        assertTrue(activity.isDestroyed());
+    }
+
 }

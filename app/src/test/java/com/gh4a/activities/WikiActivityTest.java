@@ -220,4 +220,34 @@ public class WikiActivityTest {
         }
     }
 
+    // ---- gap fixes (2026-11-22, group C) ----
+
+    @Test
+    public void launches_withFeedNullTitle_titleFallsBackToRepoName() {
+        // Feed present but its title null: getActionBarTitle's second
+        // operand is false, so the title falls back to the repo name
+        // (L54, the feed-non-null/title-null edge).
+        Intent intent = WikiActivity.makeIntent(context(), "octocat", "hello",
+                feed(null, "<p>hi</p>"));
+        try (ActivityController<WikiActivity> c =
+                Robolectric.buildActivity(WikiActivity.class, intent)) {
+            WikiActivity activity = c.setup().get();
+            assertEquals("hello",
+                    activity.getSupportActionBar().getTitle().toString());
+        }
+    }
+
+    @Test
+    public void getDocumentTitle_withFeedNullTitle_returnsRepoName() {
+        // Feed present but its title null: getDocumentTitle takes the
+        // fallback branch (L89 second operand true).
+        Intent intent = WikiActivity.makeIntent(context(), "octocat", "hello",
+                feed(null, "<p>hi</p>"));
+        try (ActivityController<WikiActivity> c =
+                Robolectric.buildActivity(WikiActivity.class, intent)) {
+            WikiActivity activity = c.setup().get();
+            assertEquals("hello", activity.getDocumentTitle());
+        }
+    }
+
 }

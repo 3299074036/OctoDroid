@@ -2,10 +2,15 @@ package com.gh4a.widget;
 
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.LinearLayout;
 
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
 import androidx.core.view.ViewCompat;
+import androidx.core.widget.NestedScrollView;
 import androidx.fragment.app.FragmentActivity;
+
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -168,5 +173,71 @@ public class ToggleableBottomSheetBehaviorTest {
         FragmentActivity activity = activity();
         assertFalse(behavior().onNestedPreFling(parent(activity), new View(activity),
                 new View(activity), 1000f, 1000f));
+    }
+
+    // A sheet laid out in a CoordinatorLayout, with a small nested-scrolling
+    // child at its top-left corner. Laying it out lets BottomSheetBehavior
+    // find the nested child and create its drag helper.
+    private static class SheetLayout {
+        final CoordinatorLayout parent;
+        final LinearLayout sheet;
+        final NestedScrollView nested;
+        final ToggleableBottomSheetBehavior<View> behavior;
+
+        SheetLayout(CoordinatorLayout parent, LinearLayout sheet,
+                NestedScrollView nested, ToggleableBottomSheetBehavior<View> behavior) {
+            this.parent = parent;
+            this.sheet = sheet;
+            this.nested = nested;
+            this.behavior = behavior;
+        }
+    }
+
+    private SheetLayout layoutSheet(FragmentActivity activity, int state) {
+        CoordinatorLayout parent = parent(activity);
+        LinearLayout sheet = new LinearLayout(activity);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        NestedScrollView nested = new NestedScrollView(activity);
+        nested.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
+        sheet.addView(nested);
+        ToggleableBottomSheetBehavior<View> behavior = behavior();
+        if (state != BottomSheetBehavior.STATE_COLLAPSED) {
+            behavior.setState(state);
+        }
+        CoordinatorLayout.LayoutParams lp = new CoordinatorLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 1000);
+        lp.setBehavior(behavior);
+        sheet.setLayoutParams(lp);
+        parent.addView(sheet);
+        activity.setContentView(parent);
+        parent.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY));
+        parent.layout(0, 0, 1080, 1920);
+        return new SheetLayout(parent, sheet, nested, behavior);
+    }
+
+    @Test
+    public void onInterceptTouchEvent_enabled_dragOutsideNestedChild_intercepts() {
+        FragmentActivity activity = activity();
+        SheetLayout layout = layoutSheet(activity, BottomSheetBehavior.STATE_EXPANDED);
+        // 展开态 sheet 顶在 y = 1920 - 1000 = 920（fitToContents 时
+        // expandedOffset = parentHeight - childHeight，material 1.13.0
+        // BottomSheetBehavior.getExpandedOffset 字节码已核实），占 y 920..1920；
+        // 100x100 的 NestedScrollView 在 sheet 左上角（全局 y 920..1020）。
+        // 触点须落在 sheet 内、NestedScrollView 外：(500,1500) 满足该条件，
+        // 原坐标 (500,500)/(500,700) 在 sheet 上方，根本碰不到 sheet。
+        long now = android.os.SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 500, 1500, 0);
+        assertFalse(layout.behavior.onInterceptTouchEvent(layout.parent, layout.sheet, down));
+        MotionEvent move = MotionEvent.obtain(now, now, MotionEvent.ACTION_MOVE, 500, 1700, 0);
+        assertTrue(layout.behavior.onInterceptTouchEvent(layout.parent, layout.sheet, move));
+    }
+
+    @Test
+    public void onNestedPreFling_enabled_withNestedChild_returnsTrue() {
+        FragmentActivity activity = activity();
+        SheetLayout layout = layoutSheet(activity, BottomSheetBehavior.STATE_COLLAPSED);
+        assertTrue(layout.behavior.onNestedPreFling(layout.parent, layout.sheet,
+                layout.nested, 0f, 1000f));
     }
 }

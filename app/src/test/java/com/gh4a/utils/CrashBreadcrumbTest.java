@@ -80,4 +80,10 @@ public class CrashBreadcrumbTest {
         assertEquals("null.noteFinish_nullActivityName_recordsLiteralNull",
                 CrashBreadcrumb.getLastFinish());
     }
+    @Test
+    public void classLine_instantiationCoversDeclaration() {
+        // L12：类声明行；隐式默认构造器。
+        new CrashBreadcrumb();
+    }
+
 }

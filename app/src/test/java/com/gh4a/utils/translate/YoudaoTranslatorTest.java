@@ -7,6 +7,7 @@ import org.robolectric.RobolectricTestRunner;
 import java.io.IOException;
 
 import okhttp3.FormBody;
+import okhttp3.Call;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -18,6 +19,9 @@ import okhttp3.ResponseBody;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * YoudaoTranslator with a stubbed OkHttp interceptor: no real network,
@@ -187,4 +191,71 @@ public class YoudaoTranslatorTest {
                 fakeClient(OK_BODY, 200, new Captured()), null, "test-key", "test-secret")
                 .getName());
     }
+    private static OkHttpClient fakeClientNullBody() throws Exception {
+        // OkHttp 的拦截器链不允许拦截器返回无 body 的 Response（会先抛
+        // IllegalStateException，异常在翻译器代码之前就抛了），所以不走拦截器：
+        // 直接 mock OkHttpClient，让 newCall 返回的 Call.execute() 给出无 body 的 Response。
+        OkHttpClient client = mock(OkHttpClient.class);
+        Call call = mock(Call.class);
+        Response nullBody = new Response.Builder()
+                .request(new Request.Builder().url("https://example.com/").build())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .build();
+        when(client.newCall(any(Request.class))).thenReturn(call);
+        when(call.execute()).thenReturn(nullBody);
+        return client;
+    }
+
+    @Test
+    public void translate_nullBodyThrows() throws Exception {
+        // L62：200 但 body 为 null 时抛错（含状态码）。
+        YoudaoTranslator t = new YoudaoTranslator(
+                fakeClientNullBody(), null, "test-key", "test-secret");
+        try {
+            t.translate("Hello", "en", "zh-CHS");
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertTrue(e.getMessage().contains("200"));
+        } catch (Exception e) {
+            fail("expected IOException, got " + e);
+        }
+    }
+
+    @Test
+    public void translate_emptyTranslationThrows() {
+        // L71：errorCode 为 0 但没有 translation 数组时抛“空结果”错。
+        YoudaoTranslator t = new YoudaoTranslator(
+                fakeClient("{\"errorCode\":\"0\"}", 200, new Captured()),
+                null, "test-key", "test-secret");
+        try {
+            t.translate("Hello", "en", "zh-CHS");
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertTrue(e.getMessage().contains("empty result"));
+        } catch (Exception e) {
+            fail("expected IOException, got " + e);
+        }
+    }
+
+    @Test
+    public void truncate_nullReturnsEmpty() throws Exception {
+        // L86-87：q 为 null 时截断结果为空串（签名用空串计算，不抛错）。
+        java.lang.reflect.Method m = YoudaoTranslator.class.getDeclaredMethod(
+                "truncate", String.class);
+        m.setAccessible(true);
+        assertEquals("", m.invoke(null, (Object) null));
+    }
+
+    @Test
+    public void truncate_longStringKeepsHeadAndTailWithLength() throws Exception {
+        // L90-93：长度超 20 时保留前 10 + 长度 + 后 10。
+        java.lang.reflect.Method m = YoudaoTranslator.class.getDeclaredMethod(
+                "truncate", String.class);
+        m.setAccessible(true);
+        assertEquals("abcdefghij360123456789",
+                m.invoke(null, "abcdefghijklmnopqrstuvwxyz0123456789"));
+    }
+
 }

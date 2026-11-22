@@ -546,6 +546,29 @@ public class StoreViewTest {
     }
 
     @Test
+    public void renderRankFullList_sameGroupDifferentListResetsShown() throws Exception {
+        // L1474：组相同、榜不同时也复位 mRankShown（|| 的第二操作数真臂；
+        // 组不同臂已有 validList 测试、组榜都相同臂已有追加测试覆盖）。
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", cannedFeed());
+        setField(view, "mRankGroups", java.util.Arrays.asList(
+                rankGroupWithList("Hot", java.util.Arrays.asList(
+                        repo(EnumSet.of(StoreClassifier.Platform.ANDROID)),
+                        repo(EnumSet.of(StoreClassifier.Platform.IOS))))));
+        setField(view, "mRankGroup", 0);
+        setField(view, "mRankList", 0);
+        setField(view, "mRankShownGroup", 0);
+        setField(view, "mRankShownList", 1);
+        setField(view, "mRankShown", 40);
+        android.widget.LinearLayout container = new android.widget.LinearLayout(mContext);
+        call(view, "renderRankFullList",
+                new Class<?>[]{android.widget.LinearLayout.class}, container);
+        assertEquals(20, field(view, "mRankShown"));
+        assertEquals(0, field(view, "mRankShownGroup"));
+        assertEquals(0, field(view, "mRankShownList"));
+    }
+
+    @Test
     public void showNewest_withDataRendersNewestList() throws Exception {
         StoreView view = new StoreView(mContext);
         setField(view, "mNewestData", cannedFeed());
@@ -1760,6 +1783,33 @@ public class StoreViewTest {
     }
 
     @Test
+    public void loadNewest_successWhileOnHome_updatesCountView() throws Exception {
+        // L1628：不在最新页、当前为首页且 feed 已加载时，只刷新统计格数字，
+        // 不重建首页头（与 showing 时整页重绘互补）。
+        MockedStatic<StoreApi> mocked =
+                mockStatic(StoreApi.class, CALLS_REAL_METHODS);
+        mocked.when(() -> StoreApi.loadBackend(any(), anyString(), anyString()))
+                .thenReturn(Single.just(cannedFeed()));
+        mocked.when(() -> StoreApi.loadNewest(any()))
+                .thenReturn(Single.just(cannedFeed()));
+        try {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", cannedFeed());
+            setField(view, "mCurrentTab", 0);
+            setField(view, "mShowingNewest", false);
+            android.widget.TextView countView =
+                    new android.widget.TextView(mContext);
+            setField(view, "mNewestCountView", countView);
+            call(view, "loadNewest", new Class<?>[]{});
+            assertFalse((Boolean) field(view, "mNewestLoading"));
+            assertFalse((Boolean) field(view, "mNewestFailed"));
+            assertEquals(StoreViews.formatStars(3), countView.getText().toString());
+        } finally {
+            mocked.close();
+        }
+    }
+
+    @Test
     public void renderNewestList_backClick_returnsHome() throws Exception {
         StoreView view = new StoreView(mContext);
         setField(view, "mNewestData", cannedFeed());
@@ -1936,6 +1986,491 @@ public class StoreViewTest {
             assertNotNull(started);
             assertEquals(android.content.Intent.ACTION_VIEW, started.getAction());
             assertEquals("https://github.com/o/r", started.getData().toString());
+        }
+    }
+
+    // ---- A 组补缺（2026-11-22）：StoreView 剩余分支 ----
+
+    private static MockedStatic<StoreApi> mockNewest(int n) {
+        MockedStatic<StoreApi> mocked =
+                mockStatic(StoreApi.class, CALLS_REAL_METHODS);
+        mocked.when(() -> StoreApi.loadBackend(any(), anyString(), anyString()))
+                .thenReturn(Single.just(cannedFeed()));
+        mocked.when(() -> StoreApi.loadNewest(any()))
+                .thenReturn(Single.just(feedOf(manyRepos(n))));
+        return mocked;
+    }
+
+    private static StoreRepo repoNoDescNoPlatforms() {
+        return new StoreRepo("o/r", "o", "r", "", "Java", "", 10, 2, 100L,
+                new java.util.ArrayList<>(), new java.util.HashSet<>(),
+                "v1", 0L, EnumSet.noneOf(StoreClassifier.Platform.class), 1,
+                null, null, null, null, "tools");
+    }
+
+    private static StoreRepo repoWithCategory(String fullName, String category) {
+        return new StoreRepo(fullName, "o", "r", "d", "Java", "", 10, 2, 100L,
+                new java.util.ArrayList<>(), new java.util.HashSet<>(),
+                "v1", 0L, EnumSet.of(StoreClassifier.Platform.ANDROID), 1,
+                null, null, null, null, category);
+    }
+
+    @Test
+    public void rankScrollListener_groupSetListNegative_returns() throws Exception {
+        // L256：mRankGroup >= 0 但 mRankList < 0 时直接返回（|| 的第二臂）。
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", cannedFeed());
+        setField(view, "mRankGroup", 0);
+        setField(view, "mRankList", -1);
+        scrollListener(tabScroll(view, 2)).onScrollChange(null, 0, 100, 0, 0);
+        assertEquals(20, field(view, "mRankShown"));
+    }
+
+    @Test
+    public void rankScrollListener_scrollable_returnsWithoutAppend() throws Exception {
+        // L262：榜单可继续下滑时不追加。
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            attachView(view);
+            setField(view, "mFeedData", feedOf(manyRepos(25)));
+            setField(view, "mRankGroups", java.util.Arrays.asList(
+                    rankGroupWithList("Hot", manyRepos(25))));
+            setField(view, "mRankGroup", 0);
+            setField(view, "mRankList", 0);
+            setField(view, "mRankShownGroup", 0);
+            setField(view, "mRankShownList", 0);
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            // selectTab 把 mRankShown 复位成 20；改回 25 再重绘，凑满 25 行
+            // 才可滚动（只展 20 行时滚动性不确定）。
+            setField(view, "mRankShown", 25);
+            call(view, "renderRank", new Class<?>[]{});
+            setField(view, "mRankFullTotal", 40);
+            idleMain();
+            assertTrue(tabScroll(view, 2).canScrollVertically(1));
+            scrollListener(tabScroll(view, 2)).onScrollChange(null, 0, 100, 0, 0);
+            assertEquals(25, field(view, "mRankShown"));
+        }
+    }
+
+    @Test
+    public void canScrollUp_showingNewestScrolled_returnsTrue() throws Exception {
+        // L333：最新入库子屏已下滑时 canScrollUp() 为真。
+        try (MockedStatic<StoreApi> mocked = mockNewest(60)) {
+            StoreView view = new StoreView(mContext);
+            attachView(view);
+            view.onShown();
+            call(view, "showNewest", new Class<?>[]{});
+            idleMain();
+            assertEquals(60, ((StoreApi.StoreData) field(view, "mNewestData"))
+                    .items.size());
+            android.widget.ScrollView newestScroll =
+                    (android.widget.ScrollView) field(view, "mNewestScroll");
+            newestScroll.scrollTo(0, 100);
+            assertTrue(view.canScrollUp());
+        }
+    }
+
+    @Test
+    public void applyExploreSort_sameSortWithoutFeed_loadsFeed() throws Exception {
+        // L510：排序未变但 feed 为空时不走刷新分支，改为加载。
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            call(view, "applyExploreSort", new Class<?>[]{int.class}, 0);
+            assertEquals(0, field(view, "mSort"));
+            assertNotNull(field(view, "mFeedData"));
+        }
+    }
+
+    @Test
+    public void ensureCounts_withoutFeed_skipsCompute() throws Exception {
+        // L613：feed 为空时不算计数。
+        StoreView view = new StoreView(mContext);
+        call(view, "ensureCounts", new Class<?>[]{});
+        assertFalse((Boolean) field(view, "mCountsReady"));
+        assertEquals(null, field(view, "mPlatformCounts"));
+    }
+
+    @Test
+    public void ensureCounts_secondCallSkipsCompute() throws Exception {
+        // L613：计数已算好时第二次调用不再重算（同一数组引用）。
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", cannedFeed());
+        call(view, "ensureCounts", new Class<?>[]{});
+        assertTrue((Boolean) field(view, "mCountsReady"));
+        Object counts = field(view, "mPlatformCounts");
+        assertNotNull(counts);
+        call(view, "ensureCounts", new Class<?>[]{});
+        assertTrue(counts == field(view, "mPlatformCounts"));
+    }
+
+    @Test
+    public void statCell_nullListener_buildsWithoutClick() throws Exception {
+        // L956：listener 为 null 时不设点击监听（生产里 4 格都传非空，
+        // 直接调私有方法覆盖该臂）。
+        StoreView view = new StoreView(mContext);
+        android.view.View cell = (android.view.View) call(view, "statCell",
+                new Class<?>[]{int.class, String.class, String.class,
+                        boolean.class, boolean.class,
+                        android.view.View.OnClickListener.class},
+                com.gh4a.R.drawable.ic_stat_package, "5", "label",
+                false, false, null);
+        assertNotNull(cell);
+        assertFalse(cell.hasOnClickListeners());
+        assertEquals("5", ((android.widget.TextView)
+                ((android.widget.LinearLayout) cell).getChildAt(2))
+                .getText().toString());
+    }
+
+    @Test
+    public void ensureRankFillViewport_wrongTab_returns() throws Exception {
+        // L1241：feed 已有但当前页不是排行榜时直接返回。
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            attachView(view);
+            view.onShown();
+            assertEquals(0, (int) field(view, "mCurrentTab"));
+            call(view, "ensureRankFillViewport", new Class<?>[]{});
+            idleMain();
+            assertEquals(20, field(view, "mRankShown"));
+        }
+    }
+
+    @Test
+    public void ensureRankFillViewport_listNegative_returns() throws Exception {
+        // L1244：mRankGroup >= 0 但 mRankList < 0 时直接返回。
+        StoreView view = new StoreView(mContext);
+        attachView(view);
+        setField(view, "mFeedData", cannedFeed());
+        setField(view, "mRankGroup", 0);
+        setField(view, "mRankList", -1);
+        call(view, "selectTab", new Class<?>[]{int.class}, 2);
+        call(view, "ensureRankFillViewport", new Class<?>[]{});
+        idleMain();
+        assertEquals(20, field(view, "mRankShown"));
+    }
+
+    @Test
+    public void ensureRankFillViewport_scrollable_returnsWithoutAppend()
+            throws Exception {
+        // L1247：榜单可继续下滑时不追加。
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            attachView(view);
+            setField(view, "mFeedData", feedOf(manyRepos(25)));
+            setField(view, "mRankGroups", java.util.Arrays.asList(
+                    rankGroupWithList("Hot", manyRepos(25))));
+            setField(view, "mRankGroup", 0);
+            setField(view, "mRankList", 0);
+            setField(view, "mRankShownGroup", 0);
+            setField(view, "mRankShownList", 0);
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            setField(view, "mRankShown", 25);
+            call(view, "renderRank", new Class<?>[]{});
+            setField(view, "mRankFullTotal", 40);
+            idleMain();
+            assertTrue(tabScroll(view, 2).canScrollVertically(1));
+            call(view, "ensureRankFillViewport", new Class<?>[]{});
+            idleMain();
+            assertEquals(25, field(view, "mRankShown"));
+        }
+    }
+
+    @Test
+    public void ensureRankFillViewport_shownComplete_returnsWithoutAppend()
+            throws Exception {
+        // L1247：已展完（mRankShown >= 总数）时不追加。
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            attachView(view);
+            setField(view, "mFeedData", feedOf(manyRepos(25)));
+            setField(view, "mRankGroups", java.util.Arrays.asList(
+                    rankGroupWithList("Hot", manyRepos(25))));
+            setField(view, "mRankGroup", 0);
+            setField(view, "mRankList", 0);
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            setField(view, "mRankShown", 25);
+            setField(view, "mRankFullTotal", 25);
+            makeUnscrollable(tabScroll(view, 2));
+            call(view, "ensureRankFillViewport", new Class<?>[]{});
+            idleMain();
+            assertEquals(25, field(view, "mRankShown"));
+        }
+    }
+
+    @Test
+    public void exploreFiltered_matchingCategoryKeepsItem() throws Exception {
+        // L1270：用途已选且条目用途相同（第二臂为假）时保留该条。
+        StoreView view = new StoreView(mContext);
+        setField(view, "mCategory", "ai");
+        java.util.List<StoreRepo> pool = java.util.Arrays.asList(
+                repoWithCategory("o/ai", "ai"),
+                repoWithCategory("o/tools", "tools"));
+        @SuppressWarnings("unchecked")
+        java.util.List<StoreRepo> out = (java.util.List<StoreRepo>) call(view,
+                "exploreFiltered", new Class<?>[]{java.util.List.class}, pool);
+        assertEquals(1, out.size());
+        assertEquals("o/ai", out.get(0).fullName());
+    }
+
+    @Test
+    public void renderRank_groupSetListNegative_rendersOverview() throws Exception {
+        // L1292：mRankGroup >= 0 但 mRankList < 0 时渲染概览。
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", cannedFeed());
+        setField(view, "mRankGroup", 0);
+        setField(view, "mRankList", -1);
+        call(view, "renderRank", new Class<?>[]{});
+        assertEquals(mContext.getString(com.gh4a.R.string.store_rank_title),
+                ((android.widget.TextView) rankContainer(view).getChildAt(0))
+                        .getText().toString());
+    }
+
+    @Test
+    public void renderRankFullList_listNegative_rendersOverview() throws Exception {
+        // L1446：榜单下标为负时复位并渲染概览。
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", cannedFeed());
+        setField(view, "mRankGroups", java.util.Arrays.asList(
+                rankGroupWithList("Hot", java.util.Arrays.asList(
+                        repo(EnumSet.of(StoreClassifier.Platform.ANDROID))))));
+        setField(view, "mRankGroup", 0);
+        setField(view, "mRankList", -1);
+        android.widget.LinearLayout container = new android.widget.LinearLayout(mContext);
+        call(view, "renderRankFullList",
+                new Class<?>[]{android.widget.LinearLayout.class}, container);
+        assertEquals(-1, field(view, "mRankGroup"));
+        assertEquals(-1, field(view, "mRankList"));
+        assertEquals(mContext.getString(com.gh4a.R.string.store_rank_title),
+                ((android.widget.TextView) container.getChildAt(0)).getText().toString());
+    }
+
+    @Test
+    public void renderRankFullList_listIndexOutOfRange_resetsBoth() throws Exception {
+        // L1446：榜单下标越界时复位并渲染概览。
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", cannedFeed());
+        setField(view, "mRankGroups", java.util.Arrays.asList(
+                rankGroupWithList("Hot", java.util.Arrays.asList(
+                        repo(EnumSet.of(StoreClassifier.Platform.ANDROID))))));
+        setField(view, "mRankGroup", 0);
+        setField(view, "mRankList", 5);
+        android.widget.LinearLayout container = new android.widget.LinearLayout(mContext);
+        call(view, "renderRankFullList",
+                new Class<?>[]{android.widget.LinearLayout.class}, container);
+        assertEquals(-1, field(view, "mRankGroup"));
+        assertEquals(-1, field(view, "mRankList"));
+        assertEquals(mContext.getString(com.gh4a.R.string.store_rank_title),
+                ((android.widget.TextView) container.getChildAt(0)).getText().toString());
+    }
+
+    @Test
+    public void renderRankFullList_sameListKeepsShown() throws Exception {
+        // L1474：同榜内追加不重置 mRankShown。
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", feedOf(manyRepos(25)));
+        setField(view, "mRankGroups", java.util.Arrays.asList(
+                rankGroupWithList("Hot", manyRepos(25))));
+        setField(view, "mRankGroup", 0);
+        setField(view, "mRankList", 0);
+        setField(view, "mRankShownGroup", 0);
+        setField(view, "mRankShownList", 0);
+        setField(view, "mRankShown", 40);
+        android.widget.LinearLayout container = new android.widget.LinearLayout(mContext);
+        call(view, "renderRankFullList",
+                new Class<?>[]{android.widget.LinearLayout.class}, container);
+        assertEquals(40, field(view, "mRankShown"));
+        assertEquals(25, field(view, "mRankFullTotal"));
+    }
+
+    @Test
+    public void rankRowView_emptyDescAndPlatforms_omitsDescAndIcons()
+            throws Exception {
+        // L1538 + L1553：简介为空且无平台时行里只剩名与副标题。
+        StoreView view = new StoreView(mContext);
+        android.widget.LinearLayout row = (android.widget.LinearLayout) call(view,
+                "rankRowView", new Class<?>[]{int.class, StoreRepo.class},
+                1, repoNoDescNoPlatforms());
+        android.widget.LinearLayout texts =
+                (android.widget.LinearLayout) row.getChildAt(1);
+        assertEquals(2, texts.getChildCount());
+        assertEquals("o/r", ((android.widget.TextView) texts.getChildAt(0))
+                .getText().toString());
+    }
+
+    @Test
+    public void loadNewest_homeTabUpdatesCountView() throws Exception {
+        // L1628（首页＋feed）+ L1633（countView 非空）：最新入库数到了只改数字。
+        try (MockedStatic<StoreApi> mocked = mockNewest(5)) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", cannedFeed());
+            setField(view, "mCurrentTab", 0);
+            setField(view, "mShowingNewest", false);
+            android.widget.TextView countView =
+                    new android.widget.TextView(mContext);
+            countView.setText("old");
+            setField(view, "mNewestCountView", countView);
+            call(view, "loadNewest", new Class<?>[]{});
+            assertEquals(StoreViews.formatStars(5),
+                    countView.getText().toString());
+        }
+    }
+
+    @Test
+    public void loadNewest_exploreTabSkipsCountView() throws Exception {
+        // L1628：不在首页时不改统计数字。
+        try (MockedStatic<StoreApi> mocked = mockNewest(5)) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", cannedFeed());
+            setField(view, "mCurrentTab", 1);
+            setField(view, "mShowingNewest", false);
+            android.widget.TextView countView =
+                    new android.widget.TextView(mContext);
+            countView.setText("old");
+            setField(view, "mNewestCountView", countView);
+            call(view, "loadNewest", new Class<?>[]{});
+            assertEquals("old", countView.getText().toString());
+            assertEquals(5, ((StoreApi.StoreData) field(view, "mNewestData"))
+                    .items.size());
+        }
+    }
+
+    @Test
+    public void loadNewest_nullCountViewSkipsSetText() throws Exception {
+        // L1633：countView 为空时不改数字、不崩溃。
+        try (MockedStatic<StoreApi> mocked = mockNewest(5)) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", cannedFeed());
+            setField(view, "mCurrentTab", 0);
+            setField(view, "mShowingNewest", false);
+            setField(view, "mNewestCountView", null);
+            call(view, "loadNewest", new Class<?>[]{});
+            assertEquals(5, ((StoreApi.StoreData) field(view, "mNewestData"))
+                    .items.size());
+        }
+    }
+
+    @Test
+    public void renderNewestList_nullDataWithoutFailure_showsError() throws Exception {
+        // L1668：未失败但数据为空时同样显示失败重试（第二臂）。
+        StoreView view = new StoreView(mContext);
+        setField(view, "mNewestData", null);
+        setField(view, "mNewestFailed", false);
+        call(view, "renderNewestList", new Class<?>[]{});
+        android.widget.LinearLayout container =
+                (android.widget.LinearLayout) field(view, "mNewestContainer");
+        assertNotNull(findText(container,
+                mContext.getString(com.gh4a.R.string.store_fetch_failed)));
+    }
+
+    @Test
+    public void newestRowView_emptyDescNoPlatformsNoUpdated_omitsBottom()
+            throws Exception {
+        // L1776 + L1798：简介为空、无平台、无更新时间时行里只剩名与 meta。
+        StoreView view = new StoreView(mContext);
+        android.widget.LinearLayout row = (android.widget.LinearLayout) call(view,
+                "newestRowView", new Class<?>[]{StoreRepo.class},
+                repoNoDescNoPlatforms());
+        assertEquals(2, row.getChildCount());
+        assertEquals("o/r", ((android.widget.TextView) row.getChildAt(0))
+                .getText().toString());
+    }
+
+    @Test
+    public void newestRowView_nullLanguageShowsDash() throws Exception {
+        // L1789：语言为 null 时 meta 显示“—”。
+        StoreView view = new StoreView(mContext);
+        android.widget.LinearLayout row = (android.widget.LinearLayout) call(view,
+                "newestRowView", new Class<?>[]{StoreRepo.class},
+                repoVariant(EnumSet.noneOf(StoreClassifier.Platform.class),
+                        0, null, 0L));
+        assertEquals(3, row.getChildCount());
+        assertEquals("— · v1", ((android.widget.TextView) row.getChildAt(2))
+                .getText().toString());
+    }
+
+    @Test
+    public void newestRowView_emptyVersionOmitsVersion() throws Exception {
+        // L1790：版本为空时 meta 不带版本后缀。
+        StoreView view = new StoreView(mContext);
+        android.widget.LinearLayout row = (android.widget.LinearLayout) call(view,
+                "newestRowView", new Class<?>[]{StoreRepo.class},
+                repoFull(EnumSet.of(StoreClassifier.Platform.ANDROID),
+                        10, "Java", 0L, "", 100L, null, null, null, null));
+        assertEquals(4, row.getChildCount());
+        assertEquals("★ " + StoreViews.formatStars(10) + " · Java",
+                ((android.widget.TextView) row.getChildAt(2)).getText().toString());
+    }
+
+    @Test
+    public void newestRowView_updatedWithoutPlatforms_showsClockOnly()
+            throws Exception {
+        // L1798：无平台但有更新时间时底栏只有时钟＋时间，无图标。
+        StoreView view = new StoreView(mContext);
+        android.widget.LinearLayout row = (android.widget.LinearLayout) call(view,
+                "newestRowView", new Class<?>[]{StoreRepo.class},
+                repoFull(EnumSet.noneOf(StoreClassifier.Platform.class),
+                        10, "Java", System.currentTimeMillis(), "v1", 100L,
+                        null, null, null, null));
+        assertEquals(4, row.getChildCount());
+        android.widget.LinearLayout bottom =
+                (android.widget.LinearLayout) row.getChildAt(3);
+        assertEquals(5, bottom.getChildCount());
+        android.widget.LinearLayout icons =
+                (android.widget.LinearLayout) bottom.getChildAt(0);
+        assertEquals(0, icons.getChildCount());
+    }
+
+    @Test
+    public void loadNewest_successOnHome_noFeedData_skipsCountView() throws Exception {
+        // L1628（第 3 轮）：不在最新页、当前为首页但 feed 尚未加载时，
+        // else-if 第二操作数 mFeedData != null 为假，不碰统计格。
+        // 与 R2 的 feed 已加载版（真臂）互补。
+        MockedStatic<StoreApi> mocked =
+                mockStatic(StoreApi.class, CALLS_REAL_METHODS);
+        mocked.when(() -> StoreApi.loadBackend(any(), anyString(), anyString()))
+                .thenReturn(Single.just(cannedFeed()));
+        mocked.when(() -> StoreApi.loadNewest(any()))
+                .thenReturn(Single.just(cannedFeed()));
+        try {
+            StoreView view = new StoreView(mContext);
+            // mFeedData 故意不置（null）；mCurrentTab 默认即 TAB_HOME(0)。
+            setField(view, "mShowingNewest", false);
+            android.widget.TextView countView =
+                    new android.widget.TextView(mContext);
+            setField(view, "mNewestCountView", countView);
+            call(view, "loadNewest", new Class<?>[]{});
+            assertFalse((Boolean) field(view, "mNewestLoading"));
+            assertFalse((Boolean) field(view, "mNewestFailed"));
+            assertEquals("", countView.getText().toString());
+        } finally {
+            mocked.close();
+        }
+    }
+
+    @Test
+    public void loadNewest_successOffHome_skipsCountView() throws Exception {
+        // L1628（第 3 轮）：不在最新页、当前不在首页时，else-if 第一操作数
+        // mCurrentTab == TAB_HOME 为假，不碰统计格。
+        MockedStatic<StoreApi> mocked =
+                mockStatic(StoreApi.class, CALLS_REAL_METHODS);
+        mocked.when(() -> StoreApi.loadBackend(any(), anyString(), anyString()))
+                .thenReturn(Single.just(cannedFeed()));
+        mocked.when(() -> StoreApi.loadNewest(any()))
+                .thenReturn(Single.just(cannedFeed()));
+        try {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", cannedFeed());
+            setField(view, "mCurrentTab", 1);
+            setField(view, "mShowingNewest", false);
+            android.widget.TextView countView =
+                    new android.widget.TextView(mContext);
+            setField(view, "mNewestCountView", countView);
+            call(view, "loadNewest", new Class<?>[]{});
+            assertFalse((Boolean) field(view, "mNewestLoading"));
+            assertFalse((Boolean) field(view, "mNewestFailed"));
+            assertEquals("", countView.getText().toString());
+        } finally {
+            mocked.close();
         }
     }
 }

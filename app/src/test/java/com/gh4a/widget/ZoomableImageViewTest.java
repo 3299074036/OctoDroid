@@ -619,6 +619,30 @@ public class ZoomableImageViewTest {
         assertEquals(before[Matrix.MTRANS_Y], after[Matrix.MTRANS_Y], 0.001f);
     }
 
+    @Test
+    public void fixTranslation_xOnlyShifted_correctsXOnly() throws Exception {
+        FragmentActivity activity = activity();
+        ZoomableImageView view = view(activity);
+        view.setImageDrawable(drawable(activity, 200, 200));
+        layout(view, 500);
+        ((Matrix) getField(view, "mMatrix")).postTranslate(10, 0);
+        invokePrivate(view, "fixTranslation", new Class[]{}, new Object[]{});
+        assertEquals(0f, transX(view), 0.001f);
+        assertEquals(0f, matrixValues(view)[Matrix.MTRANS_Y], 0.001f);
+    }
+
+    @Test
+    public void fixTranslation_yOnlyShifted_correctsYOnly() throws Exception {
+        FragmentActivity activity = activity();
+        ZoomableImageView view = view(activity);
+        view.setImageDrawable(drawable(activity, 200, 200));
+        layout(view, 500);
+        ((Matrix) getField(view, "mMatrix")).postTranslate(0, 10);
+        invokePrivate(view, "fixTranslation", new Class[]{}, new Object[]{});
+        assertEquals(0f, transX(view), 0.001f);
+        assertEquals(0f, matrixValues(view)[Matrix.MTRANS_Y], 0.001f);
+    }
+
     // ---------- onTouch / gesture / animation gaps ----------
 
     @Test

@@ -115,6 +115,12 @@ public class RadarGraphQLTest {
     }
 
     @Test
+    public void parse_errorsNullIsIgnored() throws Exception {
+        // L79：errors 显式为 null → optJSONArray 返回 null，不抛错。
+        assertTrue(parse("{\"errors\":null}").isEmpty());
+    }
+
+    @Test
     public void parse_emptyErrorsArrayIsIgnored() throws Exception {
         List<ReleaseRadarFragment.RadarItem> items =
                 parse("{\"errors\":[],\"data\":{\"user\":null}}");

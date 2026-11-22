@@ -24,9 +24,12 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Shadows;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import io.reactivex.Single;
 
@@ -364,6 +367,23 @@ public class ReleaseRadarWorkerTest {
         assertNotNull(stored);
         assertEquals(0, new JSONObject(stored).length());
         assertEquals(0, postedNotificationCount());
+    }
+
+    @Test
+    public void saveKnownTags_nullKeyAndValueSkipped() throws Exception {
+        Map<String, String> tags = new HashMap<>();
+        tags.put(null, "v1.0");
+        tags.put("octo/repo", null);
+        tags.put("octo/good", "v2.0");
+        Method saveKnownTags = ReleaseRadarWorker.class.getDeclaredMethod("saveKnownTags",
+                SharedPreferences.class, String.class, Map.class);
+        saveKnownTags.setAccessible(true);
+        saveKnownTags.invoke(null, radarPrefs(), "octo", tags);
+        String stored = radarPrefs().getString(KEY_KNOWN, null);
+        assertNotNull(stored);
+        JSONObject json = new JSONObject(stored);
+        assertEquals(1, json.length());
+        assertEquals("v2.0", json.getString("octo/good"));
     }
 
 }

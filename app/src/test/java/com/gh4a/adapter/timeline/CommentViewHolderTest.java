@@ -449,4 +449,36 @@ public class CommentViewHolderTest {
             AdapterTestSupport.clearAuth();
         }
     }
+
+    @Test
+    public void ctor_authorizedCannotAddReaction_hidesReactionMenu() {
+        canAddReaction = false;
+        AdapterTestSupport.authorize("octocat");
+        try {
+            CommentViewHolder h = holder();
+            android.widget.PopupMenu popup = AdapterTestSupport.getField(h, "mPopupMenu");
+            assertFalse(popup.getMenu().findItem(R.id.react).isVisible());
+            assertNull(AdapterTestSupport.<Object>getField(h, "mReactionMenuHelper"));
+        } finally {
+            AdapterTestSupport.clearAuth();
+            canAddReaction = true;
+        }
+    }
+
+    @Test
+    public void bind_authorizedRepoOwner_showsEditDelete() {
+        // The comment is by "octocat" but the logged-in user owns the repo,
+        // so the repo-owner side of canEdit applies.
+        AdapterTestSupport.authorize("owner");
+        try {
+            CommentViewHolder h = holder();
+            Date t = ago(1000L);
+            h.bind(commentItem(1L, t, t, null, 5));
+            android.widget.PopupMenu popup = AdapterTestSupport.getField(h, "mPopupMenu");
+            assertTrue(popup.getMenu().findItem(R.id.edit).isVisible());
+            assertTrue(popup.getMenu().findItem(R.id.delete).isVisible());
+        } finally {
+            AdapterTestSupport.clearAuth();
+        }
+    }
 }

@@ -43,6 +43,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import io.reactivex.Single;
 import okhttp3.Interceptor;
@@ -509,6 +512,62 @@ public class TrendingFragmentTest {
     }
 
     // ---- no-cache interceptor (line 224) ----
+
+    @Test
+    public void noCacheTrendService_doubleCheckedLocking_secondCallerSeesCachedService()
+            throws Exception {
+        // L221：第二个调用方在外层读到 null、进 synchronized 后重读到已缓存的 service。
+        setStaticField(TrendingFragment.class, "sNoCacheTrendService", null);
+        TrendService cached = mock(TrendService.class);
+        try {
+            Method m = TrendingFragment.class.getDeclaredMethod("noCacheTrendService");
+            m.setAccessible(true);
+            CountDownLatch holderReady = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            AtomicReference<Object> result = new AtomicReference<>();
+            AtomicReference<Throwable> error = new AtomicReference<>();
+            Thread holder = new Thread(() -> {
+                synchronized (TrendingFragment.class) {
+                    holderReady.countDown();
+                    try {
+                        if (!release.await(10, TimeUnit.SECONDS)) {
+                            return;
+                        }
+                        setStaticField(TrendingFragment.class,
+                                "sNoCacheTrendService", cached);
+                    } catch (Exception e) {
+                        error.set(e);
+                    }
+                }
+            });
+            Thread worker = new Thread(() -> {
+                try {
+                    result.set(m.invoke(null));
+                } catch (Throwable t) {
+                    error.set(t);
+                }
+            });
+            holder.start();
+            assertTrue(holderReady.await(10, TimeUnit.SECONDS));
+            worker.start();
+            // 等 worker 在 TrendingFragment.class 监视器上阻塞：此时它已读到外层 null，
+            // 接下来进 synchronized 后重读即看到 holder 刚写入的 service。
+            long deadline = System.currentTimeMillis() + 10000;
+            while (worker.getState() != Thread.State.BLOCKED
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10);
+            }
+            assertEquals(Thread.State.BLOCKED, worker.getState());
+            release.countDown();
+            worker.join(10000);
+            holder.join(10000);
+            assertNull(error.get());
+            assertFalse(worker.isAlive());
+            assertSame(cached, result.get());
+        } finally {
+            setStaticField(TrendingFragment.class, "sNoCacheTrendService", null);
+        }
+    }
 
     @Test
     public void noCacheInterceptor_addsNoCacheHeader() throws Exception {
