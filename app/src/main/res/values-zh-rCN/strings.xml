@@ -990,10 +990,9 @@
     <string name="store_sort_updated">最近更新</string>
     <string name="store_sort_downloads">下载量</string>
     <string name="store_sort_hot">近期热门</string>
-    <string name="store_sort_note_stars">按星标从高到低。</string>
-    <string name="store_sort_note_updated">按最新 release 更新时间从近到远。</string>
-    <string name="store_sort_note_downloads">按下载量从高到低。下载量为最新版安装包的下载量之和，不累计历史版本。</string>
-    <string name="store_sort_note_hot">按日均涨星排，同分按星标。</string>
+
+
+
     <string name="store_stat_repos">收录仓库</string>
     <string name="store_stat_assets">安装包</string>
     <string name="store_stat_ranks">排行榜</string>

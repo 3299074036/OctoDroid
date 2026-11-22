@@ -26,7 +26,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 
@@ -96,10 +95,6 @@ public class StoreView extends LinearLayout {
     private static final int[] SORT_TITLES = {
         R.string.store_sort_stars, R.string.store_sort_updated,
         R.string.store_sort_downloads, R.string.store_sort_hot
-    };
-    private static final int[] SORT_NOTES = {
-        R.string.store_sort_note_stars, R.string.store_sort_note_updated,
-        R.string.store_sort_note_downloads, R.string.store_sort_note_hot
     };
     // 0.1.66：用途网格换成 hiwiki 的 7 类＋其他，读条目 category（设计稿顺序）。
     private static final String[] FEED_CATS = {
@@ -182,6 +177,9 @@ public class StoreView extends LinearLayout {
     private boolean mTagCountsReady;
     private String mTagQuery = "";
     private String mTagDetail;
+    // 标签云的系统筛选（StorePrefs 持久化，默认全部；只筛标签云的计数与
+    // 详情列表，不动全局平台；换系统时计数失效重算）。
+    private String mTagPlatform = PLAT_ALL;
     private int mTagShown = PAGE_SIZE;
     private int mTagVisibleSize;
     private LinearLayout mTagCloudRows;
@@ -222,6 +220,7 @@ public class StoreView extends LinearLayout {
         mRankOnlyNonEmpty = StorePrefs.getRankOnlyNonEmpty(context);
         mRankPlatform = StorePrefs.getRankPlatform(context);
         mNewestPlatform = StorePrefs.getNewestPlatform(context);
+        mTagPlatform = StorePrefs.getTagPlatform(context);
         mPlatform = StorePrefs.getPlatform(context);
         mCategory = StorePrefs.getCategory(context);
         setOrientation(VERTICAL);
@@ -861,21 +860,6 @@ public class StoreView extends LinearLayout {
             lp.setMargins(gap, 0, gap, 0);
             sortChips.addView(chip, lp);
         }
-        // 2026-11-22：标题行删掉后，ⓘ（当前排序说明）挪到 chips 行末。
-        // 0.1.61：ⓘ 只显示当前排序的说明（旧小字文案）。之前是收录口径 + "\n" +
-        // 排序说明两行拼进 Toast，真机上 Toast 只显示第一行还带省略号，
-        // 所以点哪个排序看起来都一样，第二行从来出不来。
-        ImageView info = new ImageView(mContext);
-        info.setImageResource(R.drawable.ic_store_info);
-        info.setColorFilter(StoreViews.secondaryText(mContext), PorterDuff.Mode.SRC_IN);
-        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(
-                StoreViews.dp(mContext, 18), StoreViews.dp(mContext, 18));
-        infoLp.setMargins(StoreViews.dp(mContext, 8), 0, 0, 0);
-        info.setLayoutParams(infoLp);
-        info.setOnClickListener(v -> Toast.makeText(mContext,
-                getString(SORT_NOTES[mSort]),
-                Toast.LENGTH_LONG).show());
-        sortChips.addView(info);
         header.addView(sortChips);
 
         // 系统／用途两行筛选（图标网格；只筛已加载项，不发请求）。
@@ -1242,6 +1226,10 @@ public class StoreView extends LinearLayout {
         note.setPadding(side, StoreViews.dp(mContext, 8), side, 0);
         header.addView(note);
 
+        // 系统筛选（与首页／排行榜同款 9 格；点格只筛标签云，不动全局平台）。
+        header.addView(filterLabel(getString(R.string.store_filter_platform)));
+        header.addView(tagPlatformGrid());
+
         mTagCloudRows = new LinearLayout(mContext);
         mTagCloudRows.setOrientation(LinearLayout.VERTICAL);
         mTagCloudRows.setPadding(side, StoreViews.dp(mContext, 10), side,
@@ -1302,6 +1290,49 @@ public class StoreView extends LinearLayout {
         return out;
     }
 
+    /** 标签云的池子：全池按当前系统筛选（全部＝不筛）。 */
+    private List<StoreRepo> tagPool() {
+        if (PLAT_ALL.equals(mTagPlatform)) {
+            return pool();
+        }
+        List<StoreRepo> out = new ArrayList<>();
+        for (StoreRepo item : pool()) {
+            if (matchesPlatform(item, mTagPlatform)) {
+                out.add(item);
+            }
+        }
+        return out;
+    }
+
+    /** 标签云的系统网格（与排行榜 rankPlatformGrid 同款 9 格；数字按全池算；
+     * 点格只筛标签云的计数与详情列表，不动全局平台）。 */
+    private LinearLayout tagPlatformGrid() {
+        ensureCounts();
+        List<StoreViews.IconCell> cells = new ArrayList<>();
+        for (int i = 0; i < PLATFORM_KEYS.length; i++) {
+            final String platformKey = PLATFORM_KEYS[i];
+            cells.add(new StoreViews.IconCell(platformGridIcon(platformKey),
+                    platformLabel(platformKey), mPlatformCounts[i],
+                    platformKey.equals(mTagPlatform),
+                    v -> applyTagPlatform(platformKey), platformGridTint(platformKey)));
+        }
+        LinearLayout grid = StoreViews.iconGrid(mContext, cells);
+        int side = StoreViews.dp(mContext, 16);
+        grid.setPadding(side, 0, side, 0);
+        return grid;
+    }
+
+    /** 标签云的系统筛选：只筛标签云，状态持久化；计数失效重算。 */
+    private void applyTagPlatform(String key) {
+        if (key.equals(mTagPlatform)) {
+            return;
+        }
+        mTagPlatform = key;
+        StorePrefs.setTagPlatform(mContext, key);
+        mTagCountsReady = false;
+        renderTags();
+    }
+
     /** 标签计数：feed 条目 topics 聚合，收录数降序、名字升序；feed 未到不缓存。 */
     private void ensureTagCounts() {
         if (mTagCountsReady) {
@@ -1312,7 +1343,7 @@ public class StoreView extends LinearLayout {
             return;
         }
         Map<String, Integer> counts = new HashMap<>();
-        for (StoreRepo item : pool()) {
+        for (StoreRepo item : tagPool()) {
             for (String topic : item.topics) {
                 if (TextUtils.isEmpty(topic)) {
                     continue;
@@ -1475,7 +1506,7 @@ public class StoreView extends LinearLayout {
         if (mTagDetail == null) {
             return out;
         }
-        for (StoreRepo item : pool()) {
+        for (StoreRepo item : tagPool()) {
             if (item.topics.contains(mTagDetail)) {
                 out.add(item);
             }

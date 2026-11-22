@@ -1286,25 +1286,14 @@ public class StoreViewTest {
     // ---- 首页头/填充 ----
 
     @Test
-    public void homeInfoClick_showsSortNoteToast() throws Exception {
-        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
-            StoreView view = new StoreView(mContext);
-            view.onShown();
-            // 首页头：0 统计块、1 排序 chips 行（4 chips＋行末 ⓘ）。
-            android.widget.LinearLayout sortChips =
-                    (android.widget.LinearLayout) tabHeader(view, 0).getChildAt(1);
-            sortChips.getChildAt(sortChips.getChildCount() - 1).performClick();
-            assertNotNull(org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
-        }
-    }
-
-    @Test
     public void homeSortChipClick_appliesSort() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
+            // 首页头：0 统计块、1 排序 chips 行（4 个 chips，ⓘ 已删）。
             android.widget.LinearLayout sortChips =
                     (android.widget.LinearLayout) tabHeader(view, 0).getChildAt(1);
+            assertEquals(4, sortChips.getChildCount());
             sortChips.getChildAt(1).performClick(); // 最近更新
             assertEquals(1, field(view, "mSort"));
         }
@@ -2450,10 +2439,30 @@ public class StoreViewTest {
     // ---- 2026-11-22：首页／排行榜／标签云三页签 ----
 
     private static StoreRepo repoWithTopic(String fullName, int stars, String topic) {
+        return repoWithTopicPlatform(fullName, stars, topic,
+                com.gh4a.fragment.StoreClassifier.Platform.ANDROID);
+    }
+
+    private static StoreRepo repoWithTopicPlatform(String fullName, int stars,
+            String topic, com.gh4a.fragment.StoreClassifier.Platform platform) {
         return new StoreRepo(fullName, "o", "r", "d", "Java", "", stars, 2, 100L,
                 java.util.Arrays.asList(topic), new java.util.HashSet<>(),
-                "v1", 0L, EnumSet.of(StoreClassifier.Platform.ANDROID), 1,
+                "v1", 0L, EnumSet.of(platform), 1,
                 null, null, null, null, "tools");
+    }
+
+    /** 12 条 Android 的 windows 标签＋12 条 Windows 的 rust 标签（平台筛专用）。 */
+    private static java.util.List<StoreRepo> platformFeed() {
+        java.util.List<StoreRepo> out = new java.util.ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            out.add(repoWithTopicPlatform("o/win" + i, 10 + i, "windows",
+                    com.gh4a.fragment.StoreClassifier.Platform.ANDROID));
+        }
+        for (int i = 0; i < 12; i++) {
+            out.add(repoWithTopicPlatform("o/rust" + i, 10 + i, "rust",
+                    com.gh4a.fragment.StoreClassifier.Platform.WINDOWS));
+        }
+        return out;
     }
 
     private static java.util.List<StoreRepo> taggedFeed() {
@@ -2669,5 +2678,97 @@ public class StoreViewTest {
             call(view, "selectTab", new Class<?>[]{int.class}, 0);
             assertNull(field(view, "mTagDetail"));
         }
+    }
+
+    // ---- 2026-11-22 晚：首页 ⓘ 去掉、标签云加系统筛选 ----
+
+    @Test
+    public void tagPlatformGrid_showsNineCells() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", feedOf(platformFeed()));
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            android.widget.LinearLayout header = tabHeader(view, 2);
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_filter_platform)));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_platform_all)));
+            assertNotNull(findText(header, "Android"));
+            assertNotNull(findText(header, "iOS"));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_platform_windows)));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_platform_macos)));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_platform_linux)));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_platform_harmony)));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_platform_extension)));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_platform_other)));
+        }
+    }
+
+    @Test
+    public void applyTagPlatform_filtersCloudCounts() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", feedOf(platformFeed()));
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            android.widget.LinearLayout header = tabHeader(view, 2);
+            assertNotNull(findTag(header, "windows"));
+            assertNotNull(findTag(header, "rust"));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_tags_stats, 2, 2)));
+            call(view, "applyTagPlatform",
+                    new Class<?>[]{String.class}, "android");
+            assertEquals("android", field(view, "mTagPlatform"));
+            assertEquals("android",
+                    com.gh4a.fragment.StorePrefs.getTagPlatform(mContext));
+            header = tabHeader(view, 2);
+            assertNotNull(findTag(header, "windows"));
+            assertNull(findTag(header, "rust"));
+            assertNotNull(findText(header, mContext.getString(
+                    com.gh4a.R.string.store_tags_stats, 1, 1)));
+        }
+    }
+
+    @Test
+    public void showTagDetail_platformFiltered() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", feedOf(platformFeed()));
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            call(view, "applyTagPlatform",
+                    new Class<?>[]{String.class}, "windows");
+            call(view, "showTagDetail", new Class<?>[]{String.class}, "windows");
+            assertEquals(0, field(view, "mTagVisibleSize"));
+            assertNotNull(findText(tabList(view, 2), mContext.getString(
+                    com.gh4a.R.string.store_empty_result)));
+            call(view, "showTagDetail", new Class<?>[]{String.class}, "rust");
+            assertEquals(12, field(view, "mTagVisibleSize"));
+        }
+    }
+
+    @Test
+    public void ensureTagCounts_platformFiltered() throws Exception {
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", feedOf(platformFeed()));
+        setField(view, "mTagPlatform", "android");
+        setField(view, "mTagCountsReady", false);
+        call(view, "ensureTagCounts", new Class<?>[]{});
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> tags =
+                (java.util.List<Object>) field(view, "mTagCounts");
+        assertEquals(1, tags.size());
+        java.lang.reflect.Field nameField =
+                tags.get(0).getClass().getDeclaredField("name");
+        nameField.setAccessible(true);
+        java.lang.reflect.Field countField =
+                tags.get(0).getClass().getDeclaredField("count");
+        countField.setAccessible(true);
+        assertEquals("windows", nameField.get(tags.get(0)));
+        assertEquals(12, countField.get(tags.get(0)));
     }
 }

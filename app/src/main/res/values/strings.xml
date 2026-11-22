@@ -998,10 +998,9 @@
     <string name="store_sort_updated">Recently updated</string>
     <string name="store_sort_downloads">Downloads</string>
     <string name="store_sort_hot">Trending now</string>
-    <string name="store_sort_note_stars">Sorted by stars, highest first.</string>
-    <string name="store_sort_note_updated">Sorted by latest release, newest first.</string>
-    <string name="store_sort_note_downloads">Sorted by downloads, highest first. Downloads count the installable assets of the latest release only, not cumulative across versions.</string>
-    <string name="store_sort_note_hot">Ranked by daily star gain; ties by stars.</string>
+
+
+
     <string name="store_stat_repos">Repositories</string>
     <string name="store_stat_assets">Installers</string>
     <string name="store_stat_ranks">Rankings</string>

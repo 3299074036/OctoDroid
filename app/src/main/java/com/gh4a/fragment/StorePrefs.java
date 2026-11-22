@@ -22,6 +22,7 @@ public class StorePrefs {
     private static final String KEY_RANK_ONLY_NONEMPTY = "store_rank_only_nonempty";
     private static final String KEY_RANK_PLATFORM = "store_rank_platform";
     private static final String KEY_NEWEST_PLATFORM = "store_newest_platform";
+    private static final String KEY_TAG_PLATFORM = "store_tag_platform";
     private static final String KEY_PLATFORM = "store_platform";
     private static final String KEY_CATEGORY = "store_category";
 
@@ -78,6 +79,16 @@ public class StorePrefs {
 
     public static void setNewestPlatform(Context context, String platform) {
         prefs(context).edit().putString(KEY_NEWEST_PLATFORM, platform).apply();
+    }
+
+    /** 标签云的系统筛选（平台 key，默认全部；只筛标签云的计数与详情列表，
+     * 与排行榜的 store_rank_platform、最新入库的 store_newest_platform 分开存）。 */
+    public static String getTagPlatform(Context context) {
+        return prefs(context).getString(KEY_TAG_PLATFORM, "all");
+    }
+
+    public static void setTagPlatform(Context context, String platform) {
+        prefs(context).edit().putString(KEY_TAG_PLATFORM, platform).apply();
     }
 
     public static class RemovedEntry {
