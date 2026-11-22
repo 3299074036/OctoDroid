@@ -936,6 +936,7 @@
     <string name="store_tags">Tag cloud</string>
     <string name="store_tags_search_hint">Search tags…</string>
     <string name="store_tags_note">Only tags with more than 10 apps are shown by default. Search to find the rest.</string>
+    <string name="store_tags_note_short">Hot tags by default</string>
     <string name="store_tags_stats">%1$d hot tags · %2$d tags</string>
     <string name="store_tags_back">‹ Tag cloud</string>
     <string name="store_tags_detail_sub">%1$d apps · by stars, highest first</string>

@@ -623,13 +623,15 @@ public class StoreViewTest {
     }
 
     @Test
-    public void applyExploreSort_sameSortReloads() throws Exception {
+    public void applyExploreSort_sameSortDeselects() throws Exception {
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             view.onShown();
+            // 再点已选中的星标：取消排序，不刷新也不重载。
             call(view, "applyExploreSort", new Class<?>[]{int.class}, 0);
             assertNotNull(field(view, "mFeedData"));
-            assertEquals(0, field(view, "mSort"));
+            assertEquals(-1, field(view, "mSort"));
+            assertEquals(-1, com.gh4a.fragment.StorePrefs.getExploreSort(mContext));
         }
     }
 
@@ -1297,6 +1299,40 @@ public class StoreViewTest {
             sortChips.getChildAt(1).performClick(); // 最近更新
             assertEquals(1, field(view, "mSort"));
         }
+    }
+
+    @Test
+    public void homeSortChipClick_activeChipDeselects() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            view.onShown();
+            // 默认排序是星标（0），再点星标取消排序，回到 feed 原顺序。
+            android.widget.LinearLayout sortChips =
+                    (android.widget.LinearLayout) tabHeader(view, 0).getChildAt(1);
+            assertEquals(0, field(view, "mSort"));
+            sortChips.getChildAt(0).performClick();
+            assertEquals(-1, field(view, "mSort"));
+            assertEquals(-1, com.gh4a.fragment.StorePrefs.getExploreSort(mContext));
+            sortChips.getChildAt(0).performClick();
+            assertEquals(0, field(view, "mSort"));
+        }
+    }
+
+    @Test
+    public void exploreFiltered_noneSortKeepsFeedOrder() throws Exception {
+        StoreView view = new StoreView(mContext);
+        setField(view, "mFeedData", feedOf(java.util.Arrays.asList(
+                repoWithTopic("o/low", 10, "windows"),
+                repoWithTopic("o/high", 50, "windows"),
+                repoWithTopic("o/mid", 30, "windows"))));
+        setField(view, "mSort", -1);
+        @SuppressWarnings("unchecked")
+        java.util.List<StoreRepo> out = (java.util.List<StoreRepo>) call(view,
+                "exploreFiltered", new Class<?>[]{java.util.List.class},
+                ((java.util.List<?>) call(view, "pool", new Class<?>[]{})));
+        assertEquals("o/low", out.get(0).fullName());
+        assertEquals("o/high", out.get(1).fullName());
+        assertEquals("o/mid", out.get(2).fullName());
     }
 
     @Test
@@ -2033,12 +2069,12 @@ public class StoreViewTest {
     }
 
     @Test
-    public void applyExploreSort_sameSortWithoutFeed_loadsFeed() throws Exception {
-        // L510：排序未变但 feed 为空时不走刷新分支，改为加载。
+    public void applyExploreSort_sameSortWithoutFeed_deselectsAndLoads() throws Exception {
+        // feed 为空时再点当前排序：取消排序，并加载 feed。
         try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
             StoreView view = new StoreView(mContext);
             call(view, "applyExploreSort", new Class<?>[]{int.class}, 0);
-            assertEquals(0, field(view, "mSort"));
+            assertEquals(-1, field(view, "mSort"));
             assertNotNull(field(view, "mFeedData"));
         }
     }
@@ -2770,5 +2806,38 @@ public class StoreViewTest {
         countField.setAccessible(true);
         assertEquals("windows", nameField.get(tags.get(0)));
         assertEquals(12, countField.get(tags.get(0)));
+    }
+
+    // ---- 2026-11-22 18:14：排序可取消、标签云说明精简＋ⓘ ----
+
+    @Test
+    public void renderTags_noteShortWithInfoIcon() throws Exception {
+        try (MockedStatic<StoreApi> mocked = mockStoreApi()) {
+            StoreView view = new StoreView(mContext);
+            setField(view, "mFeedData", feedOf(taggedFeed()));
+            call(view, "selectTab", new Class<?>[]{int.class}, 2);
+            android.widget.LinearLayout header = tabHeader(view, 2);
+            String shortNote = mContext.getString(
+                    com.gh4a.R.string.store_tags_note_short);
+            String fullNote = mContext.getString(
+                    com.gh4a.R.string.store_tags_note);
+            android.widget.TextView noteView = findText(header, shortNote);
+            assertNotNull(noteView);
+            // 完整说明不直接展示，只在 ⓘ 里。
+            assertNull(findText(header, fullNote));
+            // 短文字的父行里找 ⓘ 点开，Toast 里是完整说明。
+            android.view.ViewGroup noteRow =
+                    (android.view.ViewGroup) noteView.getParent();
+            android.widget.ImageView info = null;
+            for (int i = 0; i < noteRow.getChildCount(); i++) {
+                if (noteRow.getChildAt(i) instanceof android.widget.ImageView) {
+                    info = (android.widget.ImageView) noteRow.getChildAt(i);
+                }
+            }
+            assertNotNull(info);
+            info.performClick();
+            assertEquals(fullNote,
+                    org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+        }
     }
 }

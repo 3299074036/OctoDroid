@@ -930,6 +930,7 @@
     <string name="store_tags">标签云</string>
     <string name="store_tags_search_hint">搜索标签…</string>
     <string name="store_tags_note">默认只展示项目数超过 10 个的热门标签，其余可在搜索查看</string>
+    <string name="store_tags_note_short">默认只看热门标签</string>
     <string name="store_tags_stats">%1$d 个热门标签 · %2$d 个标签</string>
     <string name="store_tags_back">‹ 标签云</string>
     <string name="store_tags_detail_sub">%1$d 个仓库 · 按星标排序</string>

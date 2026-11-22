@@ -26,6 +26,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 
@@ -87,6 +88,8 @@ public class StoreView extends LinearLayout {
     private static final int SORT_UPDATED = 1;
     private static final int SORT_DOWNLOADS = 2;
     private static final int SORT_HOT = 3;
+    // 2026-11-22：不排序（再点已选中的 chip 取消排序，回到 feed 原顺序）。
+    private static final int SORT_NONE = -1;
 
     private static final String PLAT_ALL = "all";
     private static final String PLAT_OTHER = "other";
@@ -566,14 +569,15 @@ public class StoreView extends LinearLayout {
         renderHome();
     }
 
-    /** 首页内切排序（点当前排序则刷新）。 */
+    /** 首页内切排序（2026-11-22：再点已选中的 chip 取消排序，回到 feed
+     * 原顺序，不持久化成某个排序；原来“点当前排序刷新”随之取消，刷新走统计格）。 */
     private void applyExploreSort(int sort) {
-        if (sort == mSort && mFeedData != null) {
-            reloadCurrentTab();
-            return;
+        if (sort == mSort) {
+            mSort = SORT_NONE;
+        } else {
+            mSort = sort;
         }
-        mSort = sort;
-        StorePrefs.setExploreSort(mContext, sort);
+        StorePrefs.setExploreSort(mContext, mSort);
         mExploreShown = PAGE_SIZE;
         if (mFeedData != null) {
             renderHome();
@@ -786,6 +790,9 @@ public class StoreView extends LinearLayout {
 
     private static void sortForExplore(List<StoreRepo> items, int sort) {
         switch (sort) {
+            case SORT_NONE:
+                // 不排序，保持 feed 原顺序（feed 本来就是按星标排的）。
+                break;
             case SORT_UPDATED:
                 Collections.sort(items, (a, b) -> {
                     int byDate = Long.compare(b.publishedAt, a.publishedAt);
@@ -1220,11 +1227,27 @@ public class StoreView extends LinearLayout {
         });
         header.addView(search);
 
+        // 2026-11-22：长说明精简成短文字＋行末 ⓘ，点 ⓘ 弹出完整说明。
+        LinearLayout noteRow = new LinearLayout(mContext);
+        noteRow.setOrientation(LinearLayout.HORIZONTAL);
+        noteRow.setGravity(Gravity.CENTER_VERTICAL);
+        noteRow.setPadding(side, StoreViews.dp(mContext, 8), side, 0);
         TextView note = StoreViews.text(mContext, 13, false);
-        note.setText(R.string.store_tags_note);
+        note.setText(R.string.store_tags_note_short);
         note.setTextColor(StoreViews.secondaryText(mContext));
-        note.setPadding(side, StoreViews.dp(mContext, 8), side, 0);
-        header.addView(note);
+        noteRow.addView(note);
+        ImageView info = new ImageView(mContext);
+        info.setImageResource(R.drawable.ic_store_info);
+        info.setColorFilter(StoreViews.secondaryText(mContext), PorterDuff.Mode.SRC_IN);
+        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(
+                StoreViews.dp(mContext, 16), StoreViews.dp(mContext, 16));
+        infoLp.setMargins(StoreViews.dp(mContext, 6), 0, 0, 0);
+        info.setLayoutParams(infoLp);
+        info.setOnClickListener(v -> Toast.makeText(mContext,
+                getString(R.string.store_tags_note),
+                Toast.LENGTH_LONG).show());
+        noteRow.addView(info);
+        header.addView(noteRow);
 
         // 系统筛选（与首页／排行榜同款 9 格；点格只筛标签云，不动全局平台）。
         header.addView(filterLabel(getString(R.string.store_filter_platform)));
