@@ -107,17 +107,31 @@ public class StoreApi {
         public final boolean offline;
         public final boolean mirror;
         public final String generatedAt;
+        /** 排行榜结构（feed/all.json 的 boards 字段，大类 → 细分榜单骨架）；
+         * 旧 feed 无该字段时为 null。 */
+        public final List<StoreRankGroups.Group> boards;
 
         public StoreData(List<StoreRepo> items, boolean offline, String generatedAt) {
-            this(items, offline, false, generatedAt);
+            this(items, offline, false, generatedAt, null);
         }
 
         public StoreData(List<StoreRepo> items, boolean offline, boolean mirror,
                 String generatedAt) {
+            this(items, offline, mirror, generatedAt, null);
+        }
+
+        public StoreData(List<StoreRepo> items, boolean offline, String generatedAt,
+                List<StoreRankGroups.Group> boards) {
+            this(items, offline, false, generatedAt, boards);
+        }
+
+        public StoreData(List<StoreRepo> items, boolean offline, boolean mirror,
+                String generatedAt, List<StoreRankGroups.Group> boards) {
             this.items = items;
             this.offline = offline;
             this.mirror = mirror;
             this.generatedAt = generatedAt;
+            this.boards = boards;
         }
     }
 
@@ -200,7 +214,7 @@ public class StoreApi {
                 StoreData mirrorData = parseFile(mirrorBody, true, newest);
                 if (mirrorData != null) {
                     return new StoreData(mirrorData.items, true, true,
-                            mirrorData.generatedAt);
+                            mirrorData.generatedAt, mirrorData.boards);
                 }
             } catch (IOException ignored) {
                 // 镜像失败 → 整组失败
@@ -251,10 +265,37 @@ public class StoreApi {
             if (items.isEmpty()) {
                 return null;
             }
-            return new StoreData(items, offline, generatedAt);
+            return new StoreData(items, offline, generatedAt, parseBoards(root));
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** feed/all.json 的 boards 字段 → 排行榜结构骨架（大类＋榜单名，
+     * 成员为空）；字段缺失（旧 feed）返回 null。单条坏数据只跳过该条。 */
+    private static List<StoreRankGroups.Group> parseBoards(JSONObject root) {
+        JSONArray boardsArr = root.optJSONArray("boards");
+        if (boardsArr == null) {
+            return null;
+        }
+        List<StoreRankGroups.Group> boards = new ArrayList<>();
+        for (int i = 0; i < boardsArr.length(); i++) {
+            JSONObject groupJson = boardsArr.optJSONObject(i);
+            if (groupJson == null) {
+                continue;
+            }
+            StoreRankGroups.Group group =
+                    new StoreRankGroups.Group(groupJson.optString("name", ""));
+            JSONArray lists = groupJson.optJSONArray("lists");
+            if (lists != null) {
+                for (int j = 0; j < lists.length(); j++) {
+                    group.lists.add(
+                            new StoreRankGroups.RankList(lists.optString(j, "")));
+                }
+            }
+            boards.add(group);
+        }
+        return boards;
     }
 
     /** 最新入库文件解析：裸 JSON 列表，或 {"items": [...]} 包裹；单条坏数据只跳过该条。 */

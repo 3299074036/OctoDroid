@@ -688,7 +688,8 @@ public class StoreView extends LinearLayout {
 
     private List<StoreRankGroups.Group> rankGroups() {
         if (mRankGroups == null) {
-            mRankGroups = StoreRankGroups.build(mContext, rankPool());
+            mRankGroups = StoreRankGroups.build(mContext, rankPool(),
+                    mFeedData != null ? mFeedData.boards : null);
         }
         return mRankGroups;
     }
@@ -773,10 +774,12 @@ public class StoreView extends LinearLayout {
         ensureCounts();
 
         // 统计块（hiwiki 首页 2x2：收录／安装包／最新入库／排行榜，四项都能点；
-        // 数字取 live feed／newest 数据，不写死）。
+        // 数字取 live feed／newest 数据，不写死；排行榜数为 feed 的 boards
+        // 结构计数，旧 feed 无 boards 时按池子里实际出现的榜名数回落）。
         header.addView(statsRow(mPlatformCounts[0], mStatsAssets,
                 mNewestData != null ? mNewestData.items.size() : -1,
-                StoreRankGroups.totalListCount()));
+                StoreRankGroups.totalListCount(
+                        mFeedData != null ? mFeedData.boards : null, rankPool())));
 
         if (mFeedMirror) {
             header.addView(mirrorStrip());
