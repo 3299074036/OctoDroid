@@ -247,36 +247,62 @@ def topic_codes(topics):
 
 
 # ---------------------------------------------------------------------------
-# 排行榜分组（96 榜）：静态表 + hiwiki 覆盖（2026-11-08）。
+# 排行榜分组：动态，榜单全集每轮现取自 hiwiki（2026-11-22 起，
+# 不再写死 96 榜——hiwiki 新增榜单曾被静态表过滤掉）。
 #
-# 来源：App 端 StoreRankGroups.java（v4，0.1.60；该文件只在工作树，未进
-# master），本段由脚本从该文件逐字转写，未手抄。静态表 155 条、关键词
-# 规则 131 条；榜单结构 7 大类 96 榜与之一致。
-# 规则：静态表优先于关键词规则（与 App 的 build() 一致）；一个仓库可进
-# 多个榜（静态表 44 条是多榜，关键词规则 3 条是多榜）。
+# 事实来源：harvest 每轮拉 hiwiki 榜单页（/zh-CN/rank）出的
+# hiwiki-boards.json：[{"label": 榜单中文名, "category": hiwiki 大类}]。
+# 榜单页失败时 harvest 按池子回落（subgroup 仓数 ≥5 即为榜，组取
+# 多数 category），上一轮榜单文件还在时先保组归属。
+# 归属规则（2026-11-08 定，全对上严格版）：只信 hiwiki 对照表——
+# 在表里进该榜，不在表里就是 hiwiki 的权威结论“不给榜”，不回落
+# 任何本地规则。静态表与关键词规则已随 96 榜静态表一并删除。
 # ---------------------------------------------------------------------------
-RANK_GROUP_NAMES = ["AI", "媒体", "网络", "工具", "效率", "开发", "游戏"]
-
-RANK_LIST_NAMES = [["AI Agent框架", "AI聊天客户端/助手", "LLM推理/微调工具", "AI第二大脑/知识库", "AI图像工具", "AI语音工具", "MCP连接器/工具"], ["视频播放器", "音乐播放器", "影视/追剧应用", "B站客户端", "IPTV/电视直播", "媒体库/流媒体服务器", "音乐流媒体服务", "电台/播客/有声"], ["代理/VPN客户端", "下载管理器", "即时通讯软件", "网络监控/抓包工具", "内网穿透工具", "网络爬虫工具", "网络隧道工具"], ["弹幕/直播工具", "电子书阅读器", "浏览器", "浏览器扩展", "漫画阅读器", "命令行工具", "视频下载工具", "数据库管理工具", "投屏/手机连接工具", "文件传输工具", "文件管理器", "系统增强工具", "小说阅读器", "语音转文字工具", "终端模拟器", "屏幕录制工具", "系统监控工具", "远程桌面/控制工具", "壁纸工具", "截图工具", "图像处理工具", "系统清理工具", "网页翻译工具", "输入法", "自动化工具", "PDF工具", "云存储同步工具", "音频编辑工具", "视频转码工具", "压缩解压工具", "密码管理工具", "书签工具", "图片查看器", "虚拟机/容器工具", "剪贴板管理", "资源抓取工具", "字幕工具", "窗口管理器", "调试/分析工具", "番茄钟/专注工具", "广告拦截工具", "视频编辑工具", "文档工具", "Docker工具"], ["笔记工具", "任务/待办管理", "效率启动器", "记账/财务管理", "日历工具", "时间追踪工具", "知识库工具"], ["后端开发工具", "开发库/框架", "AI编程助手", "代码编辑器", "代码质量工具", "编程语言", "机器学习框架", "Markdown编辑器", "数据库系统", "跨平台应用框架", "逆向工程工具", "CI/CD工具", "包管理器", "构建工具", "语言工具链", "API开发工具", "Kubernetes工具"], ["Minecraft启动器/工具", "游戏模拟器", "游戏", "游戏辅助工具", "游戏启动器", "游戏引擎"]]
-
-# 静态覆写表：小写 fullName -> [(组下标, 榜下标), ...]。
-RANK_ASSIGN_MAP = {"1jehuang/jcode": [[5, 3]], "2dust/v2rayn": [[2, 0]], "3150481853/molly-qq-whale": [[0, 1], [0, 6]], "3proxy/3proxy": [[2, 0]], "alishahryar1/free-claude-code": [[5, 2]], "arthursonzogni/ftxui": [[5, 1]], "astrbotdevs/astrbot": [[0, 1]], "burntsushi/ripgrep": [[3, 5]], "cherryhq/cherry-studio": [[0, 1], [0, 2]], "clementtsang/bottom": [[3, 16]], "colorlibhq/adminlte": [[5, 1]], "comfy-org/comfyui": [[0, 0], [0, 4]], "fcl-team/foldcraftlauncher": [[6, 0], [6, 4]], "genymobile/scrcpy": [[3, 8]], "graphify-labs/graphify": [[0, 3], [4, 6]], "ipf-sinon/dsh-folk": [[0, 6], [5, 2]], "icewhaletech/casaos": [[3, 11]], "incarnamind/incarnamind": [[0, 3], [4, 6]], "josefnemec/playnite": [[6, 4]], "juliusbrussee/caveman": [[0, 6], [5, 2]], "kong/insomnia": [[5, 15]], "kriscris/palworld-pal-editor": [[6, 3]], "lizardbyte/sunshine": [[6, 3]], "maaassistantarknights/maaassistantarknights": [[6, 3]], "mariocatuogno/panzaui": [[6, 3]], "metacubex/metacubexd": [[2, 0]], "nickemanarin/screentogif": [[3, 15]], "opencut-app/opencut": [[3, 41]], "pcl-community/pcl-ce": [[6, 0], [6, 4]], "panniantong/agent-reach": [[0, 0]], "parricidium/mwcoop": [[6, 2], [6, 3]], "prismlauncher/prismlauncher": [[6, 0], [6, 4]], "pumpkin-mc/pumpkin": [[6, 0]], "qwenlm/qwen-code": [[0, 6], [5, 2]], "raven-scout/scout": [[0, 3], [4, 6]], "routstr/routstrd": [[2, 6]], "sermilion/skillbill": [[0, 6], [5, 2]], "stirling-tools/stirling-pdf": [[3, 25]], "tauricresearch/tradingagents": [[0, 0]], "the-vibe-company/quivr": [[0, 3], [4, 6]], "thinkflowlab/flybot": [[0, 1]], "ajeetdsouza/zoxide": [[3, 5]], "alexpasmantier/television": [[3, 5]], "alibaba/arthas": [[3, 38]], "alibaba/nacos": [[5, 0]], "anomalyco/opencode": [[0, 6], [5, 2]], "ant-design/ant-design": [[5, 1]], "anthropics/claude-code": [[0, 6], [5, 2]], "aquasecurity/trivy": [[3, 38]], "audacity/audacity": [[3, 27]], "axisvela/praxo-core": [[0, 0], [0, 6]], "b-editor/beutl": [[3, 41]], "bee-san/rustscan": [[2, 3]], "binary-husky/gpt_academic": [[0, 1]], "budcribar/remoteblazorwebview": [[5, 1]], "ccch1mneyyy/dsh-go": [[0, 1], [5, 2]], "clash-verge-rev/clash-verge-rev": [[2, 0]], "cli/cli": [[3, 5]], "cline/cline": [[5, 2]], "cloudfoundry/stratos": [[5, 16]], "code-yeongyu/oh-my-openagent": [[0, 2]], "coder/code-server": [[5, 3]], "cr0hn/dockerscan": [[3, 38], [3, 43]], "cyanide-burnout/turbojedi": [[3, 5], [3, 16]], "davidkarlsen/flyway-operator": [[5, 8], [5, 16]], "donetick/donetick": [[4, 1]], "dorakyuraduang/whitealbum2-android": [[6, 2]], "ducaale/xh": [[3, 5]], "earendil-works/pi": [[0, 0], [5, 2]], "electron/electron": [[5, 1], [5, 9]], "farion1231/cc-switch": [[5, 2]], "fastfetch-cli/fastfetch": [[3, 16]], "fatedier/frp": [[2, 4]], "fish-shell/fish-shell": [[3, 5]], "fleetdm/fleet": [[3, 16]], "fluentci-io/fluentci": [[5, 11]], "gadievron/raptor": [[0, 0], [3, 38]], "ggml-org/llama.cpp": [[0, 2], [5, 6]], "godotengine/godot": [[6, 5]], "gogs/gogs": [[5, 0]], "google-gemini/gemini-cli": [[5, 2]], "h3pdesign/neon-vision-editor": [[3, 41]], "h5bp/html5-boilerplate": [[5, 1]], "hacan359/xerabora": [[6, 3]], "harry0703/moneyprinterturbo": [[0, 4], [3, 41]], "headroomlabs-ai/headroom": [[5, 2]], "hydralauncher/hydra": [[6, 4]], "immich-app/immich": [[1, 5]], "infiniflow/ragflow": [[0, 3]], "janhq/jan": [[0, 1], [0, 2]], "kjk-engine/kjk": [[6, 1], [6, 5]], "labring/sealos": [[5, 16]], "langchain-ai/langchain": [[0, 0], [0, 2], [5, 6]], "langflow-ai/langflow": [[0, 2]], "langgenius/dify": [[0, 0]], "lobehub/lobehub": [[0, 1]], "lollipopkit/flutter_server_box": [[3, 16]], "louislam/uptime-kuma": [[3, 16]], "magenta-maple/wubi-dict-editor": [[3, 23]], "mapeditor/tiled": [[6, 3]], "marcinz606/negpy": [[3, 20]], "matthart1983/netwatch": [[2, 3]], "mayneyao/eidos": [[4, 0], [4, 6]], "mbrock/filnix": [[5, 13], [5, 14]], "microsoft/powertoys": [[3, 11]], "mifi/lossless-cut": [[3, 41]], "mirceanton/kubectl-switch": [[3, 5], [5, 16]], "movieclaw/movieclaw": [[1, 2]], "mpvnet-player/mpv.net": [[1, 0]], "neovim/neovim": [[5, 3]], "netdata/netdata": [[3, 16]], "niakw/prosperoeden-encore": [[6, 1]], "odin-lang/odin": [[5, 5]], "ollama/ollama": [[0, 1], [0, 2]], "openai/codex": [[0, 2], [5, 2]], "openclaw/openclaw": [[0, 0]], "oven-sh/bun": [[5, 12]], "paytaca/paytaca-app": [[4, 3]], "pbek/qownnotes": [[4, 0]], "pierre-emmanuelj/iptv-proxy": [[1, 4]], "protocolbuffers/protobuf": [[5, 1]], "react/react-native": [[5, 1], [5, 9]], "rustdesk/rustdesk": [[3, 17]], "seyed-ali-002/dana-mcp-server": [[0, 6]], "sharkdp/bat": [[3, 5]], "sharkdp/fd": [[3, 5]], "sharkdp/hyperfine": [[3, 5]], "sharkdp/pastel": [[3, 5]], "siyuan-note/siyuan": [[4, 0], [4, 6]], "songquanpeng/one-api": [[5, 15]], "sostenesfreitas/ocarina-recomp": [[6, 2]], "stablyai/orca": [[5, 2]], "storytold/craft-launcher": [[6, 0], [6, 4]], "suhang12332/swift-craft-launcher": [[6, 0], [6, 4]], "sxyazi/yazi": [[3, 10]], "tldr-pages/tldr": [[3, 5]], "topjohnwu/magisk": [[3, 11]], "tw93/pake": [[5, 9]], "twbs/bootstrap": [[5, 1]], "ultraworkers/claw-code": [[0, 0]], "unslothai/unsloth": [[0, 2], [5, 6]], "usememos/memos": [[4, 0]], "vale-cli/vale": [[3, 5], [5, 4]], "ventoy/ventoy": [[3, 11]], "vercel-labs/agent-browser": [[0, 0]], "vicanso/cyberapi": [[5, 15]], "vnotex/vnote": [[4, 0]], "weifuwan/yak-ops": [[5, 8]], "wlejon/bro": [[5, 9], [6, 5]], "woodpecker-ci/woodpecker": [[5, 11]], "x6nux-oss/zed-globalization": [[5, 3]], "xopcai/xopc": [[0, 1]], "yt-dlp/yt-dlp": [[2, 1], [3, 5], [3, 6]], "ytdl-org/youtube-dl": [[2, 1], [3, 6]], "zarf-dev/zarf": [[5, 16]]}
-
-# 关键词规则：[(关键字, [(组下标, 榜下标), ...]), ...]。仅对静态表里
-# 没有的仓库生效；关键字命中 = topics 里有同名 topic，或仓库名小写后
-# 包含该关键字；"a+b" 表示两部分都要命中（简介不再参与匹配）。
-RANK_RULES = [["mcp", [[0, 6]]], ["llm", [[0, 2]]], ["chat", [[0, 1]]], ["chatbot", [[0, 1]]], ["knowledge-base", [[0, 3], [4, 6]]], ["second-brain", [[0, 3], [4, 6]]], ["image-generation", [[0, 4]]], ["text-to-image", [[0, 4]]], ["stable-diffusion", [[0, 4]]], ["text-to-speech", [[0, 5]]], ["tts", [[0, 5]]], ["voice", [[0, 5]]], ["music", [[1, 1]]], ["music-player", [[1, 1]]], ["audio-player", [[1, 1]]], ["music-streaming", [[1, 6]]], ["video+player", [[1, 0]]], ["video-player", [[1, 0]]], ["movie", [[1, 2]]], ["anime", [[1, 2]]], ["bilibili", [[1, 3]]], ["iptv", [[1, 4]]], ["podcast", [[1, 7]]], ["vpn", [[2, 0]]], ["proxy", [[2, 0]]], ["tunnel", [[2, 4]]], ["downloader", [[2, 1], [3, 6]]], ["crawler", [[2, 5]]], ["spider", [[2, 5]]], ["scraper", [[2, 5]]], ["web-scraping", [[2, 5]]], ["instant-messaging", [[2, 2]]], ["messenger", [[2, 2]]], ["packet-capture", [[2, 3]]], ["network-monitoring", [[2, 3]]], ["remote-desktop", [[3, 17]]], ["docker", [[3, 43]]], ["password", [[3, 30]]], ["password-manager", [[3, 30]]], ["editor", [[5, 3]]], ["code-editor", [[5, 3]]], ["text-editor", [[5, 3]]], ["browser", [[3, 2]]], ["browser-extension", [[3, 3]]], ["extension", [[3, 3]]], ["ebook", [[3, 1]]], ["reader", [[3, 1]]], ["manga", [[3, 4]]], ["comic", [[3, 4]]], ["novel", [[3, 12]]], ["terminal", [[3, 14]]], ["shell", [[3, 5]]], ["screenshot", [[3, 19]]], ["wallpaper", [[3, 18]]], ["clipboard", [[3, 34]]], ["pdf", [[3, 25]]], ["translation", [[3, 22]]], ["translate", [[3, 22]]], ["input-method", [[3, 23]]], ["automation", [[3, 24]]], ["subtitle", [[3, 36]]], ["compress", [[3, 29]]], ["bookmark", [[3, 31]]], ["image-viewer", [[3, 32]]], ["image-editor", [[3, 20]]], ["virtual-machine", [[3, 33]]], ["container", [[3, 33]]], ["adblock", [[3, 40]]], ["video-editor", [[3, 41]]], ["audio-editor", [[3, 27]]], ["transcode", [[3, 28]]], ["video-converter", [[3, 28]]], ["speech-to-text", [[3, 13]]], ["file-manager", [[3, 10]]], ["file-transfer", [[3, 9]]], ["file-sharing", [[3, 9]]], ["screen-recording", [[3, 15]]], ["screencast", [[3, 15]]], ["system-monitor", [[3, 16]]], ["monitoring", [[3, 16]]], ["database-management", [[3, 7]]], ["cleaner", [[3, 21]]], ["system-cleaner", [[3, 21]]], ["cloud-storage", [[3, 26]]], ["synchronization", [[3, 26]]], ["window-manager", [[3, 37]]], ["pomodoro", [[3, 39]]], ["documentation", [[3, 42]]], ["diagnosis", [[3, 38]]], ["diagnostic", [[3, 38]]], ["danmaku", [[3, 0]]], ["live-streaming", [[3, 0]]], ["emulator", [[6, 1]]], ["minecraft", [[6, 0]]], ["game", [[6, 2]]], ["game-launcher", [[6, 4]]], ["game-engine", [[6, 5]]], ["note", [[4, 0]]], ["note-taking", [[4, 0]]], ["notes", [[4, 0]]], ["todo", [[4, 1]]], ["task-manager", [[4, 1]]], ["launcher", [[4, 2]]], ["calendar", [[4, 4]]], ["time-tracking", [[4, 5]]], ["finance", [[4, 3]]], ["accounting", [[4, 3]]], ["markdown", [[5, 7]]], ["kubernetes", [[5, 16]]], ["database", [[5, 8]]], ["machine-learning", [[5, 6]]], ["computer-vision", [[5, 6]]], ["data-science", [[5, 1]]], ["backend", [[5, 0]]], ["web-server", [[5, 0]]], ["web-framework", [[5, 1]]], ["css-framework", [[5, 1]]], ["code-quality", [[5, 4]]], ["static-analysis", [[5, 4]]], ["linter", [[5, 4]]], ["programming-language", [[5, 5]]], ["reverse-engineering", [[5, 10]]], ["cicd", [[5, 11]]], ["continuous-integration", [[5, 11]]], ["package-manager", [[5, 12]]], ["packaging", [[5, 12]]], ["build-tool", [[5, 13]]], ["build-system", [[5, 13]]], ["language-server", [[5, 14]]], ["compiler", [[5, 14]]], ["http-client", [[5, 15]]]]
-
-# 96 个榜单名集合：hiwiki 覆盖只认这些名字（subgroup 须恰好是其中之一）。
-RANK_NAME_SET = {name for lists in RANK_LIST_NAMES for name in lists}
+# hiwiki 大类 -> App 大类显示名（组标题）。这是显示标签映射，不是榜单
+# 表：新榜的 category 总是这 7 个之一；万一 hiwiki 出了新大类，该榜
+# 自成一组、组名即 category 原值，永不丢弃。
+CATEGORY_GROUP_NAMES = {"ai": "AI", "media": "媒体", "network": "网络",
+                        "tools": "工具", "productivity": "效率",
+                        "development": "开发", "game": "游戏"}
+GROUP_ORDER = ["AI", "媒体", "网络", "工具", "效率", "开发", "游戏"]
 
 
-def load_hiwiki_ranks(path=None):
+def load_hiwiki_boards(path=None):
+    """读榜单全集 [{label, category}]（harvest 的 hiwiki-boards.json，
+    榜单页顺序原样）。文件缺失或损坏返回 [] 并只记一行日志——
+    调用方按无榜单处理（对照表不过滤、feed 不带 boards 结构，
+    App 按 feed 里实际出现的榜名计数回落），整轮不失败。"""
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "hiwiki-boards.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print("hiwiki boards %s 读不到（按无榜单处理）：%s" % (path, e))
+        return []
+    boards = data.get("boards") if isinstance(data, dict) else None
+    if not isinstance(boards, list):
+        print("hiwiki boards %s 结构异常（按无榜单处理）" % path)
+        return []
+    out = []
+    for b in boards:
+        if (isinstance(b, dict) and isinstance(b.get("label"), str)
+                and b.get("label") and isinstance(b.get("category"), str)
+                and b.get("category")):
+            out.append({"label": b["label"], "category": b["category"]})
+    return out
+
+
+def load_hiwiki_ranks(path=None, boards=None):
     """读 hiwiki 分类对照表 {小写 fullName: 细分榜中文名}。
 
     默认找 generate.py 同目录下的 hiwiki-ranks.json（即本任务交付的
     hiwiki-merge-mapping.json 改名后）；文件缺失或损坏时返回空表并只记
-    一行日志，整轮不失败（退化为纯静态表行为）。
+    一行日志，整轮不失败（退化为无榜行为）。
+    boards 非空时只保留在榜单里的 subgroup（榜单集合由 harvest
+    每轮现取，见 load_hiwiki_boards）；boards 为空（榜单文件缺失）
+    时不过滤——对照表本身已由 harvest 按榜单过滤过。
     """
     if path is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -290,61 +316,49 @@ def load_hiwiki_ranks(path=None):
     if not isinstance(data, dict):
         print("hiwiki ranks %s 结构异常（按无覆盖处理）" % path)
         return {}
+    board_labels = {b["label"] for b in boards} if boards else None
     table = {}
+    dropped = 0
     for full, sub in data.items():
-        if isinstance(full, str) and isinstance(sub, str) and sub in RANK_NAME_SET:
-            table[full.lower()] = sub
-    print("hiwiki ranks: %s 条（文件 %d 条，%d 条不在 96 榜内已丢弃）"
-          % (len(table), len(data), len(data) - len(table)))
+        if not (isinstance(full, str) and isinstance(sub, str)):
+            continue
+        if board_labels is not None and sub not in board_labels:
+            dropped += 1
+            continue
+        table[full.lower()] = sub
+    print("hiwiki ranks: %s 条（文件 %d 条，%d 条不在榜单内已丢弃）"
+          % (len(table), len(data), dropped))
     return table
 
 
-def match_rank_rules(item):
-    """关键词规则（App StoreRankGroups.matchRules 的逐字移植）。"""
-    out = set()
-    topics = set()
-    for topic in item.get("topics") or []:
-        if topic:
-            topics.add(str(topic).lower())
-    haystack = (item.get("fullName") or "").lower()
-    for keyword, dests in RANK_RULES:
-        hit = True
-        for part in keyword.split("+"):
-            if part not in topics and part not in haystack:
-                hit = False
-                break
-        if hit:
-            out.update(tuple(d) for d in dests)  # dests 是 JSON 转来的 list，需转 tuple 才能进 set
-    return out
-
-
 def assign_ranks(item, hiwiki_map):
-    """给一条 feed 条目定 96 榜归属，返回榜单中文名列表（可为空）。
+    """给一条 feed 条目定榜归属，返回榜单中文名列表（可为空）。
 
-    优先级（用户 2026-11-08 定）：hiwiki 覆盖 > 静态表 > 关键词规则。
-    hiwiki 覆盖：仓库在对照表里且 subgroup 恰好是 96 榜之一时，只进
-    该榜（hiwiki 一仓一榜），静态表（含多榜）整体让路；否则回落到
-    静态表（命中则可能多榜），静态表没有时再走关键词规则。
-    """
+    只信 hiwiki 对照表：在表里进该榜，不在表里就是 hiwiki 的权威
+    结论“不给榜”，返回 []。hiwiki 一仓一榜。"""
     full = (item.get("fullName") or "").lower()
-    # 全对上（严格版）：hiwiki 来源的条目只信对照表——在表里进该榜，
-    # 不在表里就是 hiwiki 的权威结论“不给榜”，返回 []，不回落静态
-    # 表/关键词规则（回落会凭空造出 hiwiki 没有的归属）。非 hiwiki
-    # 来源（严格版下不存在，留作防线）才走老逻辑。
-    if item.get("source") == "hiwiki":
-        sub = (hiwiki_map or {}).get(full)
-        return [sub] if sub else []
     sub = (hiwiki_map or {}).get(full)
-    if sub:
-        return [sub]
-    cells = RANK_ASSIGN_MAP.get(full)
-    if cells is None:
-        cells = match_rank_rules(item)
-    names = []
-    for gi, li in sorted(cells):
-        if 0 <= gi < len(RANK_LIST_NAMES) and 0 <= li < len(RANK_LIST_NAMES[gi]):
-            names.append(RANK_LIST_NAMES[gi][li])
-    return names
+    return [sub] if sub else []
+
+
+def build_board_structure(boards):
+    """榜单全集 -> App 排行榜结构 [{"name": 组名, "lists": [榜单名]}]。
+
+    组按 GROUP_ORDER 排，组内榜单保持榜单页顺序；category 不在
+    CATEGORY_GROUP_NAMES 里的榜自成一组、组名即 category 原值，
+    排在已知组之后（先出现先排），永不丢弃。空组不出现。"""
+    groups = {}
+    group_order = []
+    for b in boards:
+        group = CATEGORY_GROUP_NAMES.get(b["category"], b["category"])
+        if group not in groups:
+            groups[group] = []
+            group_order.append(group)
+        if b["label"] not in groups[group]:
+            groups[group].append(b["label"])
+    known = [g for g in GROUP_ORDER if g in groups]
+    unknown = [g for g in group_order if g not in CATEGORY_GROUP_NAMES.values()]
+    return [{"name": g, "lists": groups[g]} for g in known + unknown]
 
 
 def normalize_date(value):
@@ -939,6 +953,8 @@ def main():
                     help="hiwiki 全量分类 JSON 路径（harvest 产物）；不传或文件缺失/损坏时走回落：用上一轮 feed 里 source==hiwiki 的条目")
     ap.add_argument("--hiwiki-ranks", default=None,
                     help="hiwiki 分类对照表 JSON 路径；不传则用 generate.py 同目录的 hiwiki-ranks.json")
+    ap.add_argument("--hiwiki-boards", default=None,
+                    help="hiwiki 榜单全集 JSON 路径（harvest 的 hiwiki-boards.json）；不传则用 generate.py 同目录的 hiwiki-boards.json；文件缺失时对照表不过滤、feed 不带 boards 结构")
     ap.add_argument("--hiwiki-newest", default=None,
                     help="harvest 产出的 hiwiki-newest.json 路径；不传或文件缺失/损坏时沿用 --prev-newest，两者都没有则本轮不写 feed/newest.json，feed 不受影响")
     ap.add_argument("--prev-newest", default=None,
@@ -991,7 +1007,13 @@ def main():
         print("hiwiki pool: %d 条（harvest %s）"
               % (len(pool_records), pool_meta.get("generatedAt") or "?"))
 
-    hiwiki_map = load_hiwiki_ranks(args.hiwiki_ranks)
+    hiwiki_boards = load_hiwiki_boards(args.hiwiki_boards)
+    hiwiki_map = load_hiwiki_ranks(args.hiwiki_ranks, hiwiki_boards)
+    board_structure = build_board_structure(hiwiki_boards)
+    print("boards: %d 个榜单，%d 组（%s）"
+          % (len(hiwiki_boards), len(board_structure),
+             "、".join("%s %d" % (g["name"], len(g["lists"]))
+                       for g in board_structure)))
     mapping_date = pool_meta.get("generatedAt") or prev_generated_at or ""
     harvest_status = args.harvest_status
     if fallback_pool:
@@ -1067,8 +1089,13 @@ def main():
         return [i for i in items if platform in i["platforms"]]
 
     for platform in PLATFORMS:
+        payload = {"items": platform_items(feed, platform)}
+        if platform == "all":
+            # 排行榜结构随全量 feed 一起下发（App 首页统计与排行榜页
+            # 都从这里取，与本轮 feed 同源、永不错位；分包 feed 不带）。
+            payload["boards"] = board_structure
         write_json(os.path.join(args.out, "feed", platform + ".json"),
-                   {"items": platform_items(feed, platform)})
+                   payload)
         for chart, items in charts.items():
             write_json(os.path.join(args.out, "categories", chart,
                                     platform + ".json"),
@@ -1115,6 +1142,7 @@ def main():
             "hiwikiItems": len(feed),
             "ranked": ranked,
             "unranked": len(feed) - ranked,
+            "boardCount": len(hiwiki_boards),
             "mappingDate": mapping_date,
             "harvestStatus": harvest_status,
             "harvestFailed": harvest_failed if isinstance(harvest_failed, int) else None,
@@ -1148,7 +1176,7 @@ def main():
 
     if args.snapshot_dir and args.snapshot_dir != "/dev/null":
         write_json(os.path.join(args.snapshot_dir, "feed_all.json"),
-                   {"items": feed})
+                   {"items": feed, "boards": board_structure})
         for chart, items in charts.items():
             write_json(os.path.join(args.snapshot_dir,
                                     "chart_%s_all.json" % chart),

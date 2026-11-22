@@ -16,23 +16,28 @@ case-sensitive: sitemap-exact casing must be used
 Outputs (--out-dir):
   hiwiki-pool.json   {"generatedAt", "buildId", "poolSize", "ok",
                       "failed", "durationSec", "records": [...]}
-  hiwiki-ranks.json  {lower fullName: subgroup} for the 96-rank
-                     subgroups only (mapping; RANK_NAME_SET is imported
-                     from generate.py in the same directory -- one
-                     source of truth for the 96 names)
+  hiwiki-ranks.json  {lower fullName: subgroup}，只保留榜单页公布的
+                     榜单（boards，见下）——榜单集合每轮现取自 hiwiki，
+                     不再写死在代码里。
+  hiwiki-boards.json {"generatedAt", "boards": [{"label", "category"}]}
+                     榜单页（/zh-CN/rank）公布的榜单全集，榜单页顺序
+                     原样；榜单页拉取失败时按池子回落：subgroup 仓数
+                     ≥5 即为榜（2026-11-22 实测恰好 98 个，与榜单页
+                     一致），组取该榜下仓库的多数 category，平票取
+                     星标最高仓的 category。
   hiwiki-newest.json {"generatedAt", "buildId", "count", "items": [...]}
                      最新入库 60 条（hiwiki 入库顺序原样；行字段见
                      parse_newest）。平台值是 hiwiki 原始值（mac /
                      other 等），feed 词表映射由 generate.py 在拼
                      feed/newest.json 时做（feed 优先，映射只兜底）。
   harvest-log.json   {generatedAt, buildId, poolSize, ok, failed,
-                      failRate, mappingRows, durationSec,
+                      failRate, mappingRows, boards, durationSec,
                       newestStatus, newestCount}
 
 Failure contract (plan section 6.3): exit non-zero when the sitemap
-cannot be fetched / is empty, when RANK_NAME_SET cannot be imported,
-or when the per-repo failure rate exceeds 5% (build-id problems surface
-here too: a stale/unparseable build id makes payload fetches fail).
+cannot be fetched / is empty, or when the per-repo failure rate
+exceeds 5% (build-id problems surface here too: a stale/unparseable
+build id makes payload fetches fail).
 The workflow then falls back to the previous round's artifacts
 (level 2) or the committed hiwiki-ranks.json (level 3) and never fails
 the whole run on a hiwiki outage. Exit 0 means the outputs are fresh
@@ -42,6 +47,9 @@ outputs are written, and any failure (fetch / parse / empty rows)
 only logs a WARNING, writes no hiwiki-newest.json, and never changes
 the exit code -- generate.py then falls back to the previous round's
 newest.json, or omits feed/newest.json, and the feed is unaffected.
+The boards fetch is likewise exempt: on failure the boards are
+derived from the pool (see derive_boards_from_pool), so a rank-page
+outage never blocks the run.
 """
 import argparse
 import json
@@ -197,6 +205,116 @@ def parse_newest(raw):
     return rows or None
 
 
+def parse_boards(raw):
+    """解码 /zh-CN/rank 的 Nuxt payload，返回榜单列表
+    [{"label": 榜单中文名, "category": hiwiki 大类}]（榜单页顺序原样）
+    或 None（结构异常）。
+
+    形状（2026-11-22 实测）：flat list 里某 dict 为 {"boards": <idx>,
+    ...}，该 idx 处是榜单 dict 列表；每榜含 id / label / icon /
+    category / count / top，只取 label 与 category。
+    """
+    try:
+        L = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(L, list):
+        return None
+    boards_idx = None
+    for el in L:
+        if isinstance(el, dict) and isinstance(el.get("boards"), int):
+            boards_idx = el["boards"]
+            break
+    if boards_idx is None or not (0 <= boards_idx < len(L)):
+        return None
+    refs = L[boards_idx]
+    if not isinstance(refs, list) or not refs:
+        return None
+    boards = []
+    for ref in refs:
+        b = hyd_ref(L, ref)
+        if not isinstance(b, dict):
+            continue
+        label = b.get("label")
+        category = b.get("category")
+        if isinstance(label, str) and label and isinstance(category, str) and category:
+            boards.append({"label": label, "category": category})
+    return boards or None
+
+
+def fetch_boards():
+    """拉榜单页，返回榜单列表或 None（任何失败只记 WARNING，由
+    调用方按池子回落，永不抛错）。"""
+    try:
+        raw = fetch_with_build(BASE + "/zh-CN/rank/_payload.json?_b=%s")
+        if raw is None:
+            print("WARNING: 榜单页 payload 拉取失败（按池子回落）")
+            return None
+        boards = parse_boards(raw)
+        if not boards:
+            print("WARNING: 榜单页 payload 结构异常（按池子回落）")
+            return None
+        return boards
+    except Exception as e:
+        print("WARNING: 榜单页收割异常（按池子回落）：%s" % e)
+        return None
+
+
+def load_prev_boards(path):
+    """读上一轮榜单文件（工作流传 --prev-boards），返回榜单列表或 []。
+    文件缺失/损坏只记一行日志、不拦整轮。"""
+    if not path:
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        boards = data.get("boards") if isinstance(data, dict) else None
+        if not isinstance(boards, list):
+            print("prev boards %s 结构异常（不用）" % path)
+            return []
+        out = []
+        for b in boards:
+            if (isinstance(b, dict) and isinstance(b.get("label"), str)
+                    and b.get("label") and isinstance(b.get("category"), str)
+                    and b.get("category")):
+                out.append({"label": b["label"], "category": b["category"]})
+        return out
+    except Exception as e:
+        print("prev boards %s 读不到（不用）：%s" % (path, e))
+        return []
+
+
+def derive_boards_from_pool(ok):
+    """榜单页不可用时的回落：池子里 subgroup 仓数 ≥5 即为榜
+    （2026-11-22 实测恰好 98 个，与榜单页一致）；组取该榜下仓库的
+    多数 category，平票取星标最高仓的 category。顺序按仓数降序、
+    榜名升序（确定性）。"""
+    from collections import Counter, defaultdict
+    sub_repos = defaultdict(list)
+    for r in ok:
+        sub = r.get("subgroup")
+        if sub:
+            sub_repos[sub].append(r)
+    boards = []
+    for sub, repos in sub_repos.items():
+        if len(repos) < 5:
+            continue
+        cats = Counter(r.get("category") or "other" for r in repos)
+        top_count = max(cats.values())
+        tied = [c for c, n in cats.items() if n == top_count]
+        if len(tied) == 1:
+            category = tied[0]
+        else:
+            best = max(repos, key=lambda r: r.get("stars") or 0)
+            category = best.get("category") or "other"
+        boards.append({"label": sub, "category": category,
+                       "_count": len(repos)})
+    boards.sort(key=lambda b: (-b["_count"], b["label"]))
+    for b in boards:
+        del b["_count"]
+    return boards
+
+
 def harvest_newest(out_dir, generated_at):
     """拉最新入库并写 hiwiki-newest.json。
 
@@ -301,32 +419,18 @@ def process(full):
     return {"fullName": full, "error": "no-record"}
 
 
-def load_rank_names():
-    """96 榜名集合：从同目录 generate.py 导入，单一事实来源。"""
-    here = os.path.dirname(os.path.abspath(__file__))
-    if here not in sys.path:
-        sys.path.insert(0, here)
-    try:
-        from generate import RANK_NAME_SET
-    except Exception as e:
-        print("ERROR: 无法从 generate.py 导入 RANK_NAME_SET：%s" % e)
-        return None
-    return RANK_NAME_SET
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-dir", default=".")
     ap.add_argument("--sitemap", default=SITEMAP)
     ap.add_argument("--workers", type=int, default=WORKERS)
+    ap.add_argument("--prev-boards", default=None,
+                    help="上一轮 hiwiki-boards.json 路径；榜单页拉取失败时"
+                         "先用它保组归属，再补池子回落的新榜")
     args = ap.parse_args()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-
-    rank_names = load_rank_names()
-    if rank_names is None:
-        return 2
 
     # 1. sitemap 取池子（失败即整步失败，工作流走回落）。
     try:
@@ -357,14 +461,41 @@ def main():
     failed = len(results) - len(ok)
     fail_rate = failed / len(results) if results else 1.0
 
-    # 3. 产出池子 + 对照表。
+    # 3. 榜单全集（榜单页优先，失败按池子回落）+ 产出池子 + 对照表。
+    # 榜单集合每轮现取自 hiwiki，不再写死在代码里；对照表只保留
+    # 在榜单里的 subgroup（池子里 168 个 subgroup，榜单 98 个）。
+    # 榜单页失败时：先用上一轮榜单文件保组归属（hiwiki 的分组不是
+    # 多数 category 能推出来的——2026-11-22 实测 3 个榜会错组），
+    # 再把池子回落里多出来的新榜按推导组补上；上一轮文件也没有
+    # 才全按池子回落。
+    boards = fetch_boards()
+    if boards:
+        print("boards: 榜单页 %d 个" % len(boards))
+    else:
+        prev_boards = load_prev_boards(args.prev_boards)
+        derived = derive_boards_from_pool(ok)
+        if prev_boards:
+            known = {b["label"] for b in prev_boards}
+            extra = [b for b in derived if b["label"] not in known]
+            boards = prev_boards + extra
+            print("boards: 榜单页不可用，上一轮 %d 个 + 池子回落新榜 %d 个"
+                  % (len(prev_boards), len(extra)))
+        else:
+            boards = derived
+            print("boards: 榜单页不可用，按池子回落 %d 个" % len(boards))
+    board_labels = {b["label"] for b in boards}
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     duration = round(time.time() - t0, 1)
     mapping = {}
+    dropped = 0
     for r in ok:
         sub = r.get("subgroup")
-        if sub in rank_names:
+        if sub in board_labels:
             mapping[r["fullName"].lower()] = sub
+        elif sub:
+            dropped += 1
+    print("boards: 对照表 %d 条，%d 条不在榜单内已丢弃"
+          % (len(mapping), dropped))
     pool = {"generatedAt": generated_at, "buildId": build[0],
             "poolSize": len(ok), "ok": len(ok), "failed": failed,
             "durationSec": duration, "records": ok}
@@ -372,19 +503,23 @@ def main():
         json.dump(pool, f, ensure_ascii=False, separators=(",", ":"))
     with open(out_dir / "hiwiki-ranks.json", "w", encoding="utf-8") as f:
         json.dump(mapping, f, ensure_ascii=False, separators=(",", ":"))
+    with open(out_dir / "hiwiki-boards.json", "w", encoding="utf-8") as f:
+        json.dump({"generatedAt": generated_at, "boards": boards},
+                  f, ensure_ascii=False, separators=(",", ":"))
     # 4. 最新入库（失败不影响整轮：无文件 + 日志记 failed 即可）。
     newest_status, newest_count = harvest_newest(out_dir, generated_at)
     log = {"generatedAt": generated_at, "buildId": build[0],
            "poolSize": len(ok), "ok": len(ok), "failed": failed,
            "failRate": round(fail_rate, 4), "mappingRows": len(mapping),
+           "boards": len(boards),
            "durationSec": duration,
            "newestStatus": newest_status, "newestCount": newest_count}
     with open(out_dir / "harvest-log.json", "w", encoding="utf-8") as f:
         json.dump(log, f, ensure_ascii=False, separators=(",", ":"))
     print("DONE pool=%d ok=%d failed=%d failRate=%.2f%% mapping=%d rows "
-          "newest=%s/%d build=%s %.1fs"
+          "boards=%d newest=%s/%d build=%s %.1fs"
           % (len(ok), len(ok), failed, fail_rate * 100, len(mapping),
-             newest_status, newest_count, build[0], duration))
+             len(boards), newest_status, newest_count, build[0], duration))
     if fail_rate > MAX_FAILURE_RATE:
         print("ERROR: 失败率 %.2f%% > 5%%，按失败处理（工作流走回落）"
               % (fail_rate * 100))
