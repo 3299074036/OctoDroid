@@ -1,5 +1,6 @@
-# OctoDroid 商店后端：每天 0 点、12 点（北京时间，即 UTC 4 点、16 点）
-# 预计算一次静态 JSON，推到 gh-pages 分支。
+# OctoDroid 商店后端：每天 10:40、22:40（北京时间，即 UTC 2:40、14:40）
+# ——hiwiki 约 10:30／22:30（北京时间）整批重生成，10 分钟后跑正好
+# 接上他的新鲜数据。预计算一次静态 JSON，推到 gh-pages 分支。
 # App 取 https://3299074036.github.io/OctoDroid/store/ 下的现成文件，
 # 不再走实时全量搜索。严格版（2026-11-08，用户定：全对上）：feed 池子
 # = hiwiki 当次重抓的可安装池，我方独有的 1,408 条已删；榜单归属 =
@@ -21,7 +22,7 @@ name: store-backend
 
 on:
   schedule:
-    - cron: "0 4,16 * * *"
+    - cron: "40 2,14 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -52,6 +53,7 @@ jobs:
             cp /tmp/gh-pages-history/store/feed/newest.json prev-newest.json 2>/dev/null || true
             cp /tmp/gh-pages-history/store/hiwiki/hiwiki-pool.json prev-hiwiki/ 2>/dev/null || true
             cp /tmp/gh-pages-history/store/hiwiki/hiwiki-ranks.json prev-hiwiki/ 2>/dev/null || true
+            cp /tmp/gh-pages-history/store/hiwiki/hiwiki-boards.json prev-hiwiki/ 2>/dev/null || true
             cp /tmp/gh-pages-history/store/hiwiki/harvest-log.json prev-hiwiki/ 2>/dev/null || true
             git worktree remove --force /tmp/gh-pages-history
           fi
@@ -61,7 +63,8 @@ jobs:
         run: |
           set +e
           mkdir -p hiwiki-data
-          python3 store-backend/harvest-hiwiki.py --out-dir hiwiki-data
+          python3 store-backend/harvest-hiwiki.py --out-dir hiwiki-data \
+            --prev-boards prev-hiwiki/hiwiki-boards.json
           HARVEST_RC=$?
           set -e
           if [ "$HARVEST_RC" -eq 0 ]; then
@@ -82,9 +85,11 @@ jobs:
             rm -f hiwiki-data/hiwiki-newest.json
             if [ -f prev-hiwiki/hiwiki-pool.json ] && [ -f prev-hiwiki/hiwiki-ranks.json ]; then
               cp prev-hiwiki/hiwiki-pool.json prev-hiwiki/hiwiki-ranks.json hiwiki-data/
+              cp prev-hiwiki/hiwiki-boards.json hiwiki-data/ 2>/dev/null || true
               echo "fallback: previous round artifacts (level 2)"
             else
               cp store-backend/hiwiki-ranks.json hiwiki-data/hiwiki-ranks.json
+              cp store-backend/hiwiki-boards.json hiwiki-data/hiwiki-boards.json
               echo "fallback: committed hiwiki-ranks.json (level 3, no pool file; Generate reuses previous feed hiwiki items)"
             fi
             python3 -c "import json; json.dump({'harvestStatus': 'fallback', 'reason': 'harvest rc=$HARVEST_RC'}, open('hiwiki-data/harvest-log.json', 'w'), ensure_ascii=False)"
@@ -103,6 +108,7 @@ jobs:
           python3 store-backend/generate.py \
             --hiwiki-pool hiwiki-data/hiwiki-pool.json \
             --hiwiki-ranks hiwiki-data/hiwiki-ranks.json \
+            --hiwiki-boards hiwiki-data/hiwiki-boards.json \
             --hiwiki-newest hiwiki-data/hiwiki-newest.json \
             --prev-feed prev-feed.json \
             --prev-meta prev-meta.json \
@@ -154,6 +160,17 @@ jobs:
           assert all(i.get("source") == "hiwiki" for i in feed), "non-hiwiki source in feed"
           assert all(r in set(mapping.values()) for i in feed for r in (i.get("ranks") or [])), "rank outside mapping"
           assert meta.get("apiCalls", 0) <= 5000, meta
+
+          # 榜单结构：feed/all.json 的 boards 须与对照表值集完全一致
+          # （榜单全集动态化后，结构与归属同源、永不错位）。
+          all_json = json.load(open("store-output/feed/all.json"))
+          boards = all_json.get("boards") or []
+          board_labels = {label for g in boards for label in g.get("lists", [])}
+          assert board_labels == set(mapping.values()), (
+              "boards != mapping values", board_labels ^ set(mapping.values()))
+          assert meta.get("boardCount") == len(board_labels), meta
+          assert len(boards) == len({g.get("name") for g in boards}), "duplicate group"
+          print("boards ok: %d boards in %d groups" % (len(board_labels), len(boards)))
 
           # 最新入库：新鲜 harvest 有文件时必须与 harvest 逐条对上
           # （条数、顺序、必填字段）；只有上一轮时沿用上一轮的条目
